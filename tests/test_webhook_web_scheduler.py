@@ -9,8 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from church_bot.cli import cmd_init
-from church_bot.config import ScheduleSettings, load_settings, save_settings
-from church_bot.scheduler import previous_fire_time
+from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
+from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
 from church_bot.webhook import SignatureError, WebhookHandler, verify_signature
@@ -95,6 +95,56 @@ def test_previous_fire_time():
     assert previous_fire_time(cfg, at(2026, 9, 11, 21, 0)) == at(2026, 9, 5, 20, 0)
     assert previous_fire_time(cfg, at(2026, 9, 12, 20, 30)) == at(2026, 9, 12, 20, 0)
     assert previous_fire_time(cfg, at(2026, 9, 12, 19, 59)) == at(2026, 9, 5, 20, 0)
+
+
+# 以下日期以 2024-01-01（星期一）為第 0 週往後數：9/12、8/29、9/26 是「偶數週」，9/5、9/19、10/3 是「奇數週」
+def test_is_active_week_every_two_weeks():
+    cfg = ScheduleSettings(day_of_week="sat", time="20:00", every_n_weeks=2)
+    assert is_active_week(cfg, dt.date(2026, 9, 12)) and is_active_week(cfg, dt.date(2026, 8, 29))
+    assert not is_active_week(cfg, dt.date(2026, 9, 5)) and not is_active_week(cfg, dt.date(2026, 9, 19))
+
+
+def test_is_active_week_default_is_always_true():
+    cfg = ScheduleSettings()
+    assert all(is_active_week(cfg, dt.date(2026, 9, d)) for d in (5, 12, 19, 26))
+
+
+def test_previous_and_next_fire_time_skip_inactive_weeks():
+    cfg = ScheduleSettings(day_of_week="sat", time="20:00", every_n_weeks=2)
+    tz = ZoneInfo("Asia/Taipei")
+    at = lambda *a: dt.datetime(*a, tzinfo=tz)  # noqa: E731
+
+    # 上一次：週五晚上，最近的週六（9/5）是非發送週 → 應該再往前跳到 8/29
+    assert previous_fire_time(cfg, at(2026, 9, 11, 21, 0)) == at(2026, 8, 29, 20, 0)
+    # 上一次：發送當天當下就是發送週（9/12）→ 就是今天
+    assert previous_fire_time(cfg, at(2026, 9, 12, 20, 30)) == at(2026, 9, 12, 20, 0)
+    # 上一次：這週（9/19）是非發送週 → 回到上一個發送週 9/12
+    assert previous_fire_time(cfg, at(2026, 9, 19, 20, 30)) == at(2026, 9, 12, 20, 0)
+
+    # 下一次：週五晚上，下週六（9/12）剛好是發送週 → 直接就是它
+    assert next_fire_time(cfg, at(2026, 9, 11, 21, 0)) == at(2026, 9, 12, 20, 0)
+    # 下一次：今天（9/12）已經發送過了，下週（9/19）是非發送週 → 再往後跳到 9/26
+    assert next_fire_time(cfg, at(2026, 9, 12, 20, 30)) == at(2026, 9, 26, 20, 0)
+    # 下一次：今天（9/5）還沒到發送時間，但今天是非發送週 → 跳到下個發送週 9/12
+    assert next_fire_time(cfg, at(2026, 9, 5, 19, 0)) == at(2026, 9, 12, 20, 0)
+
+
+def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths, monkeypatch):
+    """「每 N 週」只影響自動排程；補發／手動／指令列一律照常執行，不會被誤判跳過。"""
+    settings = Settings()
+    settings.schedule.every_n_weeks = 2
+    save_settings(paths, settings)
+
+    calls: list[str] = []
+    monkeypatch.setattr(BotService, "run", lambda self, trigger, **kw: calls.append(trigger))
+    monkeypatch.setattr("church_bot.scheduler.is_active_week", lambda cfg, date: False)
+    scheduler = BotScheduler(BotService(paths))
+
+    scheduler._run("schedule")  # 非發送週 → 跳過，不執行
+    for trigger in ("catchup", "manual", "cli"):
+        scheduler._run(trigger)  # 不受「每 N 週」影響，一定執行
+
+    assert calls == ["catchup", "manual", "cli"]
 
 
 # ------------------------------------------------------------------ web

@@ -2,8 +2,11 @@
 
 ## 未發佈
 
+- 新功能：「設定 → ② 每幾週發送一次」，可以改成每 2～8 週發送一次（大約可省對應比例的 LINE 則數）；
+  設成每 N 週卻沒把「往後看幾天」跟著加長時，會主動警告，避免中間那幾週的服事漏掉沒提醒
 - 文件：新增交接文件 [docs/HANDOVER.md](docs/HANDOVER.md)
 - 文件：新增「LINE 的 ID、群組成員與私訊」運作原理說明 [docs/LINE_IDS_AND_MEMBERS.md](docs/LINE_IDS_AND_MEMBERS.md)
+- 文件：新增從零開始申請帳號、本機測試的教學 [docs/QUICKSTART_TEST.md](docs/QUICKSTART_TEST.md)
 
 ## 0.1.0 — 2026-09-11
 

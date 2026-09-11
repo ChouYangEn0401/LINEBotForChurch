@@ -92,6 +92,14 @@ class BotService:
         targets = self._load_table(TargetTable(self.paths.targets_file), issues)
         members = self._load_table(MemberTable(self.paths.members_file), issues)
         Renderer(settings.message)  # 模板語法錯誤在這裡就丟 ConfigError
+        span = settings.schedule.every_n_weeks * 7
+        if settings.schedule.every_n_weeks > 1 and settings.behavior.lookahead_days < span:
+            issues.append(Issue(
+                Severity.WARNING, "lookahead_too_short",
+                f"設定成每 {settings.schedule.every_n_weeks} 週發送一次，但「往後看幾天」只有"
+                f"{settings.behavior.lookahead_days} 天，下一次發送前那幾週的服事可能不會出現在提醒裡",
+                f"到「設定 → ⑤ 進階」把「往後看幾天」改成至少 {span} 天。",
+            ))
         return Context(settings, targets, members, issues)
 
     @staticmethod

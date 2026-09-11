@@ -77,7 +77,7 @@ def form_values(s: Settings) -> dict[str, Any]:
         "ignore_columns": fmt_list(s.source.columns.ignore),
         "messenger_kind": s.messenger.kind, "check_quota": s.messenger.check_quota,
         "schedule_enabled": s.schedule.enabled, "day_of_week": s.schedule.day_of_week, "time": s.schedule.time,
-        "timezone": s.schedule.timezone,
+        "timezone": s.schedule.timezone, "every_n_weeks": s.schedule.every_n_weeks,
         "title": s.message.title, "footer": s.message.footer, "date_format": s.message.date_format,
         "template": s.message.template, "role_order": fmt_list(s.message.role_order),
         "name_separator": s.message.name_separator,
@@ -94,8 +94,9 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
     on = lambda key: f.get(key) == "on"  # noqa: E731 - checkbox 沒勾就不會出現在表單裡
     try:
         lookahead, low_days = int(f.get("lookahead_days", "7")), int(f.get("roster_low_warning_days", "14"))
+        every_n_weeks = int(f.get("every_n_weeks", "1"))
     except ValueError as exc:
-        raise ConfigError("「往後看幾天」和「剩幾天提醒」要填數字") from exc
+        raise ConfigError("「往後看幾天」「剩幾天提醒」「每幾週發送一次」要填數字") from exc
     data["source"].update(
         kind=f.get("source_kind", "csv"), spreadsheet_url=f.get("spreadsheet_url", "").strip(),
         worksheet=f.get("worksheet", "").strip(), csv_path=f.get("csv_path", "").strip(),
@@ -105,7 +106,8 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
     data["source"]["columns"]["ignore"] = list(parse_list(f.get("ignore_columns", "")))
     data["messenger"].update(kind=f.get("messenger_kind", "line"), check_quota=on("check_quota"))
     data["schedule"].update(enabled=on("schedule_enabled"), day_of_week=f.get("day_of_week", "sat"),
-                            time=f.get("time", "20:00"), timezone=f.get("timezone", "Asia/Taipei").strip())
+                            time=f.get("time", "20:00"), timezone=f.get("timezone", "Asia/Taipei").strip(),
+                            every_n_weeks=every_n_weeks)
     data["message"].update(
         title=f.get("title", "").strip(), footer=f.get("footer", "").strip(),
         date_format=f.get("date_format", "").strip() or "%-m/%-d（{weekday}）",

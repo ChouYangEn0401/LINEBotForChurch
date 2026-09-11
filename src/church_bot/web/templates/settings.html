@@ -63,6 +63,12 @@
       <input type="time" id="time" name="time" value="{{ f.time }}">
       <div class="help">建議在聚會前一兩天，例如星期六晚上 8 點。<strong>電腦要開著、程式要在執行</strong>才會發送；如果剛好關機錯過，12 小時內打開程式會自動補發。</div>
 
+      <label for="every_n_weeks">每幾週發送一次</label>
+      <input type="number" id="every_n_weeks" name="every_n_weeks" min="1" max="8" value="{{ f.every_n_weeks }}">
+      <div class="help">1 = 每週發送（預設）。改成 2 大約可以省一半的 LINE 則數（見 docs/LINE_PRICING.md）——
+        但請記得同時把下面「往後看幾天」改成至少 <code>每幾週 × 7</code> 天，不然中間那一週的服事不會出現在提醒裡；
+        設定錯的話系統會提醒你。</div>
+
       <label for="timezone">時區</label>
       <input type="text" id="timezone" name="timezone" value="{{ f.timezone }}">
       <div class="help">台灣請用 Asia/Taipei，不用改。</div>
@@ -124,7 +130,7 @@
 
       <label for="lookahead_days">往後看幾天</label>
       <input type="number" id="lookahead_days" name="lookahead_days" min="1" max="60" value="{{ f.lookahead_days }}">
-      <div class="help">發送時提醒「今天起幾天內」的聚會。每週提醒一次就填 7。</div>
+      <div class="help">發送時提醒「今天起幾天內」的聚會。每週提醒一次就填 7；每兩週發送一次就要填 14 以上。</div>
 
       <label for="roster_low_warning_days">服事表剩幾天要提醒</label>
       <input type="number" id="roster_low_warning_days" name="roster_low_warning_days" min="0" max="365" value="{{ f.roster_low_warning_days }}">

@@ -89,6 +89,9 @@ class ScheduleSettings(_Base):
     timezone: str = "Asia/Taipei"
     day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "sat"
     time: str = "20:00"
+    # 每幾週發送一次：1 = 每週；2 = 每兩週發一次（大約可以省一半的 LINE 則數，見 docs/LINE_PRICING.md）
+    # 用「每兩週」的話，記得把 behavior.lookahead_days 也改成至少 14，不然下一次發送前的那週服事不會出現在提醒裡
+    every_n_weeks: int = Field(default=1, ge=1, le=8)
 
     @field_validator("time")
     @classmethod
@@ -119,7 +122,8 @@ class ScheduleSettings(_Base):
     def describe(self) -> str:
         if not self.enabled:
             return "自動發送已關閉"
-        return f"每{WEEKDAY_ZH[self.day_of_week]} {self.time}"
+        when = f"每{WEEKDAY_ZH[self.day_of_week]}" if self.every_n_weeks == 1 else f"每 {self.every_n_weeks} 週的{WEEKDAY_ZH[self.day_of_week]}"
+        return f"{when} {self.time}"
 
 
 class MessageSettings(_Base):

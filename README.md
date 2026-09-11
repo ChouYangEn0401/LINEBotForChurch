@@ -66,6 +66,9 @@
 
 安裝完一打開，程式先用**範例服事表**，首頁就能看到訊息長什麼樣子。接著：
 
+> 🔰 第一次做、或想先確定不會出錯再動教會的群組？改看 **[docs/QUICKSTART_TEST.md](docs/QUICKSTART_TEST.md)**——
+> 一樣的步驟，但會先教你只測試自己一個人，最後才接觸教會正式的群組。
+
 1. **申請 LINE 機器人**：照 [docs/SETUP_LINE.md](docs/SETUP_LINE.md) 做，把拿到的 token 貼到網頁「⚙️ 設定 → 🔑 LINE 金鑰」。
 2. **接上服事表**：照 [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md) 把 Google Sheet 開成「知道連結的人可以檢視」，網址貼到「⚙️ 設定 → ① 服事表從哪裡來」。服事表怎麼排見 [docs/SHEET_FORMAT.md](docs/SHEET_FORMAT.md)。
 3. **設定群組**：把機器人邀進 LINE 群組，在群組打「群組ID」，到「👥 群組」新增群組、貼上 ID，按「測試」確認收得到。
@@ -139,7 +142,8 @@
 
 | 文件 | 內容 |
 |---|---|
-| [docs/SETUP_LINE.md](docs/SETUP_LINE.md) | LINE 機器人申請與設定（第一次） |
+| [docs/QUICKSTART_TEST.md](docs/QUICKSTART_TEST.md) | **新手推薦從這裡開始**：從零申請帳號、安全測試（只有自己看得到），最後才接上教會正式群組 |
+| [docs/SETUP_LINE.md](docs/SETUP_LINE.md) | LINE 機器人申請與設定（完整參考） |
 | [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md) | 接上 Google Sheet 服事表 |
 | [docs/SHEET_FORMAT.md](docs/SHEET_FORMAT.md) | 服事表怎麼排、讀不到時怎麼改 |
 | [docs/LINE_PRICING.md](docs/LINE_PRICING.md) | LINE 方案、費用、用量、發票（報帳用） |

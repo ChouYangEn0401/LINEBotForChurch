@@ -132,3 +132,32 @@ def test_roster_change_resend_policy(service, paths, fake):
 def test_health_check_lists_every_area(service):
     names = [item.name for item in service.health()]
     assert names[:4] == ["設定檔", "群組表", "人員表", "服事表"] and "管理員通知" in names
+
+
+def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
+    """docs/QUICKSTART_TEST.md 教的做法：群組表的 LINE_ID 填自己的 U... userId，安全地只測試自己。"""
+    write(paths.config_dir / "roster.csv", ROSTER)
+    settings = Settings()
+    settings.source.kind, settings.source.csv_path = "csv", "config/roster.csv"
+    settings.schedule.enabled = False
+    save_settings(paths, settings)
+    me = uid("9")
+    TargetTable(paths.targets_file).save([Target("我自己", me, enabled=True)])
+
+    report, _ = BotService(paths).run("cli")
+    assert statuses(report) == [("我自己", DeliveryStatus.SENT)]
+    assert fake.texts_to(me) and "王牧師" in fake.texts_to(me)[0]  # 沒設人員表，名字照服事表原樣顯示
+
+
+def test_biweekly_schedule_warns_when_lookahead_too_short(paths):
+    settings = Settings()
+    settings.schedule.every_n_weeks = 2
+    settings.behavior.lookahead_days = 7  # 每兩週發一次，但只往後看 7 天 → 中間那週會漏掉
+    save_settings(paths, settings)
+    issues = BotService(paths).load().issues
+    warning = next(i for i in issues if i.code == "lookahead_too_short")
+    assert "每 2 週" in warning.message and "14" in warning.hint
+
+    settings.behavior.lookahead_days = 14
+    save_settings(paths, settings)
+    assert not [i for i in BotService(paths).load().issues if i.code == "lookahead_too_short"]

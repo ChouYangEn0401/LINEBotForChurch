@@ -53,6 +53,9 @@ schedule:
   # mon tue wed thu fri sat sun（星期一～星期日）
   day_of_week: sat
   time: "20:00"
+  # 每幾週發送一次：1 = 每週（預設）；2 = 每兩週一次，大約可省一半 LINE 則數，見 docs/LINE_PRICING.md
+  # 改成 2 以上時，記得把下面 behavior.lookahead_days 也改成至少「每幾週 × 7」天
+  every_n_weeks: 1
 
 message:
   title: 本週服事提醒
@@ -78,7 +81,7 @@ message:
     {% endif -%}
 
 behavior:
-  # 從今天起往後看幾天內的聚會（含今天）。每週提醒一次就填 7
+  # 從今天起往後看幾天內的聚會（含今天）。每週提醒一次就填 7；每兩週提醒一次就填 14 以上
   lookahead_days: 7
   # 已經送過某天的提醒，之後服事表又改了，要不要自動再送一次（false = 不要，避免洗版）
   resend_if_changed: false
