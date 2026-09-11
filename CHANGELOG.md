@@ -1,5 +1,10 @@
 # 版本紀錄
 
+## 未發佈
+
+- 文件：新增交接文件 [docs/HANDOVER.md](docs/HANDOVER.md)
+- 文件：新增「LINE 的 ID、群組成員與私訊」運作原理說明 [docs/LINE_IDS_AND_MEMBERS.md](docs/LINE_IDS_AND_MEMBERS.md)
+
 ## 0.1.0 — 2026-09-11
 
 第一版（MVP）。

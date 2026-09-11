@@ -135,6 +135,20 @@
 
 ---
 
+## 文件總覽
+
+| 文件 | 內容 |
+|---|---|
+| [docs/SETUP_LINE.md](docs/SETUP_LINE.md) | LINE 機器人申請與設定（第一次） |
+| [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md) | 接上 Google Sheet 服事表 |
+| [docs/SHEET_FORMAT.md](docs/SHEET_FORMAT.md) | 服事表怎麼排、讀不到時怎麼改 |
+| [docs/LINE_PRICING.md](docs/LINE_PRICING.md) | LINE 方案、費用、用量、發票（報帳用） |
+| [docs/LINE_IDS_AND_MEMBERS.md](docs/LINE_IDS_AND_MEMBERS.md) | 群組 ID、個人 ID 怎麼來；能不能知道群組有哪些人；能不能私訊、怎麼算錢 |
+| [docs/HANDOVER.md](docs/HANDOVER.md) | 交接：目前狀態、已驗證／未驗證、上線清單、帳號與機密、待確認事項 |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 程式架構（給工程師） |
+
+---
+
 ## 給工程師
 
 - 技術：Python 3.11+、FastAPI + Jinja2（伺服器端畫面，無前端建置）、APScheduler、httpx、gspread、pydantic v2、SQLite。
