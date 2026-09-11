@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "church-bot"
+version = "0.1.0"
+description = "教會服事表 LINE 自動提醒機器人"
+requires-python = ">=3.11"
+readme = "README.md"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "pydantic>=2.6",
+    "PyYAML>=6.0",
+    "httpx>=0.27",
+    "APScheduler>=3.10,<4",
+    "gspread>=6.0",
+    "google-auth>=2.28",
+    "tzdata>=2024.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+church-bot = "church_bot.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+church_bot = ["web/templates/*.html", "web/static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+filterwarnings = [
+    "ignore:Using .httpx. with .starlette.testclient.",
+    "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+]

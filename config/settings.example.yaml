@@ -1,0 +1,93 @@
+# ============================================================
+# 教會服事提醒機器人 — 設定檔範例（每一項都有說明）
+# ------------------------------------------------------------
+# ★ 建議直接用網頁「設定」頁修改，比較不會打錯。
+# 想手動改：複製這個檔案成 settings.yaml 再改（安裝程式會自動幫你複製一份）。
+# 規則：冒號後面要空一格；縮排用空白鍵（不要用 Tab）；# 後面是註解。
+# 機密（LINE token、網頁密碼）不放這裡，放在 .env。
+# ============================================================
+
+source:
+  # 服事表從哪裡來：
+  #   google_public          = Google Sheet，開「知道連結的人可以檢視」（最簡單，推薦）
+  #   google_service_account = Google Sheet 不公開，用服務帳號讀（見 docs/SETUP_GOOGLE.md）
+  #   csv                    = 電腦裡的 CSV 檔（試用、測試用）
+  kind: csv
+  # Google Sheet 網址：先點開你要的「分頁」，再複製瀏覽器網址列（網址裡會有 #gid=數字）
+  spreadsheet_url: ""
+  # 分頁名稱。通常留空（用網址裡的 gid 決定是哪個分頁）
+  # 服務帳號模式可以寫多個（用逗號隔開），或寫 * 代表全部分頁一起讀
+  worksheet: ""
+  credentials_file: config/service-account.json
+  csv_path: config/roster.demo.csv
+  # 表格排法：auto（自動判斷，推薦）、wide（日期在左）、long（一列一項服事）、matrix（日期在上）
+  layout: auto
+  # 儲存格裡寫這些字，代表「沒有人」
+  empty_markers: ["-", "—", "–", "無", "休", "暫停", "x", "X", "N/A", "n/a", "/"]
+  timeout_seconds: 20
+  columns:
+    # 表頭「包含」這些字就會被認出來
+    date: [日期, 主日, date]
+    role: [服事項目, 服事, 項目, 職務, 崗位, role]
+    person: [服事人員, 人員, 同工, 姓名, 名字, name]
+    label: [聚會, 場次, label]
+    note: [備註, 說明, note]
+    # 不想出現在提醒裡的欄位，例如 [經文, 詩歌, 星期]
+    ignore: []
+
+messenger:
+  # line = 正式送到 LINE；console = 測試模式（只寫到 data/outbox.log，不會真的送出）
+  kind: line
+  # 每次發送前先查本月 LINE 額度，不夠會先警告
+  check_quota: true
+
+line:
+  # 出問題時通知誰：你自己的 userId（U 開頭）或管理群組 ID（C 開頭）
+  # 私訊機器人「我的ID」就能拿到。建議填「個人」：通知群組的話每次都會按人數扣額度
+  admin_target_id: ""
+  timeout_seconds: 15
+
+schedule:
+  enabled: true
+  timezone: Asia/Taipei
+  # mon tue wed thu fri sat sun（星期一～星期日）
+  day_of_week: sat
+  time: "20:00"
+
+message:
+  title: 本週服事提醒
+  # %Y 年、%m 月、%d 日（%-m、%-d 不補 0）、{weekday} = 週日、{weekday_long} = 星期日、{roc_year} = 民國年
+  date_format: "%-m/%-d（{weekday}）"
+  footer: 謝謝大家的擺上 🙏
+  name_separator: 、
+  # 服事項目的排列順序（寫部分字也可以），空 = 照服事表的欄位順序。例如 [講員, 司會, 敬拜, 司琴]
+  role_order: []
+  # 訊息模板（Jinja2 語法）。改壞了就到網頁「設定」按「恢復預設模板」
+  template: |
+    📣 {{ title }}
+    📅 {{ date_text }}{% if label %}・{{ label }}{% endif %}
+
+    {% for a in assignments -%}
+    ▸ {{ a.role }}：{{ a.names }}
+    {% endfor -%}
+    {% if note %}
+    📝 {{ note }}
+    {% endif -%}
+    {% if footer %}
+    {{ footer }}
+    {% endif -%}
+
+behavior:
+  # 從今天起往後看幾天內的聚會（含今天）。每週提醒一次就填 7
+  lookahead_days: 7
+  # 已經送過某天的提醒，之後服事表又改了，要不要自動再送一次（false = 不要，避免洗版）
+  resend_if_changed: false
+  # 服事表剩不到幾天就提醒管理員「該排下一期了」
+  roster_low_warning_days: 14
+  # 服事表上的名字在人員表找不到時，要不要提醒管理員
+  warn_unknown_names: true
+
+web:
+  # 127.0.0.1 = 只有這台電腦能開管理網頁；0.0.0.0 = 同一個網路的其他電腦也能開（請一定要設密碼）
+  host: 127.0.0.1
+  port: 8787

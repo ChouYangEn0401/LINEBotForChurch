@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}服事提醒機器人{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">⛪ 服事提醒機器人</a>
+  <nav>
+    {% set items = [
+      ("index", "/", "🏠 首頁"), ("targets", "/targets", "👥 群組"), ("members", "/members", "🙋 人員"),
+      ("settings", "/settings", "⚙️ 設定"), ("runs", "/runs", "📜 紀錄"), ("check", "/check", "🩺 系統檢查"),
+      ("help", "/help", "❓ 使用說明")] %}
+    {% for key, href, label in items %}
+      <a href="{{ href }}" class="{{ 'active' if nav == key or (key == 'runs' and nav == 'run_detail') }}">{{ label }}</a>
+    {% endfor %}
+  </nav>
+</header>
+<main>
+  {% if flash %}<div class="flash {{ flash_level }}">{{ flash }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<footer>
+  v{{ version }}・自動發送：{{ schedule_status }}{% if next_run and next_run != '（沒有排程）' %}・下次 {{ next_run }}{% endif %}
+  ・<a href="/docs" target="_blank">API 文件</a>
+</footer>
+<script src="/static/app.js?v={{ version }}"></script>
+</body>
+</html>

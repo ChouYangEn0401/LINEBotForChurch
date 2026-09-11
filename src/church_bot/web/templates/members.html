@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}人員・服事提醒機器人{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>🙋 人員表：服事表上的名字是誰</h2>
+  <p class="muted">用途：① 服事表寫綽號（小明）→ 訊息顯示正式名字（陳小明）　② 標記誰已經不服事了（停用），被排到會提醒你　③ 要 @ 人時需要他的 LINE_userId。<br>
+    <strong>不設定也可以</strong>，名字會照服事表原樣顯示。存在 <code>config/members.csv</code>（<a href="/download/members.csv">下載一份</a>）。</p>
+  {% for i in issues if i.severity.value != "info" %}
+    <div class="flash {{ 'error' if i.severity.value == 'error' else 'warn' }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
+      {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</div>
+  {% endfor %}
+</section>
+
+{% if unknown_error %}
+  <div class="flash warn">⚠️ 讀不到服事表，所以沒辦法檢查名字：{{ unknown_error }}</div>
+{% endif %}
+
+{% if unknown %}
+<section class="card">
+  <h2>❓ 服事表上有、人員表找不到的名字（{{ unknown | length }} 個）</h2>
+  <p class="muted">不處理也會照常發送（照服事表原樣顯示）。處理一次之後就會記住，下次不會再問。</p>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>服事表上的寫法</th><th>要怎麼處理</th></tr></thead>
+    <tbody>
+    {% for raw, suggestions in unknown.items() %}
+      <tr>
+        <td><strong>{{ raw }}</strong>{% if suggestions %}<div class="muted small">可能是：{{ fmt_list(suggestions) }}</div>{% endif %}</td>
+        <td>
+          <form method="post" action="/members/alias" class="inline-form">
+            <input type="hidden" name="raw" value="{{ raw }}">
+            <select name="member_name">
+              <option value="">➕ 新增成一位新同工「{{ raw }}」</option>
+              {% for m in members %}
+                <option value="{{ m.name }}" {{ "selected" if suggestions and m.name == suggestions[0] }}>是「{{ m.name }}」（加到他的其他寫法）</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="primary">確定</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>同工名單（{{ members | length }} 位）</h2>
+  {% if members %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>名字</th><th>其他寫法</th><th>LINE_userId</th><th>狀態</th><th>備註</th><th></th></tr></thead>
+      <tbody>
+      {% for m in members %}
+        <tr class="{{ '' if m.active else 'disabled' }}">
+          <td><strong>{{ m.name }}</strong></td>
+          <td>{{ fmt_list(m.aliases) }}</td>
+          <td>{% if m.line_user_id %}<span class="id copy">{{ m.line_user_id }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{% if m.active %}<span class="tag ok">服事中</span>{% else %}<span class="tag off">停用</span>{% endif %}</td>
+          <td class="small">{{ m.note }}</td>
+          <td class="nowrap">
+            <a class="button secondary" href="/members?edit={{ m.name | urlencode }}#edit">編輯</a>
+            <form method="post" action="/members/delete" class="inline" data-confirm="確定刪除「{{ m.name }}」嗎？">
+              <input type="hidden" name="name" value="{{ m.name }}"><button type="submit" class="danger">刪除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p>還沒有任何同工資料。</p>
+  {% endif %}
+</section>
+
+{% set m = editing %}
+<section class="card" id="edit">
+  <h2>{% if m %}✏️ 編輯「{{ m.name }}」{% else %}➕ 新增同工{% endif %}</h2>
+  <form method="post" action="/members/save" class="form-grid">
+    <input type="hidden" name="original_name" value="{{ m.name if m else '' }}">
+
+    <label for="name">名字</label>
+    <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}" placeholder="訊息上要顯示的名字，例如：陳小明">
+
+    <label for="aliases">其他寫法</label>
+    <input type="text" id="aliases" name="aliases" value="{{ fmt_list(m.aliases) if m else '' }}" placeholder="例如：小明、Ming、陳弟兄">
+    <div class="help">服事表上可能出現的其他寫法，用「、」隔開。服事表寫這些，訊息都會顯示成上面的名字。</div>
+
+    <label for="line_user_id">LINE_userId</label>
+    <input type="text" id="line_user_id" name="line_user_id" value="{{ m.line_user_id if m else '' }}" placeholder="U 開頭 + 32 碼（選填）">
+    <div class="help">只有要 @ 他才需要。請他在有機器人的群組打「我的ID」，把回覆的 ID 貼過來。</div>
+
+    <label>狀態</label>
+    <div class="checkbox-row"><input type="checkbox" id="active" name="active" {{ "checked" if (m is none or m.active) }}>
+      <label for="active">還在服事（取消勾選 = 停用：如果又被排到服事，會提醒管理員）</label></div>
+
+    <label for="note">備註</label>
+    <input type="text" id="note" name="note" value="{{ m.note if m else '' }}">
+
+    <div></div>
+    <div class="actions">
+      <button type="submit" class="primary">💾 儲存</button>
+      {% if m %}<a class="button secondary" href="/members">取消編輯</a>{% endif %}
+    </div>
+  </form>
+</section>
+{% endblock %}

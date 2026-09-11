@@ -1,0 +1,33 @@
+# ---- 機密（絕對不要上傳）----
+.env
+config/settings.yaml
+config/targets.csv
+config/members.csv
+config/*.json
+!config/*.example.*
+credentials*.json
+service-account*.json
+
+# ---- 執行時產生 ----
+data/*
+!data/.gitkeep
+*.log
+
+# ---- Python ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+
+# ---- 編輯器 / 系統 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+config/roster.demo.csv

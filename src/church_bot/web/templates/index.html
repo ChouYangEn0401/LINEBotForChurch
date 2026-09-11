@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block content %}
+{% set errors = problems | selectattr("severity.value", "equalto", "error") | list %}
+<section class="hero {{ report.status }}">
+  <div class="hero-title">
+    {% if report.status == "ok" %}✅ 一切正常
+    {% elif report.status == "warning" %}⚠️ 有 {{ problems | length }} 件事需要看一下（提醒還是會照常發送）
+    {% else %}❌ 有 {{ errors | length }} 個問題，提醒可能送不出去{% endif %}
+  </div>
+  <div class="hero-sub">⏰ 自動發送：{{ schedule_status }}{% if next_run and next_run != '（沒有排程）' %}，下次是 <strong>{{ next_run }}</strong>{% endif %}</div>
+  <div class="hero-sub">📨 上次發送：
+    {% if last %}<a href="/runs/{{ last.id }}">{{ last.started_at[:16] | replace("T", " ") }}（{{ last.trigger_zh }}・{{ last.status_zh }}・送出 {{ last.sent }} 則）</a>
+    {% else %}還沒有發送過{% endif %}
+  </div>
+</section>
+
+{% if problems %}
+<section class="card">
+  <h2>需要處理的事項</h2>
+  <ul class="issues">
+    {% for i in problems %}
+    <li class="{{ i.severity.value }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
+      {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>這次會發送的內容（預覽）</h2>
+  {% if plan and plan.days %}
+    <p class="muted">涵蓋 {{ plan.today.month }}/{{ plan.today.day }} ～ {{ plan.window_end.month }}/{{ plan.window_end.day }} 之間的聚會。預覽不會真的送出。</p>
+  {% endif %}
+
+  {% if report.deliveries %}
+    <div class="bubbles">
+      {% for d in report.deliveries %}
+      <div class="bubble-card">
+        <div class="bubble-head">
+          <strong>{{ d.target_name }}</strong>
+          <span class="tag {{ d.status.value }}">{{ "會發送" if d.status.value == "dry_run" else d.status.zh }}</span>
+        </div>
+        {% if d.detail %}<div class="muted small">{{ d.detail }}</div>{% endif %}
+        <pre class="bubble">{{ d.text }}</pre>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="actions">
+      <form method="post" action="/send" data-confirm="確定現在就發送嗎？（會真的送到 LINE 群組）">
+        <input type="hidden" name="force" value="0">
+        <button class="primary big" type="submit">📤 立刻發送</button>
+      </form>
+      <form method="post" action="/send" data-confirm="已經送過的群組也會再收到一次，確定嗎？">
+        <input type="hidden" name="force" value="1">
+        <button class="secondary" type="submit">🔁 重新發送（已送過的也送）</button>
+      </form>
+      <a class="button secondary" href="/">🔄 重新整理預覽</a>
+    </div>
+    <p class="muted small">不用每週手動按：到了排程時間會自動發送。這兩個按鈕是給「臨時想提早發」或「服事表改了想重發」用的。</p>
+  {% elif plan and plan.samples %}
+    <p>還沒有設定可以收到提醒的群組。先看看訊息會長這樣：</p>
+    <div class="bubbles">
+      {% for day, msg in plan.samples %}<div class="bubble-card"><pre class="bubble">{{ msg.text }}</pre></div>{% endfor %}
+    </div>
+    <div class="actions"><a class="button primary big" href="/targets">👥 下一步：設定群組</a></div>
+  {% else %}
+    <p class="muted">這次沒有要發送的訊息，原因請看上面的「需要處理的事項」。</p>
+  {% endif %}
+</section>
+
+{% if infos %}
+<details class="card">
+  <summary>參考資訊（{{ infos | length }} 項）</summary>
+  <ul class="issues">
+    {% for i in infos %}<li class="info">{{ severity_icon["info"] }} {{ i.message }}{% if i.hint %}<div class="hint">{{ i.hint }}</div>{% endif %}</li>{% endfor %}
+  </ul>
+</details>
+{% endif %}
+{% endblock %}

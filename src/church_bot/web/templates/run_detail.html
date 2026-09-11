@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}發送結果・服事提醒機器人{% endblock %}
+{% block content %}
+{% set problems = r.issues | rejectattr("severity", "equalto", "info") | list %}
+{% set infos = r.issues | selectattr("severity", "equalto", "info") | list %}
+<section class="card">
+  <h2>發送結果</h2>
+  <p>時間：{{ r.started_at[:19] | replace("T", " ") }}
+     觸發：{{ {"schedule": "自動排程", "manual": "網頁手動", "cli": "指令", "catchup": "開機補發"}.get(r.trigger, r.trigger) }}
+     {% if r.dry_run %}（預覽）{% endif %}</p>
+  <div class="actions"><a class="button secondary" href="/runs">← 回紀錄列表</a><a class="button secondary" href="/">回首頁</a></div>
+</section>
+
+{% if problems %}
+<section class="card">
+  <h2>問題與提醒</h2>
+  <ul class="issues">
+    {% for i in problems %}<li class="{{ i.severity }}">{{ severity_icon[i.severity] }} {{ i.message }}{% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section class="card">
+  <h2>每個群組的結果</h2>
+  {% if r.deliveries %}
+  <div class="bubbles">
+    {% for d in r.deliveries %}
+    <div class="bubble-card">
+      <div class="bubble-head"><strong>{{ d.target_name }}</strong><span class="tag {{ d.status }}">{{ status_zh.get(d.status, d.status) }}</span></div>
+      {% if d.detail %}<div class="muted small">{{ d.detail }}</div>{% endif %}
+      <pre class="bubble">{{ d.text }}</pre>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">這次沒有任何要發送的訊息。</p>
+  {% endif %}
+</section>
+
+{% if infos %}
+<details class="card"><summary>參考資訊（{{ infos | length }} 項）</summary>
+  <ul class="issues">{% for i in infos %}<li class="info">ℹ️ {{ i.message }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+{% endblock %}

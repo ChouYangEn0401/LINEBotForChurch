@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}發生問題・服事提醒機器人{% endblock %}
+{% block content %}
+<section class="hero error">
+  <div class="hero-title">❌ {{ message }}</div>
+  {% if hint %}<div class="hero-sub">👉 {{ hint }}</div>{% endif %}
+</section>
+<section class="card">
+  <p>可以試試：</p>
+  <ul>
+    <li><a href="/settings">到「設定」頁檢查設定</a></li>
+    <li><a href="/check">到「系統檢查」看看哪裡有問題</a></li>
+    <li>還是不行的話，把 <code>data/church_bot.log</code> 這個檔案傳給維護的人</li>
+  </ul>
+</section>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}使用說明・服事提醒機器人{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>❓ 這個機器人在做什麼</h2>
+  <p>每週固定時間，它會：</p>
+  <ol class="steps">
+    <li>📄 讀 Google Sheet 上的<strong>服事表</strong>，找出這週的聚會</li>
+    <li>🙋 用<strong>人員表</strong>把名字整理好（綽號換成正式名字、檢查有沒有人已經停用）</li>
+    <li>👥 依照<strong>群組表</strong>，把提醒送到每個 LINE 群組</li>
+    <li>🚨 有任何問題（服事表沒更新、名字對不到、LINE 送不出去），<strong>通知管理員</strong>，也會顯示在首頁</li>
+  </ol>
+  <p><strong>平常什麼都不用做</strong>：只要更新 Google Sheet 上的服事表就好，這台電腦開著、程式在跑，就會自動提醒。</p>
+</section>
+
+<section class="card">
+  <h2>🚀 第一次設定（照順序做）</h2>
+  <ol class="steps">
+    <li><strong>申請 LINE 機器人</strong>：照 <code>docs/SETUP_LINE.md</code> 做，拿到 Channel access token，貼到「⚙️ 設定 → LINE 金鑰」。</li>
+    <li><strong>接上服事表</strong>：Google Sheet 右上「共用」→ 改成「知道連結的使用者可以檢視」，複製網址，貼到「⚙️ 設定 → ① 服事表從哪裡來」，來源選「Google Sheet（公開連結）」。</li>
+    <li><strong>把機器人邀進 LINE 群組</strong>，在群組打 <span class="kbd">群組ID</span>，機器人會回覆一串 C 開頭的 ID（沒回覆的話，看下面「沒有設定 Webhook 怎麼辦」）。</li>
+    <li>到「👥 群組」頁新增群組，貼上 ID、勾「啟用」，按「測試」確認群組有收到。</li>
+    <li>私訊機器人 <span class="kbd">我的ID</span>，把拿到的 U 開頭 ID 填到「⚙️ 設定 → ④ 管理員 LINE ID」，出問題才找得到你。</li>
+    <li>到「🩺 系統檢查」，全部是 ✅ 就完成了！回首頁看看這週的預覽。</li>
+  </ol>
+</section>
+
+<section class="card">
+  <h2>📋 服事表可以怎麼排</h2>
+  <p>三種常見排法都認得（設定選「自動判斷」就好）。表頭有「日期」兩個字最保險。</p>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>① 日期在左（最常見）</th><th>② 一列一項服事</th><th>③ 日期在上</th></tr></thead>
+    <tbody><tr>
+      <td><pre>日期   | 講員   | 司琴 | 音控
+9/13   | 王牧師 | 小明 | 阿豪
+9/20   | 李傳道 | 美華 | 阿豪</pre></td>
+      <td><pre>日期 | 服事項目 | 人員
+9/13 | 講員     | 王牧師
+9/13 | 司琴     | 小明</pre></td>
+      <td><pre>服事 | 9/13   | 9/20
+講員 | 王牧師 | 李傳道
+司琴 | 小明   | 美華</pre></td>
+    </tr></tbody>
+  </table>
+  </div>
+  <ul>
+    <li>一格多人：用 <code>、</code> <code>,</code> <code>/</code> 或換行隔開都可以。</li>
+    <li>沒有人：留空，或寫 <code>-</code>、<code>無</code>、<code>休</code>。</li>
+    <li>日期寫法：<code>2026/9/13</code>、<code>9/13</code>、<code>9月13日</code>、<code>115/9/13</code>（民國）都可以。</li>
+    <li>要寫備註：加一欄「備註」，例如「聖餐主日」，會出現在提醒裡。</li>
+  </ul>
+</section>
+
+<section class="card">
+  <h2>🤔 常見狀況</h2>
+  <details><summary><strong>首頁說「某某在人員表找不到」</strong></summary>
+    <p>服事表上出現了新名字或打錯字。訊息還是會照原樣送出，不影響提醒。到「🙋 人員」頁，會列出所有找不到的名字，選「新增成新同工」或「是某某的其他寫法」按確定就好。</p></details>
+  <details><summary><strong>有人離開教會 / 不再服事</strong></summary>
+    <p>到「🙋 人員」頁把他編輯成「停用」。之後如果服事表不小心又排到他，會提醒管理員。</p></details>
+  <details><summary><strong>新的群組、群組換了</strong></summary>
+    <p>把機器人邀進新群組，在群組打「群組ID」，到「👥 群組」頁新增或修改 LINE_ID。舊群組不用了就改成停用或刪除。機器人被踢出群組時，會通知管理員。</p></details>
+  <details><summary><strong>服事表排到下一季、開了新分頁</strong></summary>
+    <p>最簡單：直接在同一個分頁往下加。如果開了新分頁，要到「⚙️ 設定」把網址換成新分頁的網址。服事表快用完時（預設剩 14 天），會先提醒管理員。</p></details>
+  <details><summary><strong>「這個月的 LINE 訊息額度用完了」</strong></summary>
+    <p>LINE 免費方案每月 200 則，推播到群組是按群組人數算。詳見 <code>docs/LINE_PRICING.md</code>（有報帳需要的資訊）。</p></details>
+  <details><summary><strong>「LINE token 錯誤或已失效」</strong></summary>
+    <p>到 LINE Developers 重新發行 Channel access token，貼到「⚙️ 設定 → LINE 金鑰」。</p></details>
+  <details><summary><strong>在群組打「群組ID」機器人沒反應（沒有設定 Webhook 怎麼辦）</strong></summary>
+    <p>「群組ID」指令需要設定 Webhook（見 <code>docs/SETUP_LINE.md</code> 第 5 步）。只有第一次拿 ID 時需要，拿到之後就可以關掉。</p></details>
+  <details><summary><strong>電腦關機 / 睡眠會怎樣</strong></summary>
+    <p>關機時不會發送。如果錯過排程時間，12 小時內打開程式會自動補發（已經送過的不會重送）。建議用「開機自動啟動」（見 README）。</p></details>
+</section>
+
+<section class="card">
+  <h2>💬 在 LINE 可以打的指令</h2>
+  <table class="table">
+    <tr><td class="nowrap"><span class="kbd">群組ID</span></td><td>機器人回覆這個群組的 ID（填到群組表用）</td></tr>
+    <tr><td class="nowrap"><span class="kbd">我的ID</span></td><td>機器人回覆你自己的 ID（填到人員表才能 @ 你；填到設定可以收管理員通知）</td></tr>
+  </table>
+  <p class="muted small">這些回覆不會計入 LINE 每月額度。其他聊天內容機器人一律不回應，不會吵到群組。</p>
+</section>
+{% endblock %}

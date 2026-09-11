@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}群組・服事提醒機器人{% endblock %}
+{% block content %}
+<section class="card">
+  <h2>👥 群組表：提醒要送到哪些 LINE 群組</h2>
+  <p class="muted">存在 <code>config/targets.csv</code>，也可以用 Excel 打開直接改（<a href="/download/targets.csv">下載一份</a>）。
+    網頁和 Excel 改的是同一個檔案，改完不用重開程式。</p>
+  {% for i in issues if i.severity.value != "info" %}
+    <div class="flash {{ 'error' if i.severity.value == 'error' else 'warn' }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
+      {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</div>
+  {% endfor %}
+
+  {% if targets %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>群組名稱</th><th>狀態</th><th>LINE_ID</th><th>只發這些服事</th><th>只發這些聚會</th><th>@ 人</th><th>備註</th><th></th></tr></thead>
+      <tbody>
+      {% for t in targets %}
+        <tr class="{{ '' if t.enabled else 'disabled' }}">
+          <td><strong>{{ t.name }}</strong></td>
+          <td>{% if t.enabled and t.line_id %}<span class="tag ok">啟用</span>
+              {% elif t.enabled %}<span class="tag error">缺 LINE_ID</span>
+              {% else %}<span class="tag off">停用</span>{% endif %}</td>
+          <td>{% if t.line_id %}<span class="id copy">{{ t.line_id }}</span><div class="muted small">{{ describe_line_id(t.line_id) }}</div>
+              {% else %}<span class="muted">（還沒填）</span>{% endif %}</td>
+          <td>{{ fmt_list(t.roles) or "全部" }}</td>
+          <td>{{ fmt_list(t.labels) or "全部" }}</td>
+          <td>{{ "是" if t.mention else "否" }}</td>
+          <td class="small">{{ t.note }}</td>
+          <td class="nowrap">
+            <a class="button secondary" href="/targets?edit={{ t.name | urlencode }}#edit">編輯</a>
+            {% if t.line_id %}
+            <form method="post" action="/targets/test" class="inline"
+                  data-confirm="會送一則測試訊息到「{{ t.name }}」。送到群組會按群組人數扣 LINE 額度，確定嗎？">
+              <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="secondary">測試</button>
+            </form>
+            {% endif %}
+            <form method="post" action="/targets/delete" class="inline" data-confirm="確定刪除「{{ t.name }}」嗎？">
+              <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="danger">刪除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p>還沒有任何群組，用下面的表單新增第一個。</p>
+  {% endif %}
+</section>
+
+{% if chats %}
+<section class="card">
+  <h2>🔔 機器人最近看到的群組（還沒加進群組表）</h2>
+  <p class="muted">機器人被邀進群組、或有人在群組裡打「群組ID」後，會出現在這裡。按「加入」就會幫你填好 LINE_ID。</p>
+  <table class="table">
+    <thead><tr><th>群組名稱</th><th>LINE_ID</th><th>最後看到</th><th></th></tr></thead>
+    <tbody>
+    {% for c in chats %}
+      <tr>
+        <td>{{ c.name or "（抓不到名稱）" }}</td>
+        <td class="id">{{ c.chat_id }}</td>
+        <td class="nowrap">{{ c.last_seen[:16] | replace("T", " ") }}</td>
+        <td><form method="post" action="/targets/add-chat" class="inline">
+          <input type="hidden" name="chat_id" value="{{ c.chat_id }}"><input type="hidden" name="name" value="{{ c.name }}">
+          <button type="submit" class="primary">加入</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+{% set t = editing %}
+<section class="card" id="edit">
+  <h2>{% if t %}✏️ 編輯「{{ t.name }}」{% else %}➕ 新增群組{% endif %}</h2>
+  <form method="post" action="/targets/save" class="form-grid">
+    <input type="hidden" name="original_name" value="{{ t.name if t else '' }}">
+
+    <label for="name">群組名稱</label>
+    <input type="text" id="name" name="name" required value="{{ t.name if t else '' }}" placeholder="例如：主日服事同工群">
+    <div class="help">給自己看的名字，看得懂就好。</div>
+
+    <label for="line_id">LINE_ID</label>
+    <input type="text" id="line_id" name="line_id" value="{{ t.line_id if t else '' }}" placeholder="群組是 C 開頭、個人是 U 開頭，後面 32 碼">
+    <div class="help">把機器人加進群組，在群組裡打「群組ID」，機器人會回覆，複製貼上即可（詳見「使用說明」）。</div>
+
+    <label>啟用</label>
+    <div class="checkbox-row"><input type="checkbox" id="enabled" name="enabled" {{ "checked" if (t is none or t.enabled) }}>
+      <label for="enabled">這個群組要收到提醒</label></div>
+
+    <label for="roles">只發這些服事</label>
+    <input type="text" id="roles" name="roles" value="{{ fmt_list(t.roles) if t else '' }}" placeholder="留空 = 全部都發">
+    <div class="help">例如敬拜團只想收敬拜相關的：填「敬拜、司琴、音控」。寫部分字就會對到（「敬拜」會對到「敬拜主領」）。</div>
+
+    <label for="labels">只發這些聚會</label>
+    <input type="text" id="labels" name="labels" value="{{ fmt_list(t.labels) if t else '' }}" placeholder="留空 = 全部都發">
+    <div class="help">服事表有「聚會」欄（例如主日崇拜、青年崇拜）才需要填。</div>
+
+    <label>@ 標記服事的人</label>
+    <div class="checkbox-row"><input type="checkbox" id="mention" name="mention" {{ "checked" if t and t.mention }}>
+      <label for="mention">在訊息裡 @ 服事的人（要先在「人員」頁填好他們的 LINE_userId）</label></div>
+
+    <label for="note">備註</label>
+    <input type="text" id="note" name="note" value="{{ t.note if t else '' }}">
+
+    <div></div>
+    <div class="actions">
+      <button type="submit" class="primary">💾 儲存</button>
+      {% if t %}<a class="button secondary" href="/targets">取消編輯</a>{% endif %}
+    </div>
+  </form>
+</section>
+{% endblock %}

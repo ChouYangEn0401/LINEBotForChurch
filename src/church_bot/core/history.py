@@ -1,0 +1,216 @@
+"""SQLite 紀錄：每次執行的結果、每則訊息送出的狀態（防重複發送）、LINE 回報的群組。
+
+資料檔在 data/church_bot.db。刪掉它不會壞，只是會忘記「送過什麼」和歷史紀錄。
+每個操作都開新連線 + 鎖：網頁和排程在不同執行緒，這樣最單純也最安全。
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import datetime as dt
+import json
+import sqlite3
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterator
+
+from church_bot.models import DeliveryStatus, RunReport
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    trigger TEXT NOT NULL,
+    dry_run INTEGER NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT NOT NULL,
+    service_date TEXT,
+    sent INTEGER NOT NULL DEFAULT 0,
+    failed INTEGER NOT NULL DEFAULT 0,
+    skipped INTEGER NOT NULL DEFAULT 0,
+    errors INTEGER NOT NULL DEFAULT 0,
+    warnings INTEGER NOT NULL DEFAULT 0,
+    report_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started_at);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    service_date TEXT,
+    label TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_key ON deliveries(target_id, service_date, label, status);
+
+CREATE TABLE IF NOT EXISTS chats (
+    chat_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active',
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
+"""
+
+
+def _now() -> str:
+    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _json_default(obj: object) -> str:
+    if isinstance(obj, (dt.date, dt.datetime)):
+        return obj.isoformat()
+    return str(obj)
+
+
+@dataclass(frozen=True, slots=True)
+class RunSummary:
+    id: str
+    trigger: str
+    dry_run: bool
+    started_at: str
+    finished_at: str | None
+    status: str
+    service_date: str | None
+    sent: int
+    failed: int
+    skipped: int
+    errors: int
+    warnings: int
+
+    @property
+    def status_zh(self) -> str:
+        return {"error": "有錯誤", "warning": "有提醒事項", "ok": "正常"}.get(self.status, self.status)
+
+    @property
+    def trigger_zh(self) -> str:
+        return {"schedule": "自動排程", "manual": "網頁手動", "cli": "指令", "catchup": "開機補發",
+                "preview": "預覽"}.get(self.trigger, self.trigger)
+
+
+class History:
+    def __init__(self, db_path: Path) -> None:
+        self.db_path = db_path
+        self._lock = threading.Lock()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._conn() as conn:
+            conn.executescript(_SCHEMA)
+
+    @contextmanager
+    def _conn(self) -> Iterator[sqlite3.Connection]:
+        with self._lock:
+            conn = sqlite3.connect(self.db_path, timeout=10)
+            conn.row_factory = sqlite3.Row
+            try:
+                yield conn
+                conn.commit()
+            finally:
+                conn.close()
+
+    # ------------------------------------------------------------------ dedup
+
+    def skip_reason(self, target_id: str, service_date: dt.date, label: str, fp: str,
+                    resend_if_changed: bool) -> str | None:
+        """回傳「為什麼這則不用再送」；None 代表要送。"""
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT fingerprint, created_at FROM deliveries WHERE target_id=? AND service_date=? AND label=? "
+                "AND status=? ORDER BY id DESC LIMIT 1",
+                (target_id, service_date.isoformat(), label, DeliveryStatus.SENT.value),
+            ).fetchone()
+        if row is None:
+            return None
+        if resend_if_changed and row["fingerprint"] != fp:
+            return None
+        return f"{row['created_at'][:16].replace('T', ' ')} 已經送過了"
+
+    # ------------------------------------------------------------------ runs
+
+    def record(self, report: RunReport) -> None:
+        payload = json.dumps(dataclasses.asdict(report), ensure_ascii=False, default=_json_default)
+        errors = sum(1 for i in report.issues if i.severity.value == "error")
+        warnings = sum(1 for i in report.issues if i.severity.value == "warning")
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    report.run_id, report.trigger, int(report.dry_run),
+                    report.started_at.isoformat(timespec="seconds"),
+                    report.finished_at.isoformat(timespec="seconds") if report.finished_at else None,
+                    report.status, report.service_date.isoformat() if report.service_date else None,
+                    report.count(DeliveryStatus.SENT), report.count(DeliveryStatus.FAILED),
+                    report.count(DeliveryStatus.SKIPPED), errors, warnings, payload,
+                ),
+            )
+            conn.executemany(
+                "INSERT INTO deliveries (run_id, target_id, target_name, service_date, label, fingerprint, status,"
+                " detail, created_at) VALUES (?,?,?,?,?,?,?,?,?)",
+                [
+                    (report.run_id, d.target_id, d.target_name,
+                     d.service_date.isoformat() if d.service_date else None, d.label, d.fingerprint,
+                     d.status.value, d.detail, _now())
+                    for d in report.deliveries
+                    if d.status is not DeliveryStatus.DRY_RUN
+                ],
+            )
+
+    def recent_runs(self, limit: int = 30, include_previews: bool = False) -> list[RunSummary]:
+        where = "" if include_previews else "WHERE dry_run = 0"
+        with self._conn() as conn:
+            rows = conn.execute(
+                f"SELECT * FROM runs {where} ORDER BY started_at DESC LIMIT ?", (limit,)  # noqa: S608
+            ).fetchall()
+        return [self._summary(r) for r in rows]
+
+    def last_run(self, triggers: tuple[str, ...] = ()) -> RunSummary | None:
+        sql = "SELECT * FROM runs WHERE dry_run = 0"
+        params: list[object] = []
+        if triggers:
+            sql += f" AND trigger IN ({','.join('?' * len(triggers))})"
+            params.extend(triggers)
+        with self._conn() as conn:
+            row = conn.execute(sql + " ORDER BY started_at DESC LIMIT 1", params).fetchone()
+        return self._summary(row) if row else None
+
+    def get_report(self, run_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT report_json FROM runs WHERE id=?", (run_id,)).fetchone()
+        return json.loads(row["report_json"]) if row else None
+
+    @staticmethod
+    def _summary(row: sqlite3.Row) -> RunSummary:
+        return RunSummary(
+            id=row["id"], trigger=row["trigger"], dry_run=bool(row["dry_run"]), started_at=row["started_at"],
+            finished_at=row["finished_at"], status=row["status"], service_date=row["service_date"],
+            sent=row["sent"], failed=row["failed"], skipped=row["skipped"], errors=row["errors"],
+            warnings=row["warnings"],
+        )
+
+    # ------------------------------------------------------------------ chats seen via webhook
+
+    def remember_chat(self, chat_id: str, kind: str, name: str = "", status: str = "active") -> None:
+        now = _now()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO chats (chat_id, kind, name, status, first_seen, last_seen) VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(chat_id) DO UPDATE SET name=CASE WHEN excluded.name != '' THEN excluded.name "
+                "ELSE chats.name END, status=excluded.status, last_seen=excluded.last_seen",
+                (chat_id, kind, name, status, now, now),
+            )
+
+    def chats(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute("SELECT * FROM chats ORDER BY last_seen DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def forget_chat(self, chat_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM chats WHERE chat_id=?", (chat_id,))
