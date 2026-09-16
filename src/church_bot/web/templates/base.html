@@ -17,6 +17,9 @@
     {% for key, href, label in items %}
       <a href="{{ href }}" class="{{ 'active' if nav == key or (key == 'runs' and nav == 'run_detail') }}">{{ label }}</a>
     {% endfor %}
+    {% if has_password %}
+      <form method="post" action="/logout" class="inline"><button type="submit" class="secondary">🔒 登出</button></form>
+    {% endif %}
   </nav>
 </header>
 <main>

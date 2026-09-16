@@ -7,6 +7,7 @@ JSON API：/api/*（自動產生的文件在 /docs）。LINE Webhook：/line/web
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 import logging
 import os
 import secrets
@@ -19,7 +20,6 @@ from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
@@ -153,16 +153,27 @@ def create_app(paths: Paths) -> FastAPI:
 
     app = FastAPI(title="教會服事提醒機器人", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
-    basic = HTTPBasic(auto_error=False)
 
-    def require_login(credentials: HTTPBasicCredentials | None = Depends(basic)) -> None:
-        password = os.environ.get("UI_PASSWORD") or read_env_file(paths.env_file).get("UI_PASSWORD", "")
+    SESSION_COOKIE = "church_bot_session"
+
+    def current_password() -> str:
+        return os.environ.get("UI_PASSWORD") or read_env_file(paths.env_file).get("UI_PASSWORD", "")
+
+    def session_token(password: str) -> str:
+        return hashlib.sha256(password.encode()).hexdigest()
+
+    class LoginRequired(Exception):
+        pass
+
+    def require_login(request: Request) -> None:
+        """沒設密碼＝直接放行；設了密碼＝一定要有對得上目前密碼的 session cookie，不然一律擋下來、
+        直接顯示登入畫面（不用跳轉），改密碼後舊的 cookie 立刻對不上、所有人都要重新登入。"""
+        password = current_password()
         if not password:
             return
-        if credentials and secrets.compare_digest(credentials.password.encode(), password.encode()):
+        if secrets.compare_digest(request.cookies.get(SESSION_COOKIE, ""), session_token(password)):
             return
-        raise HTTPException(401, "需要密碼（帳號隨便填，密碼是 .env 裡的 UI_PASSWORD）",
-                            headers={"WWW-Authenticate": 'Basic realm="church-bot"'})
+        raise LoginRequired()
 
     ui = APIRouter(dependencies=[Depends(require_login)])
     api = APIRouter(prefix="/api", tags=["API"], dependencies=[Depends(require_login)])
@@ -171,8 +182,30 @@ def create_app(paths: Paths) -> FastAPI:
         ctx.setdefault("flash", request.query_params.get("msg", ""))
         ctx.setdefault("flash_level", request.query_params.get("level", "ok"))
         base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status,
-                "next_run": scheduler.next_run_text()}
+                "next_run": scheduler.next_run_text(), "has_password": bool(current_password())}
         return templates.TemplateResponse(request, name, {**base, **ctx})
+
+    @app.exception_handler(LoginRequired)
+    async def login_required(request: Request, exc: LoginRequired) -> HTMLResponse:
+        next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        return templates.TemplateResponse(request, "login.html", {"next": next_url}, status_code=401)
+
+    @app.post("/login")
+    async def login(request: Request, password: str = Form(""), next: str = Form("/")):
+        saved = current_password()
+        if saved and secrets.compare_digest(password, saved):
+            resp = RedirectResponse(next or "/", status_code=303)
+            resp.set_cookie(SESSION_COOKIE, session_token(saved), httponly=True, samesite="lax",
+                            max_age=60 * 60 * 24 * 30)
+            return resp
+        return templates.TemplateResponse(request, "login.html", {"next": next, "error": "密碼不對，再試一次"},
+                                          status_code=401)
+
+    @app.post("/logout")
+    def logout():
+        resp = _redirect("/")
+        resp.delete_cookie(SESSION_COOKIE)
+        return resp
 
     @app.exception_handler(ChurchBotError)
     async def friendly_error(request: Request, exc: ChurchBotError) -> HTMLResponse:

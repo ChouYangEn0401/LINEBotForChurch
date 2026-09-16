@@ -223,6 +223,17 @@ def test_invalid_settings_are_not_saved(client, paths):
 
 def test_password_protects_ui_but_not_webhook(client, paths):
     write(paths.env_file, "UI_PASSWORD=pw\n")
-    assert client.get("/").status_code == 401
-    assert client.get("/", auth=("any", "pw")).status_code == 200
+    assert client.get("/").status_code == 401  # 沒登入：直接擋下來顯示登入畫面，不是跳轉
+    assert client.post("/login", data={"password": "wrong", "next": "/"}).status_code == 401
+    r = client.post("/login", data={"password": "pw", "next": "/"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert client.get("/").status_code == 200  # 登入後 cookie 生效，同一個 client 能繼續逛
     assert client.post("/line/webhook", content=b'{"events":[]}').status_code == 503  # 沒設 secret，但不需要登入
+
+
+def test_changing_password_forces_everyone_to_log_in_again(client, paths):
+    write(paths.env_file, "UI_PASSWORD=old\n")
+    client.post("/login", data={"password": "old", "next": "/"})
+    assert client.get("/").status_code == 200
+    write(paths.env_file, "UI_PASSWORD=new\n")
+    assert client.get("/").status_code == 401  # 舊的 cookie 對不上新密碼，立刻失效

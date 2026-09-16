@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登入・服事提醒機器人</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+</head>
+<body>
+<main>
+  <section class="card" style="max-width:360px;margin:12vh auto">
+    <h2>🔒 請先登入</h2>
+    <p class="muted">這台管理網頁設定了密碼保護，請輸入密碼才能繼續。</p>
+    {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+    <form method="post" action="/login" class="form-grid">
+      <input type="hidden" name="next" value="{{ next or '/' }}">
+      <label for="password">密碼</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+      <div></div>
+      <div class="actions"><button type="submit" class="primary">登入</button></div>
+    </form>
+  </section>
+</main>
+</body>
+</html>
