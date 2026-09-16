@@ -231,6 +231,12 @@ def test_password_protects_ui_but_not_webhook(client, paths):
     assert client.post("/line/webhook", content=b'{"events":[]}').status_code == 503  # 沒設 secret，但不需要登入
 
 
+def test_login_rejects_external_redirect_target(client, paths):
+    write(paths.env_file, "UI_PASSWORD=pw\n")
+    r = client.post("/login", data={"password": "pw", "next": "https://evil.example/phish"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/"
+
+
 def test_changing_password_forces_everyone_to_log_in_again(client, paths):
     write(paths.env_file, "UI_PASSWORD=old\n")
     client.post("/login", data={"password": "old", "next": "/"})

@@ -192,6 +192,8 @@ def create_app(paths: Paths) -> FastAPI:
 
     @app.post("/login")
     async def login(request: Request, password: str = Form(""), next: str = Form("/")):
+        if not (next.startswith("/") and not next.startswith("//")):
+            next = "/"  # next 是網址列裡的路徑，不能是外部網址，避免被拿來做開放重導向釣魚
         saved = current_password()
         if saved and secrets.compare_digest(password, saved):
             resp = RedirectResponse(next or "/", status_code=303)
