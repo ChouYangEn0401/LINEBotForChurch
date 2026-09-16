@@ -274,9 +274,11 @@ def create_app(paths: Paths) -> FastAPI:
             unknown, unknown_error = service.unknown_names(), ""
         except ChurchBotError as exc:
             unknown, unknown_error = {}, f"{exc.message}（{exc.hint}）" if exc.hint else exc.message
+        known_uids = {m.line_user_id for m in result.items if m.line_user_id}
+        people = [p for p in service.history.people() if p["user_id"] not in known_uids]
         editing = next((m for m in result.items if m.name == edit), None)
         return page(request, "members.html", members=result.items, issues=result.issues, unknown=unknown,
-                    unknown_error=unknown_error, editing=editing)
+                    unknown_error=unknown_error, people=people, editing=editing)
 
     @ui.post("/members/save")
     def members_save(name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
@@ -299,6 +301,24 @@ def create_app(paths: Paths) -> FastAPI:
             table = MemberTable(paths.members_file)
             table.save(remove(table.load().items, name, key=lambda m: m.name))
         return _redirect("/members", f"已刪除「{name}」")
+
+    @ui.post("/members/add-person")
+    def members_add_person(user_id: str = Form(...), name: str = Form("")):
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            if not any(m.line_user_id == user_id for m in items):
+                display = name or f"新朋友 {user_id[-6:]}"
+                items.append(Member(name=display, line_user_id=user_id, active=False,
+                                    note=f"機器人自動收集（{dt.date.today():%m/%d}），確認後把「狀態」改成「服事中」"))
+                table.save(items)
+                return _redirect(f"/members?edit={quote(display)}", f"已加入人員表「{display}」（尚未啟用）")
+        return _redirect("/members", "這個人已經在人員表裡了")
+
+    @ui.post("/members/forget-person")
+    def members_forget_person(user_id: str = Form(...)):
+        service.history.forget_person(user_id)
+        return _redirect("/members", "已從「自動收集到的人」移除")
 
     @ui.post("/members/alias")
     def members_alias(raw: str = Form(...), member_name: str = Form("")):

@@ -38,6 +38,9 @@ class FakeLine:
     def group_name(self, group_id):
         return "敬拜團"
 
+    def member_profile(self, chat_id, user_id):
+        return "小美"
+
     def send(self, to, message):
         FakeLine.replies.append((to, message.text))
 
@@ -77,7 +80,29 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
         {"type": "message", "replyToken": "r3", "source": source, "message": {"type": "text", "text": "大家早安"}},
     )
     handler.handle(body, sign(body))
-    assert FakeLine.replies == [("r2", f"你的 LINE ID：\n{uid()}")]
+    assert FakeLine.replies == [("r2", f"你的名字：小美\n你的 LINE ID：\n{uid()}")]
+
+
+def test_message_from_group_is_remembered_as_a_person(handler, paths):
+    from church_bot.service import BotService
+
+    source = {"type": "group", "groupId": gid(), "userId": uid()}
+    body = event_body({"type": "message", "replyToken": "r5", "source": source,
+                       "message": {"type": "text", "text": "大家早安"}})
+    handler.handle(body, sign(body))
+    person = BotService(paths).history.person(uid())
+    assert person and person["display_name"] == "小美" and person["chat_id"] == gid()
+
+
+def test_member_joined_reports_new_member_names_and_ids(handler):
+    body = event_body({
+        "type": "memberJoined",
+        "replyToken": "r4",
+        "source": {"type": "group", "groupId": gid()},
+        "joined": {"members": [{"type": "user", "userId": uid()}]},
+    })
+    handler.handle(body, sign(body))
+    assert FakeLine.replies == [("r4", f"歡迎新朋友加入 🙌\n小美（{uid()}）")]
 
 
 def test_bad_signature_is_rejected(handler):

@@ -4,6 +4,16 @@
 > 以前常用的 **LINE Notify 已在 2025/3/31 停止服務**，現在要用「LINE 官方帳號 + Messaging API」。
 > 費用與額度見 [LINE_PRICING.md](LINE_PRICING.md)。
 
+## 0. 先搞懂：其實是「兩個網站」，這是最容易卡關的地方
+
+| 網站 | 網址開頭 | 拿什麼 / 改什麼 |
+|---|---|---|
+| **LINE Developers**（技術後台） | `developers.line.biz/console/...` | Channel access token、Channel secret、Webhook URL、按 Verify、開 Use webhook |
+| **LINE Official Account Manager**（官方帳號後台，簡稱 OA Manager） | `manager.line.biz/account/...` | 建立官方帳號、頭像介紹、回應設定（聊天模式、自動回應）、帳號設定（加入群組權限） |
+
+兩個網站要**登入同一個 LINE 帳號**，但畫面、選單完全不一樣，同一件事有時兩邊都有入口（例如 Webhook 開關兩邊都能看到，但實際生效、要填網址的地方是 Developers 那邊）。
+下面每一步會註明是在哪個網站。網址裡的 `channel/一串數字` 是你這個 Channel 的內部編號、`@xxxxxxx` 是機器人的官方帳號 ID（加好友用的那個），這兩個都不是密碼，不用特別記，但也不用貼給別人看。
+
 整個流程：
 
 ```
@@ -51,6 +61,9 @@
 | 回應設定 → **Webhook** | 開啟 | 要用「群組ID」「我的ID」指令才需要 |
 | 回應設定 → 加入好友的歡迎訊息 | 隨意 | — |
 
+> 這裡的「Webhook」開關和下一步（LINE Developers）的「Use webhook」是**同一件事的兩個入口**，兩邊都要是開的；
+> 網址、Verify、Channel secret 這些**只有 LINE Developers 那邊**有，OA Manager 這裡沒有。
+
 ## 5. 把機器人加進群組，拿到群組 ID
 
 **先加機器人好友**：LINE Developers「Messaging API」分頁上有 QR code，用手機 LINE 掃描加好友。
@@ -63,6 +76,11 @@ LINE 沒有地方能直接看到「群組 ID」，要讓機器人「聽到」群
 ### 方法 A：用本程式內建的 Webhook（推薦）
 
 機器人會直接在群組回覆 ID，而且**自動幫你加到「👥 群組」頁**。需要一個暫時的公開網址，這裡用免費的 Cloudflare Tunnel：
+
+> ⚠️ **這個網址開著的時候，等於把整個管理網頁（不只是 Webhook）短暫公開到網路上**——
+> 任何拿到這個網址的人都能打開你的管理網頁。如果你還沒在「⚙️ 設定」最下面設定「網頁密碼」，
+> 建議先設一次（一次性動作，之後每次開 tunnel 都有效），或者至少做到「抓完 ID 就馬上關掉 tunnel」（第 7 步）。
+> trycloudflare 給的網址是隨機的、沒有登記在任何地方，只要不貼到公開群組或論壇，通常不會被別人撞到。
 
 1. 安裝 cloudflared（只要裝一次）
    - Windows：開「命令提示字元」，輸入 `winget install --id Cloudflare.cloudflared`

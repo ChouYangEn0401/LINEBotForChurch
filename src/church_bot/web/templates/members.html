@@ -46,6 +46,35 @@
 </section>
 {% endif %}
 
+{% if people %}
+<section class="card">
+  <h2>🔍 自動收集到的人（{{ people | length }} 位，還沒加進人員表）</h2>
+  <p class="muted">有人在群組裡講過話、或加入群組時，機器人會背景記下他的名字和 ID，出現在這裡。按「加入」就會幫你填好名字和 LINE_userId（先停用，確認是誰之後再啟用）。</p>
+  <div class="table-wrap">
+  <table class="table">
+    <thead><tr><th>LINE 名稱</th><th>userId</th><th>最後在哪個群組看到</th><th>最後看到</th><th></th></tr></thead>
+    <tbody>
+    {% for p in people %}
+      <tr>
+        <td>{{ p.display_name or "（抓不到名稱）" }}</td>
+        <td class="id">{{ p.user_id }}</td>
+        <td class="small">{{ p.chat_name or p.chat_id }}</td>
+        <td class="nowrap">{{ p.last_seen[:16] | replace("T", " ") }}</td>
+        <td class="nowrap">
+          <form method="post" action="/members/add-person" class="inline">
+            <input type="hidden" name="user_id" value="{{ p.user_id }}"><input type="hidden" name="name" value="{{ p.display_name }}">
+            <button type="submit" class="primary">加入</button></form>
+          <form method="post" action="/members/forget-person" class="inline" data-confirm="確定不要這筆紀錄了嗎？">
+            <input type="hidden" name="user_id" value="{{ p.user_id }}"><button type="submit" class="danger">忽略</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
 <section class="card">
   <h2>同工名單（{{ members | length }} 位）</h2>
   {% if members %}

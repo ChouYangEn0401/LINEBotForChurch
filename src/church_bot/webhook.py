@@ -8,10 +8,13 @@
 支援的事件：
 * 機器人被加進群組 → 在群組回覆群組 ID，並自動加到「群組表」（先不啟用，管理員確認後再打開）
 * 在群組或私訊打「群組ID」→ 回覆這個聊天室的 ID
-* 打「我的ID」→ 回覆自己的 userId（填到人員表就能被 @；填到設定就能收管理員通知）
+* 打「我的ID」→ 回覆自己的名字＋userId（填到人員表就能被 @；填到設定就能收管理員通知）
+* 有新成員加入群組 → 在群組回報新成員的名字＋userId（只有手機版 LINE 使用者才會有 userId）
 * 機器人被踢出群組 → 通知管理員（那個群組以後收不到提醒了）
+* 任何人在群組講話 → 背景記錄他的名字＋userId（不用開口特別問，講一句話就記住），
+  在「🙋 人員」頁會看到「自動收集到的人」，一鍵就能加進人員表
 
-一般聊天內容一律不回應，不會吵到群組。回覆（Reply API）不計入 LINE 每月額度。
+一般聊天內容一律不回應，不會吵到群組。回覆（Reply API）、查名字（Get profile）都不計入 LINE 每月額度。
 """
 
 from __future__ import annotations
@@ -100,32 +103,64 @@ class WebhookHandler:
             log.info("機器人被加進%s：%s（%s）", "群組" if kind == "group" else "聊天室", name or "?", chat_id)
             note = "已自動加到管理網頁的「群組」頁（尚未啟用）。" if added else "這個群組已經在「群組」頁裡了。"
             messenger.reply(reply_token, f"大家好！我是服事提醒小幫手 🙌\n這個群組的 ID：\n{chat_id}\n\n管理員：{note}")
+        elif etype == "memberJoined":
+            self._report_new_members(event, chat_id, kind, reply_token, messenger)
         elif etype == "leave":
             history.remember_chat(chat_id, kind, status="left")
             log.warning("機器人被移出群組：%s", chat_id)
             self._alert_left(chat_id, messenger, admin_id)
         elif etype == "follow":
             history.remember_chat(chat_id, "user")
-            messenger.reply(reply_token, f"謝謝你加我好友 🙌\n你的 LINE ID：\n{chat_id}\n\n{HELP_TEXT}")
+            name = self._touch_person(chat_id, chat_id, "user", messenger)
+            greeting = f" 你好，{name}！" if name else ""
+            messenger.reply(reply_token, f"謝謝你加我好友 🙌{greeting}\n你的 LINE ID：\n{chat_id}\n\n{HELP_TEXT}")
         elif etype == "message" and event.get("message", {}).get("type") == "text":
             if kind in ("group", "room"):
                 history.remember_chat(chat_id, kind)
+            user_id = source.get("userId", "")
+            name = self._touch_person(user_id, chat_id, kind, messenger) if user_id else ""
             self._handle_command(_normalize(event["message"].get("text", "")), source, chat_id, kind,
-                                 reply_token, messenger)
+                                 reply_token, messenger, name)
 
     def _handle_command(self, text: str, source: dict, chat_id: str, kind: str, reply_token: str,
-                        messenger: LineMessenger) -> None:
+                        messenger: LineMessenger, name: str = "") -> None:
         if text in CMD_CHAT_ID:
             label = {"group": "群組", "room": "聊天室", "user": "你的"}.get(kind, "")
             messenger.reply(reply_token, f"這個{label} ID：\n{chat_id}")
         elif text in CMD_MY_ID:
             uid = source.get("userId")
-            messenger.reply(reply_token, f"你的 LINE ID：\n{uid}" if uid else
-                            "抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「我的ID」。")
+            if not uid:
+                messenger.reply(reply_token, "抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「我的ID」。")
+            else:
+                who = f"你的名字：{name}\n" if name else ""
+                messenger.reply(reply_token, f"{who}你的 LINE ID：\n{uid}")
         elif text in CMD_HELP:
             messenger.reply(reply_token, HELP_TEXT)
 
+    def _report_new_members(self, event: dict, chat_id: str, kind: str, reply_token: str,
+                            messenger: LineMessenger) -> None:
+        members = event.get("joined", {}).get("members", [])
+        uids = [m.get("userId") for m in members if m.get("type") == "user" and m.get("userId")]
+        if not uids:
+            return
+        lines = []
+        for uid in uids:
+            name = self._touch_person(uid, chat_id, kind, messenger)
+            lines.append(f"{name}（{uid}）" if name else uid)
+        messenger.reply(reply_token, "歡迎新朋友加入 🙌\n" + "\n".join(lines))
+
     # ------------------------------------------------------------------ helpers
+
+    def _touch_person(self, user_id: str, chat_id: str, kind: str, messenger: LineMessenger) -> str:
+        """背景記錄一個人（被動收集，見檔案開頭說明），回傳目前已知的顯示名稱（可能是空字串）。"""
+        history = self.service.history
+        known = history.person(user_id)
+        name = known["display_name"] if known else ""
+        if not name:
+            lookup_id = chat_id if kind in ("group", "room") else user_id
+            name = messenger.member_profile(lookup_id, user_id)
+        history.remember_person(user_id, name, chat_id)
+        return name
 
     def _auto_add_target(self, chat_id: str, name: str) -> bool:
         table = TargetTable(self.service.paths.targets_file)

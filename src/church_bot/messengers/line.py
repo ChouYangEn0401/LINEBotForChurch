@@ -131,6 +131,15 @@ class LineMessenger:
         except MessengerError:
             return ""
 
+    def member_profile(self, chat_id: str, user_id: str) -> str:
+        """某人的顯示名稱。群組/多人聊天室成員不用是好友也查得到；1 對 1 私訊要對方是好友（或 7 天內私訊過）。"""
+        kind = {"C": "group", "R": "room"}.get(chat_id[:1])
+        path = f"/v2/bot/{kind}/{chat_id}/member/{user_id}" if kind else f"/v2/bot/profile/{user_id}"
+        try:
+            return str(self._request("GET", path).json().get("displayName", ""))
+        except MessengerError:
+            return ""
+
     def close(self) -> None:
         self._client.close()
 

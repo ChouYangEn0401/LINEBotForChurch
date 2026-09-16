@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS chats (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS people (
+    user_id TEXT PRIMARY KEY,
+    display_name TEXT NOT NULL DEFAULT '',
+    chat_id TEXT NOT NULL DEFAULT '',
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL
+);
 """
 
 
@@ -214,3 +222,33 @@ class History:
     def forget_chat(self, chat_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM chats WHERE chat_id=?", (chat_id,))
+
+    # ------------------------------------------------------------------ people seen via webhook
+
+    def person(self, user_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM people WHERE user_id=?", (user_id,)).fetchone()
+        return dict(row) if row else None
+
+    def remember_person(self, user_id: str, display_name: str = "", chat_id: str = "") -> None:
+        now = _now()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO people (user_id, display_name, chat_id, first_seen, last_seen) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET display_name=CASE WHEN excluded.display_name != '' "
+                "THEN excluded.display_name ELSE people.display_name END, chat_id=excluded.chat_id, "
+                "last_seen=excluded.last_seen",
+                (user_id, display_name, chat_id, now, now),
+            )
+
+    def people(self) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT people.*, chats.name AS chat_name FROM people "
+                "LEFT JOIN chats ON chats.chat_id = people.chat_id ORDER BY people.last_seen DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def forget_person(self, user_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("DELETE FROM people WHERE user_id=?", (user_id,))
