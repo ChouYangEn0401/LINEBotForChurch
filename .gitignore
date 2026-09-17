@@ -1,8 +1,8 @@
-# ---- 機密（絕對不要上傳）----
+# ---- 機密與教會資料（絕對不要上傳）----
 .env
 config/settings.yaml
-config/targets.csv
-config/members.csv
+# 群組表、同工名單、組織架構、範例服事表…所有 CSV 都是教會自己的資料；只有 *.example.* 範例檔會上傳
+config/*.csv
 config/*.json
 !config/*.example.*
 credentials*.json
@@ -30,4 +30,3 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
-config/roster.demo.csv
