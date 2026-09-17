@@ -127,4 +127,5 @@ legend { font-weight: 700; padding: 0 6px; }
               border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 6px 0 12px; }
 .toggle-box.on { background: var(--ok-bg); border-color: var(--ok); }
 .table tr.pending td { background: var(--warn-bg); }
+.pending-change { border-color: var(--warn); background: var(--warn-bg); }
 details > summary { cursor: pointer; margin: 8px 0; }

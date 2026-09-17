@@ -24,6 +24,19 @@
 </header>
 <main>
   {% if flash %}<div class="flash {{ flash_level }}">{{ flash }}</div>{% endif %}
+  {% if pending_change %}
+  <section class="card pending-change">
+    <strong>🔐 有人在 LINE 要修改設定，正在等驗證碼</strong>
+    <div>{{ pending_change.requester or "（沒有名稱）" }}（{{ pending_change.chat_label }}）要把「{{ pending_change.option.key }}」
+      改成「{{ pending_change.value_text }}」・還有 {{ pending_minutes }} 分鐘</div>
+    <div class="actions">
+      <form method="post" action="/remote-config/approve" data-confirm="確定核准：{{ pending_change.option.key }} → {{ pending_change.value_text }}？">
+        <button type="submit" class="primary">✅ 核准</button></form>
+      <form method="post" action="/remote-config/reject"><button type="submit" class="danger">❌ 拒絕</button></form>
+    </div>
+    <div class="muted small">驗證碼只顯示在執行機器人的視窗和管理員的 LINE。在這裡按「核准」等於輸入了正確的驗證碼；不認得這個請求就按「拒絕」。</div>
+  </section>
+  {% endif %}
   {% block content %}{% endblock %}
 </main>
 <footer>

@@ -36,6 +36,7 @@ from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
 from church_bot.models import DeliveryStatus, Member, OutgoingMessage, RunReport, Severity, Target
+from church_bot.remote_config import Verifier
 from church_bot.scheduler import BotScheduler
 from church_bot.service import BotService
 from church_bot.sources import SOURCE_KINDS_ZH
@@ -90,6 +91,8 @@ def form_values(s: Settings) -> dict[str, Any]:
         "lookahead_days": s.behavior.lookahead_days, "resend_if_changed": s.behavior.resend_if_changed,
         "roster_low_warning_days": s.behavior.roster_low_warning_days,
         "warn_unknown_names": s.behavior.warn_unknown_names,
+        "collect_names": s.chat.collect_names, "remote_config": s.chat.remote_config,
+        "send_code_to_admin": s.chat.send_code_to_admin,
     }
 
 
@@ -122,6 +125,8 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
     data["line"]["admin_target_id"] = f.get("admin_target_id", "").strip()
     data["behavior"].update(lookahead_days=lookahead, resend_if_changed=on("resend_if_changed"),
                             roster_low_warning_days=low_days, warn_unknown_names=on("warn_unknown_names"))
+    data["chat"].update(collect_names=on("collect_names"), remote_config=on("remote_config"),
+                        send_code_to_admin=on("send_code_to_admin"))
     try:
         new = Settings.model_validate(data)
     except ValidationError as exc:
@@ -140,7 +145,7 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
 def create_app(paths: Paths) -> FastAPI:
     service = BotService(paths)
     scheduler = BotScheduler(service)
-    webhook = WebhookHandler(service)
+    webhook = WebhookHandler(service, Verifier(), on_settings_changed=scheduler.reload)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals.update(
         version=__version__, weekday_zh=WEEKDAY_ZH, describe_line_id=describe_line_id, fmt_list=fmt_list,
@@ -158,6 +163,7 @@ def create_app(paths: Paths) -> FastAPI:
 
     app = FastAPI(title="教會服事提醒機器人", version=__version__, lifespan=lifespan)
     app.mount("/static", StaticFiles(directory=str(HERE / "static")), name="static")
+    app.state.webhook = webhook
 
     SESSION_COOKIE = "church_bot_session"
 
@@ -186,8 +192,11 @@ def create_app(paths: Paths) -> FastAPI:
     def page(request: Request, name: str, **ctx: Any) -> HTMLResponse:
         ctx.setdefault("flash", request.query_params.get("msg", ""))
         ctx.setdefault("flash_level", request.query_params.get("level", "ok"))
+        pending = webhook.verifier.current()
         base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status,
-                "next_run": scheduler.next_run_text(), "has_password": bool(current_password())}
+                "next_run": scheduler.next_run_text(), "has_password": bool(current_password()),
+                "pending_change": pending,
+                "pending_minutes": webhook.verifier.minutes_left(pending) if pending else 0}
         return templates.TemplateResponse(request, name, {**base, **ctx})
 
     @app.exception_handler(LoginRequired)
@@ -495,6 +504,22 @@ def create_app(paths: Paths) -> FastAPI:
             save_settings(paths, new)
         await run_in_threadpool(scheduler.reload)
         return _redirect("/settings", f"設定已儲存。自動發送：{scheduler.status}")
+
+    @ui.post("/remote-config/approve")
+    def remote_config_approve():
+        pending = webhook.verifier.take("管理網頁核准")
+        if pending is None:
+            return _redirect("/", "這個修改已經過期或被處理掉了", "warn")
+        webhook.apply(pending)
+        return _redirect("/", f"已核准：{pending.option.key} → {pending.value_text}（LINE 那邊不會另外通知）")
+
+    @ui.post("/remote-config/reject")
+    def remote_config_reject():
+        pending = webhook.verifier.take("管理網頁拒絕")
+        if pending is not None:
+            log.warning("管理網頁拒絕了 LINE 設定修改：%s → %s（%s）", pending.option.key, pending.value_text,
+                        pending.requester or pending.user_id)
+        return _redirect("/", "已拒絕這個修改" if pending else "這個修改已經過期或被處理掉了")
 
     @ui.post("/settings/secrets")
     def settings_secrets(token: str = Form(""), secret: str = Form(""), password: str = Form(""),

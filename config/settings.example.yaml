@@ -99,3 +99,7 @@ chat:
   # 開放大家在 LINE 打「/我的名字 王小明」登記真實姓名（登記後要管理員在「同工名單」頁確認才會生效）
   # 平常建議關著（false），要收集時才打開，用完關掉，避免有人亂填
   collect_names: false
+  # 允許在 LINE 打「/設定 收集名單=開」這類指令修改少數設定（每次都要一次性驗證碼）
+  remote_config: true
+  # 驗證碼除了顯示在執行程式的畫面，也用 LINE 私訊管理員（line.admin_target_id；每次 1 則，每天最多 10 次）
+  send_code_to_admin: true

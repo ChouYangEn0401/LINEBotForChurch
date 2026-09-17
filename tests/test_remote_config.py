@@ -1,0 +1,219 @@
+import datetime as dt
+import re
+
+import pytest
+
+from church_bot.config import Settings, load_settings, save_settings
+from church_bot.remote_config import (
+    MAX_CODE_PUSHES_PER_DAY, NothingPending, OPTIONS, Verifier, VerifyError, find_option, parse_assignment,
+)
+from tests.line_fakes import FakeLine, gid, say, sign, uid
+
+COLLECT = find_option("收集名單")
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = dt.datetime(2026, 9, 17, 20, 0, tzinfo=dt.timezone(dt.timedelta(hours=8)))
+
+    def __call__(self) -> dt.datetime:
+        return self.now
+
+    def advance(self, **kwargs) -> None:
+        self.now += dt.timedelta(**kwargs)
+
+
+# ------------------------------------------------------------------ parsing
+
+
+@pytest.mark.parametrize(("arg", "expected"), [
+    ("收集名單=開", ("收集名單", "開")),
+    ("收集名單 = 開", ("收集名單", "開")),
+    ("收集名單：開", ("收集名單", "開")),
+    ('"COLLECT_MEMBER":"true"', ("COLLECT_MEMBER", "true")),
+    ("「收集名單」 關", ("收集名單", "關")),
+    ("收集名單", ("收集名單", "")),
+])
+def test_parse_assignment(arg, expected):
+    assert parse_assignment(arg) == expected
+
+
+def test_find_option_accepts_aliases_in_any_case():
+    assert find_option("COLLECT_MEMBER") is COLLECT
+    assert find_option("collect-members") is COLLECT
+    assert find_option("Every_N_Weeks").key == "每幾週"
+    assert find_option("line_token") is None
+
+
+def test_option_values():
+    assert COLLECT.parse("activate") is True and COLLECT.parse("關") is False
+    with pytest.raises(ValueError):
+        COLLECT.parse("maybe")
+    weeks = find_option("每幾週")
+    with pytest.raises(ValueError):
+        weeks.parse("9")
+    settings = Settings()
+    weeks.apply(settings, 2)
+    assert settings.schedule.every_n_weeks == 2 and settings.behavior.lookahead_days == 14
+
+
+def test_secrets_and_admin_can_never_be_changed_from_chat():
+    reachable = {k for o in OPTIONS for k in (o.key, *o.aliases)}
+    assert not {"line_channel_access_token", "channel_secret", "ui_password", "admin_target_id"} & reachable
+
+
+# ------------------------------------------------------------------ verifier
+
+
+def test_correct_code_is_single_use():
+    verifier = Verifier()
+    pending, code = verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    assert re.fullmatch(r"\d{6}", code) and pending.value_text == "開"
+    assert code not in repr(pending)  # 驗證碼本身不會被保存
+    assert verifier.submit(uid(), gid(), code) is pending
+    with pytest.raises(NothingPending):
+        verifier.submit(uid(), gid(), code)
+
+
+def test_only_the_requester_in_the_same_chat_can_verify():
+    verifier = Verifier()
+    _, code = verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    with pytest.raises(NothingPending):
+        verifier.submit(uid("c"), gid(), code)
+    with pytest.raises(NothingPending):
+        verifier.submit(uid(), gid("d"), code)
+    assert verifier.current() is not None
+
+
+def test_three_wrong_codes_cancel_the_request():
+    verifier = Verifier()
+    _, code = verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    wrong = "000000" if code != "000000" else "111111"
+    for left in ("2", "1"):
+        with pytest.raises(VerifyError, match=left):
+            verifier.submit(uid(), gid(), wrong)
+    with pytest.raises(VerifyError, match="取消"):
+        verifier.submit(uid(), gid(), wrong)
+    with pytest.raises(NothingPending):
+        verifier.submit(uid(), gid(), code)
+
+
+def test_code_expires_after_five_minutes():
+    clock = Clock()
+    verifier = Verifier(clock)
+    _, code = verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    clock.advance(minutes=5)
+    with pytest.raises(NothingPending):
+        verifier.submit(uid(), gid(), code)
+
+
+def test_one_request_at_a_time():
+    verifier = Verifier()
+    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    with pytest.raises(VerifyError, match="還在等驗證碼"):
+        verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    with pytest.raises(VerifyError, match="別人"):
+        verifier.start(COLLECT, True, user_id=uid("c"), chat_id=gid())
+    assert verifier.cancel(uid(), gid())
+    verifier.start(COLLECT, True, user_id=uid("c"), chat_id=gid())
+
+
+def test_line_pushes_are_capped_per_day():
+    clock = Clock()
+    verifier = Verifier(clock)
+    assert all(verifier.allow_push() for _ in range(MAX_CODE_PUSHES_PER_DAY))
+    assert not verifier.allow_push()
+    clock.advance(days=1, seconds=1)
+    assert verifier.allow_push()
+
+
+# ------------------------------------------------------------------ LINE flow
+
+
+@pytest.fixture
+def line_handler(handler, paths):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    return handler
+
+
+def test_change_setting_from_line_with_code_sent_to_admin(line_handler, paths, capsys):
+    body = say("/設定 收集名單=開")
+    line_handler.handle(body, sign(body))
+    to_admin = [text for to, text in FakeLine.replies if to == uid("f")]
+    assert len(to_admin) == 1 and "收集名單 → 開" in to_admin[0]
+    code = re.search(r"驗證碼：(\d{6})", to_admin[0])[1]
+    assert code in capsys.readouterr().out  # 也印在執行程式的畫面上
+    requester_reply = FakeLine.replies[-1][1]
+    assert "需要驗證碼" in requester_reply and code not in requester_reply
+    assert not load_settings(paths).chat.collect_names
+
+    body = say(f"/驗證 {code}")
+    line_handler.handle(body, sign(body))
+    assert FakeLine.replies[-1][1] == "✅ 已更新：收集名單 → 開"
+    assert load_settings(paths).chat.collect_names
+    assert code not in (paths.data_dir / "church_bot.db").read_bytes().decode("latin-1")
+
+
+def test_bare_six_digits_count_only_for_the_requester(line_handler, paths):
+    body = say("/config COLLECT_MEMBER:true")
+    line_handler.handle(body, sign(body))
+    code = re.search(r"驗證碼：(\d{6})", next(t for to, t in FakeLine.replies if to == uid("f")))[1]
+    replies_before = len(FakeLine.replies)
+    body = say(code, user=uid("c"))  # 別人打同樣的數字：當作一般聊天，不回應
+    line_handler.handle(body, sign(body))
+    assert len(FakeLine.replies) == replies_before
+    body = say(code)
+    line_handler.handle(body, sign(body))
+    assert load_settings(paths).chat.collect_names
+
+
+def test_remote_config_can_be_turned_off(line_handler, paths):
+    settings = load_settings(paths)
+    settings.chat.remote_config = False
+    save_settings(paths, settings)
+    body = say("/設定 收集名單=開")
+    line_handler.handle(body, sign(body))
+    assert "沒有開放" in FakeLine.replies[-1][1]
+    assert line_handler.verifier.current() is None
+
+
+def test_listing_and_unknown_options_need_no_code(line_handler):
+    for text in ("/設定", "/設定 密碼=1234", "/設定 收集名單", "/設定 收集名單=關"):
+        body = say(text)
+        line_handler.handle(body, sign(body))
+    replies = [t for _, t in FakeLine.replies]
+    assert "可以用 LINE 修改的設定" in replies[0]
+    assert "沒有「密碼」這個設定" in replies[1]
+    assert "目前是「關」" in replies[2]
+    assert "本來就是「關」" in replies[3]
+    assert line_handler.verifier.current() is None
+
+
+# ------------------------------------------------------------------ web approve / reject
+
+
+def test_web_shows_pending_change_and_can_approve(client, paths):
+    verifier = client.app.state.webhook.verifier
+    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid(), requester="小美", chat_label="敬拜團")
+    page = client.get("/").text
+    assert "小美（敬拜團）要把「收集名單」" in page
+    client.post("/remote-config/approve")
+    assert load_settings(paths).chat.collect_names and verifier.current() is None
+
+
+def test_web_reject(client, paths):
+    verifier = client.app.state.webhook.verifier
+    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
+    client.post("/remote-config/reject")
+    assert verifier.current() is None and not load_settings(paths).chat.collect_names
+
+
+def test_settings_page_saves_chat_switches(client, paths):
+    form = {"source_kind": "csv", "csv_path": "config/roster.demo.csv", "day_of_week": "sat", "time": "20:00",
+            "timezone": "Asia/Taipei", "lookahead_days": "7", "roster_low_warning_days": "14", "every_n_weeks": "1",
+            "messenger_kind": "console", "collect_names": "on"}
+    client.post("/settings", data=form)
+    chat = load_settings(paths).chat
+    assert chat.collect_names and not chat.remote_config and not chat.send_code_to_admin

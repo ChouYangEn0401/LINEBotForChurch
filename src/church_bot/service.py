@@ -98,7 +98,7 @@ class BotService:
                 Severity.WARNING, "lookahead_too_short",
                 f"設定成每 {settings.schedule.every_n_weeks} 週發送一次，但「往後看幾天」只有"
                 f"{settings.behavior.lookahead_days} 天，下一次發送前那幾週的服事可能不會出現在提醒裡",
-                f"到「設定 → ⑤ 進階」把「往後看幾天」改成至少 {span} 天。",
+                f"到「設定 → ⑥ 進階」把「往後看幾天」改成至少 {span} 天。",
             ))
         return Context(settings, targets, members, issues)
 

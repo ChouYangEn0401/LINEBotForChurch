@@ -160,6 +160,10 @@ class ChatSettings(_Base):
 
     # 開放大家打「/我的名字 王小明」登記真實姓名。平常關著，要收集時才打開，避免有人亂填
     collect_names: bool = False
+    # 允許在 LINE 打「/設定 名稱=值」修改少數設定；每次都要輸入一次性驗證碼（見 remote_config.py）
+    remote_config: bool = True
+    # 驗證碼除了顯示在執行程式的畫面，也用 LINE 私訊管理員（每次算 1 則，每天最多 10 次）
+    send_code_to_admin: bool = True
 
 
 class Settings(_Base):

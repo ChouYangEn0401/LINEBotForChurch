@@ -115,8 +115,30 @@
     </div>
   </fieldset>
 
+  <fieldset id="chat">
+    <legend>⑤ LINE 聊天室指令</legend>
+    <p class="muted small">大家在群組或私訊機器人打「/」開頭的指令（例如 <span class="kbd">/我的ID</span>）。需要設定 Webhook 才會有反應，見「說明」。</p>
+    <div class="form-grid">
+      <label>名字登記</label>
+      <div class="checkbox-row"><input type="checkbox" id="collect_names" name="collect_names" {{ "checked" if f.collect_names }}>
+        <label for="collect_names">開放大家打 <span class="kbd">/我的名字 王小明</span> 登記真實姓名</label></div>
+      <div class="help">登記後要到「同工名單 → LINE 帳號」確認才會生效。平常建議關著，要收集時再打開，避免有人亂填。</div>
+
+      <label>用 LINE 改設定</label>
+      <div class="checkbox-row"><input type="checkbox" id="remote_config" name="remote_config" {{ "checked" if f.remote_config }}>
+        <label for="remote_config">允許打 <span class="kbd">/設定 收集名單=開</span> 修改少數設定</label></div>
+      <div class="help">每次修改都要輸入一次性驗證碼（6 位數、5 分鐘有效、錯 3 次作廢）。能改的只有「收集名單」「自動發送」「每幾週」，
+        LINE 金鑰、密碼、管理員永遠不能從聊天室改。有人正在等驗證時，這個網頁最上面也會出現「核准／拒絕」按鈕。</div>
+
+      <label>驗證碼私訊管理員</label>
+      <div class="checkbox-row"><input type="checkbox" id="send_code_to_admin" name="send_code_to_admin" {{ "checked" if f.send_code_to_admin }}>
+        <label for="send_code_to_admin">除了顯示在執行機器人的視窗，也用 LINE 私訊給上面的管理員</label></div>
+      <div class="help">每次私訊算 1 則（管理員填群組的話按人數算），每天最多 10 次，超過就只顯示在視窗上，不會被有心人拿來耗光額度。</div>
+    </div>
+  </fieldset>
+
   <fieldset>
-    <legend>⑤ 進階</legend>
+    <legend>⑥ 進階</legend>
     <div class="form-grid">
       <label for="messenger_kind">發送方式</label>
       <select id="messenger_kind" name="messenger_kind">

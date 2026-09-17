@@ -248,6 +248,11 @@ class History:
             rows = conn.execute("SELECT * FROM chats ORDER BY last_seen DESC").fetchall()
         return [dict(r) for r in rows]
 
+    def chat(self, chat_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute("SELECT * FROM chats WHERE chat_id=?", (chat_id,)).fetchone()
+        return dict(row) if row else None
+
     def forget_chat(self, chat_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM chats WHERE chat_id=?", (chat_id,))

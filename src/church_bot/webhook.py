@@ -8,6 +8,8 @@
 指令一律「/」開頭（全形「／」也可以），一般聊天不會誤觸：
 * /群組ID → 回覆這個聊天室的 ID
 * /我的ID → 回覆自己的名字＋userId（填到人員表就能被 @；填到設定就能收管理員通知）
+* /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
+* /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
 * /說明 → 列出指令
 
 支援的事件：
@@ -29,13 +31,19 @@ import hmac
 import json
 import logging
 import re
+import sys
 import unicodedata
 from dataclasses import dataclass
+from typing import Callable
 
 from church_bot.config import Settings, load_settings
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers.line import LineMessenger
 from church_bot.models import OutgoingMessage, Target
+from church_bot.remote_config import (
+    CODE_RE, CODE_TTL, PendingChange, Verifier, VerifyError, apply_change, describe_options, find_option,
+    parse_assignment,
+)
 from church_bot.service import BotService
 from church_bot.tables import TABLE_WRITE_LOCK, TargetTable
 
@@ -46,9 +54,12 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "chat_id": ("群組id", "群id", "群組代號", "groupid", "chatid", "id"),
     "my_id": ("我的id", "myid", "me", "userid"),
     "help": ("說明", "指令", "help", "?"),
+    "cancel": ("取消", "cancel"),
     "my_name": ("我的名字", "名字", "myname", "name"),
+    "config": ("設定", "config", "setting", "set"),
+    "verify": ("驗證碼", "驗證", "verify", "code"),
 }
-NO_ARGUMENT = {"chat_id", "my_id", "help"}
+NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -60,6 +71,7 @@ HELP_TEXT = (
     "・/群組ID：這個聊天室的 ID\n"
     "・/我的ID：你自己的 ID\n"
     "・/我的名字 王小明：登記你的真實姓名（管理員開放時才能用）\n"
+    "・/設定：用 LINE 修改機器人設定（要驗證碼）\n"
     "・/說明：顯示這段說明\n"
     "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
 )
@@ -126,9 +138,22 @@ class SignatureError(ChurchBotError):
     pass
 
 
+def _print_to_screen(text: str) -> None:
+    """印在執行程式的視窗上（不寫進記錄檔）。沒有視窗（背景執行）時什麼都不做。"""
+    if sys.stdout is None:
+        return
+    try:
+        print(text, flush=True)
+    except (UnicodeEncodeError, OSError):
+        print(text.encode("ascii", errors="replace").decode("ascii"), flush=True)
+
+
 class WebhookHandler:
-    def __init__(self, service: BotService) -> None:
+    def __init__(self, service: BotService, verifier: Verifier | None = None,
+                 on_settings_changed: Callable[[], None] | None = None) -> None:
         self.service = service
+        self.verifier = verifier or Verifier()
+        self.on_settings_changed = on_settings_changed
 
     def handle(self, body: bytes, signature: str) -> int:
         """回傳處理了幾個事件。簽章不對丟 SignatureError；沒設定 secret 丟 ConfigError。"""
@@ -184,7 +209,12 @@ class WebhookHandler:
                 history.remember_chat(chat_id, kind)
             user_id = source.get("userId", "")
             name = self._touch_person(user_id, chat_id, kind, messenger) if user_id else ""
-            command = parse_command(event["message"].get("text", ""))
+            text = event["message"].get("text", "")
+            command = parse_command(text)
+            if command is None and user_id and self.verifier.waiting_for(user_id, chat_id):
+                bare = re.sub(r"\s+", "", unicodedata.normalize("NFKC", text))
+                if CODE_RE.fullmatch(bare):  # 等驗證碼的人直接打 6 位數字也算
+                    command = Command("verify", bare)
             if command is not None:
                 chat = _Chat(settings, messenger, reply_token, chat_id, kind, user_id, name)
                 self._handle_command(command, chat)
@@ -201,8 +231,100 @@ class WebhookHandler:
                 chat.reply(f"{who}你的 LINE ID：\n{chat.user_id}")
         elif command.name == "my_name":
             self._register_name(command.arg, chat)
+        elif command.name == "config":
+            self._request_change(command.arg, chat)
+        elif command.name == "verify":
+            self._verify(command.arg, chat)
+        elif command.name == "cancel":
+            cancelled = bool(chat.user_id) and self.verifier.cancel(chat.user_id, chat.chat_id)
+            chat.reply("已取消這次的設定修改。" if cancelled else "目前沒有等你驗證的設定修改。")
         elif command.name == "help":
             chat.reply(HELP_TEXT)
+
+    # ------------------------------------------------------------------ /設定（見 remote_config.py）
+
+    def _request_change(self, arg: str, chat: _Chat) -> None:
+        settings = chat.settings
+        if not settings.chat.remote_config:
+            chat.reply("目前沒有開放用 LINE 修改設定（管理網頁「設定 → LINE 聊天室指令」可以打開）。")
+            return
+        if not arg:
+            chat.reply(describe_options(settings))
+            return
+        if not chat.user_id:
+            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
+            return
+        key, value_text = parse_assignment(arg)
+        option = find_option(key)
+        if option is None:
+            chat.reply(f"沒有「{key}」這個設定。\n\n{describe_options(settings)}")
+            return
+        if not value_text:
+            chat.reply(f"「{option.key}」目前是「{option.current(settings)}」。\n"
+                       f"要修改請打：/設定 {option.key}=新的值（{option.hint}）")
+            return
+        try:
+            value = option.parse(value_text)
+        except ValueError as exc:
+            chat.reply(f"「{option.key}」的值看不懂：{exc}")
+            return
+        if option.show(value) == option.current(settings):
+            chat.reply(f"「{option.key}」本來就是「{option.show(value)}」，不用改。")
+            return
+        chat_info = self.service.history.chat(chat.chat_id) or {}
+        label = chat_info.get("name") or {"group": "群組", "room": "多人聊天室", "user": "私訊"}.get(chat.kind, "")
+        try:
+            pending, code = self.verifier.start(option, value, user_id=chat.user_id, chat_id=chat.chat_id,
+                                                requester=chat.display_name, chat_label=label)
+        except VerifyError as exc:
+            chat.reply(exc.message)
+            return
+        where = self._deliver_code(pending, code, chat)
+        minutes = int(CODE_TTL.total_seconds() // 60)
+        chat.reply(f"🔐 要把「{option.key}」改成「{pending.value_text}」，需要驗證碼。\n{where}\n"
+                   f"請在 {minutes} 分鐘內打「/驗證 六位數字」（或直接打那 6 個數字）。打 /取消 可以取消。")
+
+    def _deliver_code(self, pending: PendingChange, code: str, chat: _Chat) -> str:
+        """把驗證碼送到打指令的人以外的地方，回傳「驗證碼在哪裡」的說明。"""
+        who = pending.requester or pending.user_id
+        _print_to_screen(f"\n🔐 [LINE 設定驗證碼] {who}（{pending.chat_label}）要把「{pending.option.key}」"
+                         f"改成「{pending.value_text}」→ 驗證碼：{code}（5 分鐘內有效，只能用一次）\n")
+        log.warning("LINE 設定修改等待驗證：%s（%s）要把「%s」改成「%s」", who, pending.chat_label, pending.option.key,
+                    pending.value_text)
+        on_screen = "驗證碼顯示在執行機器人的電腦畫面上（管理網頁也可以直接核准）。"
+        admin = chat.settings.line.admin_target_id
+        if not (chat.settings.chat.send_code_to_admin and admin):
+            return on_screen
+        if not self.verifier.allow_push():
+            log.warning("今天用 LINE 私訊驗證碼的次數已達上限，這次只顯示在電腦畫面上")
+            return on_screen
+        text = (f"🔐 有人要用 LINE 修改機器人設定\n・誰：{who}\n・在哪裡：{pending.chat_label}\n"
+                f"・要改：{pending.option.key} → {pending.value_text}\n\n驗證碼：{code}\n\n"
+                "5 分鐘內有效、只能用一次。是你同意的修改才把驗證碼告訴對方；不是的話不用理它，時間到自動失效。")
+        try:
+            chat.messenger.send(admin, OutgoingMessage(text=text))
+        except ChurchBotError as exc:
+            log.error("用 LINE 私訊驗證碼給管理員失敗：%s", exc)
+            return on_screen
+        return "驗證碼已經私訊給管理員，也顯示在執行機器人的電腦畫面上。"
+
+    def _verify(self, arg: str, chat: _Chat) -> None:
+        code = re.sub(r"\s+", "", arg)
+        if not CODE_RE.fullmatch(code):
+            chat.reply("驗證碼是 6 位數字，例如：/驗證 123456")
+            return
+        try:
+            pending = self.verifier.submit(chat.user_id, chat.chat_id, code)
+        except VerifyError as exc:
+            chat.reply(exc.message)
+            return
+        self.apply(pending)
+        chat.reply(f"✅ 已更新：{pending.option.key} → {pending.value_text}")
+
+    def apply(self, pending: PendingChange) -> None:
+        apply_change(self.service.paths, pending)
+        if pending.option.reschedule and self.on_settings_changed is not None:
+            self.on_settings_changed()
 
     def _register_name(self, arg: str, chat: _Chat) -> None:
         """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""
