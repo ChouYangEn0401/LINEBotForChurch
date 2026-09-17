@@ -161,3 +161,9 @@
 - JSON API：管理網頁開著時看 <http://127.0.0.1:8787/docs>
 - 架構、錯誤處理原則、**怎麼把 LINE／Google Sheet 換成別的服務**：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - 版本紀錄：[CHANGELOG.md](CHANGELOG.md)
+
+---
+
+## 授權
+
+[MIT License](LICENSE)：任何教會或個人都可以自由使用、修改、再散布，只要保留授權聲明。

@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "教會服事表 LINE 自動提醒機器人"
 requires-python = ">=3.11"
 readme = "README.md"
+license = {text = "MIT"}
 dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
