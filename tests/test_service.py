@@ -144,7 +144,9 @@ def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
     me = uid("9")
     TargetTable(paths.targets_file).save([Target("我自己", me, enabled=True)])
 
-    report, _ = BotService(paths).run("cli")
+    svc = BotService(paths)
+    svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    report, _ = svc.run("cli")
     assert statuses(report) == [("我自己", DeliveryStatus.SENT)]
     assert fake.texts_to(me) and "王牧師" in fake.texts_to(me)[0]  # 沒設人員表，名字照服事表原樣顯示
 
