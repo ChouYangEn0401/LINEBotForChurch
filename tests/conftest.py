@@ -9,16 +9,9 @@ from church_bot.config import Paths
 from church_bot.errors import MessengerError
 from church_bot.messengers.base import Quota, SendResult
 from church_bot.models import OutgoingMessage
+from tests.line_fakes import gid, uid  # noqa: F401 - 很多測試檔從 conftest 匯入
 
 TODAY = dt.date(2026, 9, 11)  # 星期五；最近的主日是 9/13
-
-
-def gid(ch: str = "a") -> str:
-    return "C" + ch * 32
-
-
-def uid(ch: str = "b") -> str:
-    return "U" + ch * 32
 
 
 def write(path: Path, text: str) -> Path:
@@ -70,6 +63,21 @@ def paths(tmp_path: Path) -> Paths:
     (tmp_path / "data").mkdir()
     return Paths(tmp_path)
 
+
+@pytest.fixture
+def handler(paths: Paths, monkeypatch: pytest.MonkeyPatch):
+    """LINE Webhook 處理器，LINE 換成 tests/line_fakes.py 的 FakeLine。"""
+    from church_bot.service import BotService
+    from church_bot.webhook import WebhookHandler
+    from tests.line_fakes import SECRET, FakeLine
+
+    write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\n")
+    FakeLine.reset()
+    monkeypatch.setattr("church_bot.webhook.LineMessenger", FakeLine)
+    return WebhookHandler(BotService(paths))
+
+
+# --------------------------------------------------------------------------- web
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 

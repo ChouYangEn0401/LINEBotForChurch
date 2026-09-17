@@ -1,8 +1,4 @@
-import base64
 import datetime as dt
-import hashlib
-import hmac
-import json
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -11,54 +7,11 @@ from church_bot.config import ScheduleSettings, Settings, save_settings
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
-from church_bot.webhook import Command, SignatureError, WebhookHandler, parse_command, verify_signature
-from tests.conftest import gid, uid, write
-
-SECRET = "s3cret"
-
-
-def sign(body: bytes, secret: str = SECRET) -> str:
-    return base64.b64encode(hmac.new(secret.encode(), body, hashlib.sha256).digest()).decode()
-
+from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
+from tests.conftest import write
+from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
 
 # ------------------------------------------------------------------ webhook
-
-
-class FakeLine:
-    replies: list[tuple[str, str]] = []
-    profile_name = "小美"
-    profile_lookups = 0
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    def reply(self, token, text):
-        FakeLine.replies.append((token, text))
-
-    def group_name(self, group_id):
-        return "敬拜團"
-
-    def member_profile(self, chat_id, user_id):
-        FakeLine.profile_lookups += 1
-        return FakeLine.profile_name
-
-    def send(self, to, message):
-        FakeLine.replies.append((to, message.text))
-
-    def close(self):
-        pass
-
-
-@pytest.fixture
-def handler(paths, monkeypatch):
-    write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\n")
-    FakeLine.replies, FakeLine.profile_name, FakeLine.profile_lookups = [], "小美", 0
-    monkeypatch.setattr("church_bot.webhook.LineMessenger", FakeLine)
-    return WebhookHandler(BotService(paths))
-
-
-def event_body(*events) -> bytes:
-    return json.dumps({"events": list(events)}).encode()
 
 
 def test_signature():
@@ -107,12 +60,6 @@ def test_parse_command(text, expected):
     assert parse_command(text) == expected
 
 
-def say(text: str, token: str = "r", user: str = "", chat: str = "") -> bytes:
-    source = {"type": "group", "groupId": chat or gid(), "userId": user or uid()}
-    return event_body({"type": "message", "replyToken": token, "source": source,
-                       "message": {"type": "text", "text": text}})
-
-
 def turn_on_name_collection(paths):
     settings = Settings()
     settings.chat.collect_names = True
@@ -158,11 +105,8 @@ def test_message_from_group_is_remembered_as_a_person(handler, paths):
 
 
 def test_display_name_is_looked_up_at_most_once_a_day(handler):
-    source = {"type": "group", "groupId": gid(), "userId": uid()}
-    say = lambda token: event_body({"type": "message", "replyToken": token, "source": source,  # noqa: E731
-                                    "message": {"type": "text", "text": "早安"}})
     for token in ("a", "b", "c"):
-        body = say(token)
+        body = say("早安", token)
         handler.handle(body, sign(body))
     assert FakeLine.profile_lookups == 1
 
@@ -171,7 +115,7 @@ def test_display_name_is_looked_up_at_most_once_a_day(handler):
     with history._conn() as conn:
         conn.execute("UPDATE people SET profile_checked_at=? WHERE user_id=?", (stale, uid()))
     FakeLine.profile_name = "美美（改名了）"
-    body = say("d")
+    body = say("早安", "d")
     handler.handle(body, sign(body))
     assert FakeLine.profile_lookups == 2
     assert history.person(uid())["display_name"] == "美美（改名了）"
