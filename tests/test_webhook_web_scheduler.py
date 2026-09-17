@@ -28,6 +28,8 @@ def sign(body: bytes, secret: str = SECRET) -> str:
 
 class FakeLine:
     replies: list[tuple[str, str]] = []
+    profile_name = "小美"
+    profile_lookups = 0
 
     def __init__(self, *args, **kwargs):
         pass
@@ -39,7 +41,8 @@ class FakeLine:
         return "敬拜團"
 
     def member_profile(self, chat_id, user_id):
-        return "小美"
+        FakeLine.profile_lookups += 1
+        return FakeLine.profile_name
 
     def send(self, to, message):
         FakeLine.replies.append((to, message.text))
@@ -51,7 +54,7 @@ class FakeLine:
 @pytest.fixture
 def handler(paths, monkeypatch):
     write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\n")
-    FakeLine.replies = []
+    FakeLine.replies, FakeLine.profile_name, FakeLine.profile_lookups = [], "小美", 0
     monkeypatch.setattr("church_bot.webhook.LineMessenger", FakeLine)
     return WebhookHandler(BotService(paths))
 
@@ -92,6 +95,26 @@ def test_message_from_group_is_remembered_as_a_person(handler, paths):
     handler.handle(body, sign(body))
     person = BotService(paths).history.person(uid())
     assert person and person["display_name"] == "小美" and person["chat_id"] == gid()
+
+
+def test_display_name_is_looked_up_at_most_once_a_day(handler):
+    source = {"type": "group", "groupId": gid(), "userId": uid()}
+    say = lambda token: event_body({"type": "message", "replyToken": token, "source": source,  # noqa: E731
+                                    "message": {"type": "text", "text": "早安"}})
+    for token in ("a", "b", "c"):
+        body = say(token)
+        handler.handle(body, sign(body))
+    assert FakeLine.profile_lookups == 1
+
+    history = handler.service.history
+    stale = (dt.datetime.now().astimezone() - dt.timedelta(days=2)).isoformat(timespec="seconds")
+    with history._conn() as conn:
+        conn.execute("UPDATE people SET profile_checked_at=? WHERE user_id=?", (stale, uid()))
+    FakeLine.profile_name = "美美（改名了）"
+    body = say("d")
+    handler.handle(body, sign(body))
+    assert FakeLine.profile_lookups == 2
+    assert history.person(uid())["display_name"] == "美美（改名了）"
 
 
 def test_member_joined_reports_new_member_names_and_ids(handler):

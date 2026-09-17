@@ -53,8 +53,19 @@ def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
     return hmac.compare_digest(base64.b64encode(digest).decode("ascii"), signature or "")
 
 
+PROFILE_REFRESH = dt.timedelta(days=1)
+
+
 def _normalize(text: str) -> str:
     return unicodedata.normalize("NFKC", text or "").replace(" ", "").lower()
+
+
+def _checked_recently(stamp: str) -> bool:
+    try:
+        checked = dt.datetime.fromisoformat(stamp)
+    except ValueError:
+        return False
+    return dt.datetime.now().astimezone() - checked < PROFILE_REFRESH
 
 
 class SignatureError(ChurchBotError):
@@ -152,14 +163,19 @@ class WebhookHandler:
     # ------------------------------------------------------------------ helpers
 
     def _touch_person(self, user_id: str, chat_id: str, kind: str, messenger: LineMessenger) -> str:
-        """背景記錄一個人（被動收集，見檔案開頭說明），回傳目前已知的顯示名稱（可能是空字串）。"""
+        """背景記錄一個人（被動收集，見檔案開頭說明），回傳目前已知的顯示名稱（可能是空字串）。
+
+        顯示名稱最多一天向 LINE 查一次：有人改了 LINE 名稱，隔天講話就會更新；查不到也算查過，不會每句話都重查。
+        """
         history = self.service.history
-        known = history.person(user_id)
-        name = known["display_name"] if known else ""
-        if not name:
+        known = history.person(user_id) or {}
+        name = known.get("display_name", "")
+        if not _checked_recently(known.get("profile_checked_at", "")):
             lookup_id = chat_id if kind in ("group", "room") else user_id
-            name = messenger.member_profile(lookup_id, user_id)
-        history.remember_person(user_id, name, chat_id)
+            fresh = messenger.member_profile(lookup_id, user_id)
+            history.remember_person(user_id, fresh, chat_id, profile_checked=True)
+            return fresh or name
+        history.remember_person(user_id, "", chat_id)
         return name
 
     def _auto_add_target(self, chat_id: str, name: str) -> bool:

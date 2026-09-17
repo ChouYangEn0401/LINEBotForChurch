@@ -1,7 +1,8 @@
-"""SQLite 紀錄：每次執行的結果、每則訊息送出的狀態（防重複發送）、LINE 回報的群組。
+"""SQLite 紀錄：每次執行的結果、每則訊息送出的狀態（防重複發送）、LINE 回報的群組與人。
 
-資料檔在 data/church_bot.db。刪掉它不會壞，只是會忘記「送過什麼」和歷史紀錄。
+資料檔在 data/church_bot.db。刪掉它不會壞，只是會忘記「送過什麼」、自動收集到的 LINE 帳號和歷史紀錄。
 每個操作都開新連線 + 鎖：網頁和排程在不同執行緒，這樣最單純也最安全。
+舊版建立的資料庫在開啟時會自動補上新欄位（見 ``_MIGRATIONS``），不用手動處理。
 """
 
 from __future__ import annotations
@@ -66,7 +67,25 @@ CREATE TABLE IF NOT EXISTS people (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS memberships (
+    user_id TEXT NOT NULL,
+    chat_id TEXT NOT NULL,
+    first_seen TEXT NOT NULL,
+    last_seen TEXT NOT NULL,
+    PRIMARY KEY (user_id, chat_id)
+);
 """
+
+# (資料表, 欄位, 欄位定義)：舊資料庫缺的欄位開啟時自動補上
+_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+    ("people", "real_name", "TEXT NOT NULL DEFAULT ''"),  # 本人用「/我的名字」登記的名字，等管理員確認
+    ("people", "real_name_at", "TEXT NOT NULL DEFAULT ''"),
+    ("people", "ignored", "INTEGER NOT NULL DEFAULT 0"),  # 管理員按了「忽略」
+    ("people", "profile_checked_at", "TEXT NOT NULL DEFAULT ''"),  # 上次向 LINE 查顯示名稱的時間
+    ("chats", "member_count", "INTEGER"),
+    ("chats", "count_checked_at", "TEXT NOT NULL DEFAULT ''"),
+)
 
 
 def _now() -> str:
@@ -111,6 +130,16 @@ class History:
         db_path.parent.mkdir(parents=True, exist_ok=True)
         with self._conn() as conn:
             conn.executescript(_SCHEMA)
+            for table, column, ddl in _MIGRATIONS:
+                existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
+            # 舊版只記「最後在哪個群組看到」；搬進 memberships，之後才知道每個人在哪些群組
+            conn.execute(
+                "INSERT OR IGNORE INTO memberships (user_id, chat_id, first_seen, last_seen) "
+                "SELECT user_id, chat_id, first_seen, last_seen FROM people "
+                "WHERE substr(chat_id, 1, 1) IN ('C', 'R')"
+            )
 
     @contextmanager
     def _conn(self) -> Iterator[sqlite3.Connection]:
@@ -223,6 +252,25 @@ class History:
         with self._conn() as conn:
             conn.execute("DELETE FROM chats WHERE chat_id=?", (chat_id,))
 
+    def set_member_count(self, chat_id: str, count: int) -> None:
+        now = _now()
+        kind = {"C": "group", "R": "room"}.get(chat_id[:1], "user")
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO chats (chat_id, kind, first_seen, last_seen, member_count, count_checked_at) "
+                "VALUES (?,?,?,?,?,?) ON CONFLICT(chat_id) DO UPDATE SET member_count=excluded.member_count, "
+                "count_checked_at=excluded.count_checked_at",
+                (chat_id, kind, now, now, count, now),
+            )
+
+    def member_counts(self) -> dict[str, tuple[int, str]]:
+        """群組 ID → (人數, 查詢時間)。只包含查過人數的群組。"""
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT chat_id, member_count, count_checked_at FROM chats WHERE member_count IS NOT NULL"
+            ).fetchall()
+        return {r["chat_id"]: (r["member_count"], r["count_checked_at"]) for r in rows}
+
     # ------------------------------------------------------------------ people seen via webhook
 
     def person(self, user_id: str) -> dict | None:
@@ -230,25 +278,60 @@ class History:
             row = conn.execute("SELECT * FROM people WHERE user_id=?", (user_id,)).fetchone()
         return dict(row) if row else None
 
-    def remember_person(self, user_id: str, display_name: str = "", chat_id: str = "") -> None:
+    def remember_person(self, user_id: str, display_name: str = "", chat_id: str = "",
+                        profile_checked: bool = False) -> None:
+        """記下一個人出現過。``profile_checked`` = 這次有向 LINE 查過顯示名稱（查不到也算，避免一直重查）。"""
         now = _now()
         with self._conn() as conn:
             conn.execute(
-                "INSERT INTO people (user_id, display_name, chat_id, first_seen, last_seen) VALUES (?,?,?,?,?) "
+                "INSERT INTO people (user_id, display_name, chat_id, first_seen, last_seen, profile_checked_at) "
+                "VALUES (?,?,?,?,?,?) "
                 "ON CONFLICT(user_id) DO UPDATE SET display_name=CASE WHEN excluded.display_name != '' "
                 "THEN excluded.display_name ELSE people.display_name END, chat_id=excluded.chat_id, "
-                "last_seen=excluded.last_seen",
-                (user_id, display_name, chat_id, now, now),
+                "last_seen=excluded.last_seen, profile_checked_at=CASE WHEN excluded.profile_checked_at != '' "
+                "THEN excluded.profile_checked_at ELSE people.profile_checked_at END",
+                (user_id, display_name, chat_id, now, now, now if profile_checked else ""),
+            )
+            if chat_id[:1] in ("C", "R"):
+                conn.execute(
+                    "INSERT INTO memberships (user_id, chat_id, first_seen, last_seen) VALUES (?,?,?,?) "
+                    "ON CONFLICT(user_id, chat_id) DO UPDATE SET last_seen=excluded.last_seen",
+                    (user_id, chat_id, now, now),
+                )
+
+    def claim_real_name(self, user_id: str, real_name: str) -> None:
+        """本人登記的名字：後登記的蓋掉先登記的；重新登記代表他想被處理，所以取消「忽略」。"""
+        now = _now()
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO people (user_id, first_seen, last_seen, real_name, real_name_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET real_name=excluded.real_name, "
+                "real_name_at=excluded.real_name_at, ignored=0",
+                (user_id, now, now, real_name, now),
             )
 
+    def clear_real_name(self, user_id: str) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE people SET real_name='', real_name_at='' WHERE user_id=?", (user_id,))
+
+    def set_person_ignored(self, user_id: str, ignored: bool) -> None:
+        with self._conn() as conn:
+            conn.execute("UPDATE people SET ignored=? WHERE user_id=?", (int(ignored), user_id))
+
     def people(self) -> list[dict]:
+        """所有收集到的人，附上「最後在哪個群組看到」和「在哪些群組」（群組名稱用「、」串起來）。"""
         with self._conn() as conn:
             rows = conn.execute(
-                "SELECT people.*, chats.name AS chat_name FROM people "
-                "LEFT JOIN chats ON chats.chat_id = people.chat_id ORDER BY people.last_seen DESC"
+                "SELECT people.*, last_chat.name AS chat_name, "
+                "(SELECT group_concat(CASE WHEN c.name != '' THEN c.name ELSE m.chat_id END, '、') "
+                " FROM memberships m LEFT JOIN chats c ON c.chat_id = m.chat_id "
+                " WHERE m.user_id = people.user_id) AS chat_names "
+                "FROM people LEFT JOIN chats AS last_chat ON last_chat.chat_id = people.chat_id "
+                "ORDER BY people.last_seen DESC"
             ).fetchall()
         return [dict(r) for r in rows]
 
     def forget_person(self, user_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM people WHERE user_id=?", (user_id,))
+            conn.execute("DELETE FROM memberships WHERE user_id=?", (user_id,))
