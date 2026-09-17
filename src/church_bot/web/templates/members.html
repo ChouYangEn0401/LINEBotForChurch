@@ -120,7 +120,7 @@
 
     <label for="line_user_id">LINE_userId</label>
     <input type="text" id="line_user_id" name="line_user_id" value="{{ m.line_user_id if m else '' }}" placeholder="U 開頭 + 32 碼（選填）">
-    <div class="help">只有要 @ 他才需要。請他在有機器人的群組打「我的ID」，把回覆的 ID 貼過來。</div>
+    <div class="help">只有要 @ 他才需要。請他在有機器人的群組打「/我的ID」，把回覆的 ID 貼過來。</div>
 
     <label>狀態</label>
     <div class="checkbox-row"><input type="checkbox" id="active" name="active" {{ "checked" if (m is none or m.active) }}>

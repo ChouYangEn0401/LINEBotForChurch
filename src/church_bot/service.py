@@ -213,7 +213,7 @@ class BotService:
         admin = settings.line.admin_target_id
         if not admin:
             report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但沒有設定「管理員」，所以沒辦法用 LINE 通知你",
-                                       "到「設定」頁填管理員的 LINE ID（私訊機器人「我的ID」就能拿到）。"))
+                                       "到「設定」頁填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
             return
         if messenger is None:
             log.error("有問題需要通知管理員，但目前沒有可用的發送方式")
@@ -300,9 +300,9 @@ class BotService:
         admin = s.line.admin_target_id
         items.append(CheckItem("管理員通知", bool(admin and LINE_ID_RE.match(admin)),
                                f"出問題會通知：{admin}" if admin else "還沒設定，出問題時沒辦法用 LINE 通知你",
-                               "" if admin else "私訊機器人「我的ID」，把拿到的 ID 填到「設定 → 管理員 LINE ID」。"))
+                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 管理員 LINE ID」。"))
         items.append(CheckItem("自動排程", s.schedule.enabled or None, s.schedule.describe()))
         items.append(CheckItem("群組 ID 自動抓取", True if s.line.channel_secret else None,
                                "已設定 Channel secret" if s.line.channel_secret else "沒有設定 Channel secret（選用功能）",
-                               "" if s.line.channel_secret else "只有想用「在群組打 群組ID 自動抓」才需要，見 docs/SETUP_LINE.md。"))
+                               "" if s.line.channel_secret else "只有想用「在群組打 /群組ID 自動抓」才需要，見 docs/SETUP_LINE.md。"))
         return items

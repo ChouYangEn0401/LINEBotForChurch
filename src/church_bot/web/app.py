@@ -125,7 +125,7 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
 
     admin = new.line.admin_target_id
     if admin and not LINE_ID_RE.match(admin):
-        raise ConfigError("管理員 LINE ID 格式不對", "要是 U 或 C 開頭再加 32 個英數字。私訊機器人「我的ID」就能拿到。")
+        raise ConfigError("管理員 LINE ID 格式不對", "要是 U 或 C 開頭再加 32 個英數字。私訊機器人「/我的ID」就能拿到。")
     if new.source.kind in ("google_public", "google_service_account"):
         parse_sheet_url(new.source.spreadsheet_url)
     Renderer(new.message).validate()

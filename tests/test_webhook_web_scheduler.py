@@ -13,7 +13,7 @@ from church_bot.config import ScheduleSettings, Settings, load_settings, save_se
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
-from church_bot.webhook import SignatureError, WebhookHandler, verify_signature
+from church_bot.webhook import Command, SignatureError, WebhookHandler, parse_command, verify_signature
 from tests.conftest import gid, uid, write
 
 SECRET = "s3cret"
@@ -79,11 +79,28 @@ def test_join_adds_disabled_target_and_replies_group_id(handler, paths):
 def test_my_id_command_and_normal_chat_is_ignored(handler):
     source = {"type": "group", "groupId": gid(), "userId": uid()}
     body = event_body(
-        {"type": "message", "replyToken": "r2", "source": source, "message": {"type": "text", "text": "我的 ID"}},
+        {"type": "message", "replyToken": "r2", "source": source, "message": {"type": "text", "text": "/我的 ID"}},
         {"type": "message", "replyToken": "r3", "source": source, "message": {"type": "text", "text": "大家早安"}},
+        {"type": "message", "replyToken": "r4", "source": source, "message": {"type": "text", "text": "我的ID"}},
     )
     handler.handle(body, sign(body))
     assert FakeLine.replies == [("r2", f"你的名字：小美\n你的 LINE ID：\n{uid()}")]
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("/群組ID", Command("chat_id")),
+    ("／群組 id", Command("chat_id")),  # 全形斜線、空白、大小寫都沒關係
+    ("/ID", Command("chat_id")),
+    ("/我的ID", Command("my_id")),
+    ("/說明", Command("help")),
+    ("群組ID", None),  # 沒有「/」就當作一般聊天
+    ("id", None),
+    ("/今天吃什麼", None),  # 不認得的指令不回應
+    ("/群組ID 多打的字", None),
+    ("", None),
+])
+def test_parse_command(text, expected):
+    assert parse_command(text) == expected
 
 
 def test_message_from_group_is_remembered_as_a_person(handler, paths):

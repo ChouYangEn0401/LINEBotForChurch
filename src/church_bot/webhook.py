@@ -5,14 +5,17 @@
 * LINE Developers 後台設定 Webhook URL（要公開的 https 網址；只有第一次抓 ID 時需要，
   可以用 cloudflared 暫時開一個，見 docs/SETUP_LINE.md）
 
+指令一律「/」開頭（全形「／」也可以），一般聊天不會誤觸：
+* /群組ID → 回覆這個聊天室的 ID
+* /我的ID → 回覆自己的名字＋userId（填到人員表就能被 @；填到設定就能收管理員通知）
+* /說明 → 列出指令
+
 支援的事件：
 * 機器人被加進群組 → 在群組回覆群組 ID，並自動加到「群組表」（先不啟用，管理員確認後再打開）
-* 在群組或私訊打「群組ID」→ 回覆這個聊天室的 ID
-* 打「我的ID」→ 回覆自己的名字＋userId（填到人員表就能被 @；填到設定就能收管理員通知）
 * 有新成員加入群組 → 在群組回報新成員的名字＋userId（只有手機版 LINE 使用者才會有 userId）
 * 機器人被踢出群組 → 通知管理員（那個群組以後收不到提醒了）
 * 任何人在群組講話 → 背景記錄他的名字＋userId（不用開口特別問，講一句話就記住），
-  在「🙋 人員」頁會看到「自動收集到的人」，一鍵就能加進人員表
+  在「同工名單」頁會看到「LINE 帳號」，一鍵就能加進人員表
 
 一般聊天內容一律不回應，不會吵到群組。回覆（Reply API）、查名字（Get profile）都不計入 LINE 每月額度。
 """
@@ -25,7 +28,9 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import unicodedata
+from dataclasses import dataclass
 
 from church_bot.config import load_settings
 from church_bot.errors import ChurchBotError, ConfigError
@@ -36,16 +41,44 @@ from church_bot.tables import TABLE_WRITE_LOCK, TargetTable
 
 log = logging.getLogger(__name__)
 
-CMD_CHAT_ID = {"群組id", "群id", "id", "/id", "chatid", "群組代號"}
-CMD_MY_ID = {"我的id", "myid", "/me", "userid"}
-CMD_HELP = {"/help", "機器人說明", "提醒小幫手"}
+# 指令名稱 → 可以打的寫法（比對時忽略大小寫、空白、全形半形）
+COMMAND_WORDS: dict[str, tuple[str, ...]] = {
+    "chat_id": ("群組id", "群id", "群組代號", "groupid", "chatid", "id"),
+    "my_id": ("我的id", "myid", "me", "userid"),
+    "help": ("說明", "指令", "help", "?"),
+}
+NO_ARGUMENT = {"chat_id", "my_id", "help"}
+_WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
+_COMMAND_RE = re.compile(r"^/\s*([^\s=:]+)\s*[=:]?\s*(.*)$", re.DOTALL)
 
 HELP_TEXT = (
-    "我是服事提醒小幫手 🙌\n"
-    "・打「群組ID」：告訴你這個聊天室的 ID\n"
-    "・打「我的ID」：告訴你自己的 ID\n"
-    "其他訊息我都不會回，不會吵到大家 😊"
+    "我是服事提醒小幫手 🙌 指令都是「/」開頭：\n"
+    "・/群組ID：這個聊天室的 ID\n"
+    "・/我的ID：你自己的 ID\n"
+    "・/說明：顯示這段說明\n"
+    "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
 )
+
+
+@dataclass(frozen=True, slots=True)
+class Command:
+    name: str
+    arg: str = ""
+
+
+def parse_command(text: str) -> Command | None:
+    """「/我的ID」「／群組 ID」「/設定 收集名單=開」→ Command；不是「/」開頭或不認得的指令 → None。"""
+    normalized = unicodedata.normalize("NFKC", text or "").strip()
+    if not normalized.startswith("/"):
+        return None
+    compact = re.sub(r"\s+", "", normalized[1:]).lower()
+    if _WORD_TO_COMMAND.get(compact) in NO_ARGUMENT:
+        return Command(_WORD_TO_COMMAND[compact])
+    match = _COMMAND_RE.match(normalized)
+    name = _WORD_TO_COMMAND.get(match[1].lower()) if match else None
+    if name is None or name in NO_ARGUMENT:
+        return None
+    return Command(name, match[2].strip())
 
 
 def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
@@ -54,10 +87,6 @@ def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
 
 
 PROFILE_REFRESH = dt.timedelta(days=1)
-
-
-def _normalize(text: str) -> str:
-    return unicodedata.normalize("NFKC", text or "").replace(" ", "").lower()
 
 
 def _checked_recently(stamp: str) -> bool:
@@ -130,22 +159,23 @@ class WebhookHandler:
                 history.remember_chat(chat_id, kind)
             user_id = source.get("userId", "")
             name = self._touch_person(user_id, chat_id, kind, messenger) if user_id else ""
-            self._handle_command(_normalize(event["message"].get("text", "")), source, chat_id, kind,
-                                 reply_token, messenger, name)
+            command = parse_command(event["message"].get("text", ""))
+            if command is not None:
+                self._handle_command(command, source, chat_id, kind, reply_token, messenger, name)
 
-    def _handle_command(self, text: str, source: dict, chat_id: str, kind: str, reply_token: str,
+    def _handle_command(self, command: Command, source: dict, chat_id: str, kind: str, reply_token: str,
                         messenger: LineMessenger, name: str = "") -> None:
-        if text in CMD_CHAT_ID:
+        if command.name == "chat_id":
             label = {"group": "群組", "room": "聊天室", "user": "你的"}.get(kind, "")
             messenger.reply(reply_token, f"這個{label} ID：\n{chat_id}")
-        elif text in CMD_MY_ID:
+        elif command.name == "my_id":
             uid = source.get("userId")
             if not uid:
-                messenger.reply(reply_token, "抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「我的ID」。")
+                messenger.reply(reply_token, "抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的ID」。")
             else:
                 who = f"你的名字：{name}\n" if name else ""
                 messenger.reply(reply_token, f"{who}你的 LINE ID：\n{uid}")
-        elif text in CMD_HELP:
+        elif command.name == "help":
             messenger.reply(reply_token, HELP_TEXT)
 
     def _report_new_members(self, event: dict, chat_id: str, kind: str, reply_token: str,

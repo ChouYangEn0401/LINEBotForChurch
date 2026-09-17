@@ -221,7 +221,7 @@ class TargetTable(CsvTable[Target]):
         if enabled and not line_id:
             issues.append(self._issue(
                 Severity.ERROR, "target_no_id", f"{where}還沒填 LINE_ID，不會收到提醒",
-                "把機器人加進群組後，在群組裡打「群組ID」就會自動抓到；或先把「啟用」改成「否」。",
+                "把機器人加進群組後，在群組裡打「/群組ID」就會自動抓到；或先把「啟用」改成「否」。",
             ))
         elif line_id and not LINE_ID_RE.match(line_id):
             issues.append(self._issue(

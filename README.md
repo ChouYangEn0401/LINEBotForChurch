@@ -71,8 +71,8 @@
 
 1. **申請 LINE 機器人**：照 [docs/SETUP_LINE.md](docs/SETUP_LINE.md) 做，把拿到的 token 貼到網頁「⚙️ 設定 → 🔑 LINE 金鑰」。
 2. **接上服事表**：照 [docs/SETUP_GOOGLE.md](docs/SETUP_GOOGLE.md) 把 Google Sheet 開成「知道連結的人可以檢視」，網址貼到「⚙️ 設定 → ① 服事表從哪裡來」。服事表怎麼排見 [docs/SHEET_FORMAT.md](docs/SHEET_FORMAT.md)。
-3. **設定群組**：把機器人邀進 LINE 群組，在群組打「群組ID」，到「👥 群組」新增群組、貼上 ID，按「測試」確認收得到。
-4. **設定管理員**：私訊機器人「我的ID」，把 ID 填到「⚙️ 設定 → ④ 出問題時通知誰」。
+3. **設定群組**：把機器人邀進 LINE 群組，在群組打「/群組ID」，到「👥 群組」新增群組、貼上 ID，按「測試」確認收得到。
+4. **設定管理員**：私訊機器人「/我的ID」，把 ID 填到「⚙️ 設定 → ④ 出問題時通知誰」。
 5. **系統檢查**：打開「🩺 系統檢查」，全部 ✅ 就完成了！
 6. **（建議）開機自動執行**：Windows 雙擊 `scripts\windows\autostart-on.bat`；Mac 執行 `scripts/mac/autostart-on.sh`。
 

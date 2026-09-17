@@ -157,7 +157,7 @@ class Planner:
                      "確認服事表是不是要換人；如果他回來服事了，把人員表的「啟用」改回「是」。")
         if mention_on and p.member and not p.member.line_user_id:
             plan.add(Severity.INFO, "no_user_id", f"「{p.member.name}」沒有 LINE_userId，訊息裡不會 @ 到他",
-                     "請他在有機器人的群組打「我的ID」，把回覆的 ID 填到人員表。")
+                     "請他在有機器人的群組打「/我的ID」，把回覆的 ID 填到人員表。")
 
     def _check_empty_roles(self, plan: Plan) -> None:
         for day in plan.days:

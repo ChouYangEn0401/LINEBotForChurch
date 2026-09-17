@@ -40,7 +40,7 @@
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
 | `service.py` | 組裝一次完整執行、管理員通知、健康檢查 |
 | `scheduler.py` | APScheduler 每週排程 + 開機補發 |
-| `webhook.py` | LINE Webhook：群組ID／我的ID 指令、加入群組、被踢出群組 |
+| `webhook.py` | LINE Webhook：「/」開頭的聊天指令（`parse_command`）、加入群組、被踢出群組、被動收集 LINE 帳號 |
 | `web/` | FastAPI：管理網頁（Jinja2）+ `/api/*` JSON API |
 | `cli.py` | `python -m church_bot init / web / check / preview / send` |
 

@@ -52,7 +52,7 @@
 {% if chats %}
 <section class="card">
   <h2>🔔 機器人最近看到的群組（還沒加進群組表）</h2>
-  <p class="muted">機器人被邀進群組、或有人在群組裡打「群組ID」後，會出現在這裡。按「加入」就會幫你填好 LINE_ID。</p>
+  <p class="muted">機器人被邀進群組、或有人在群組裡打「/群組ID」後，會出現在這裡。按「加入」就會幫你填好 LINE_ID。</p>
   <table class="table">
     <thead><tr><th>群組名稱</th><th>LINE_ID</th><th>最後看到</th><th></th></tr></thead>
     <tbody>
@@ -83,7 +83,7 @@
 
     <label for="line_id">LINE_ID</label>
     <input type="text" id="line_id" name="line_id" value="{{ t.line_id if t else '' }}" placeholder="群組是 C 開頭、個人是 U 開頭，後面 32 碼">
-    <div class="help">把機器人加進群組，在群組裡打「群組ID」，機器人會回覆，複製貼上即可（詳見「使用說明」）。</div>
+    <div class="help">把機器人加進群組，在群組裡打「/群組ID」，機器人會回覆，複製貼上即可（詳見「使用說明」）。</div>
 
     <label>啟用</label>
     <div class="checkbox-row"><input type="checkbox" id="enabled" name="enabled" {{ "checked" if (t is none or t.enabled) }}>

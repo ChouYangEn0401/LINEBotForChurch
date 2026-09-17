@@ -110,7 +110,7 @@
     <div class="form-grid">
       <label for="admin_target_id">管理員 LINE ID</label>
       <input type="text" id="admin_target_id" name="admin_target_id" value="{{ f.admin_target_id }}" placeholder="U 開頭（個人，建議）或 C 開頭（群組）">
-      <div class="help">服事表沒更新、名字對不到、LINE 送不出去…都會通知這個人。先加機器人好友，再私訊它「我的ID」就能拿到。
+      <div class="help">服事表沒更新、名字對不到、LINE 送不出去…都會通知這個人。先加機器人好友，再私訊它「/我的ID」就能拿到。
         建議填個人：通知群組的話每次都會按群組人數扣 LINE 額度。</div>
     </div>
   </fieldset>
@@ -160,7 +160,7 @@
 
     <label for="secret">Channel secret</label>
     <input type="password" id="secret" name="secret" autocomplete="off" placeholder="{{ secret_status or '還沒設定（選用）' }}">
-    <div class="help">「Basic settings」分頁。只有要用「在群組打 群組ID 自動抓」功能才需要。</div>
+    <div class="help">「Basic settings」分頁。只有要用「在群組打 /群組ID 自動抓」功能才需要。</div>
 
     <label for="password">網頁密碼</label>
     <input type="password" id="password" name="password" autocomplete="new-password" placeholder="{{ password_status or '沒有密碼（只有這台電腦能打開）' }}">

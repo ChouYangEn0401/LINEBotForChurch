@@ -18,9 +18,9 @@
   <ol class="steps">
     <li><strong>申請 LINE 機器人</strong>：照 <code>docs/SETUP_LINE.md</code> 做，拿到 Channel access token，貼到「⚙️ 設定 → LINE 金鑰」。</li>
     <li><strong>接上服事表</strong>：Google Sheet 右上「共用」→ 改成「知道連結的使用者可以檢視」，複製網址，貼到「⚙️ 設定 → ① 服事表從哪裡來」，來源選「Google Sheet（公開連結）」。</li>
-    <li><strong>把機器人邀進 LINE 群組</strong>，在群組打 <span class="kbd">群組ID</span>，機器人會回覆一串 C 開頭的 ID（沒回覆的話，看下面「沒有設定 Webhook 怎麼辦」）。</li>
+    <li><strong>把機器人邀進 LINE 群組</strong>，在群組打 <span class="kbd">/群組ID</span>，機器人會回覆一串 C 開頭的 ID（沒回覆的話，看下面「沒有設定 Webhook 怎麼辦」）。</li>
     <li>到「👥 群組」頁新增群組，貼上 ID、勾「啟用」，按「測試」確認群組有收到。</li>
-    <li>私訊機器人 <span class="kbd">我的ID</span>，把拿到的 U 開頭 ID 填到「⚙️ 設定 → ④ 管理員 LINE ID」，出問題才找得到你。</li>
+    <li>私訊機器人 <span class="kbd">/我的ID</span>，把拿到的 U 開頭 ID 填到「⚙️ 設定 → ④ 管理員 LINE ID」，出問題才找得到你。</li>
     <li>到「🩺 系統檢查」，全部是 ✅ 就完成了！回首頁看看這週的預覽。</li>
   </ol>
 </section>
@@ -59,15 +59,15 @@
   <details><summary><strong>有人離開教會 / 不再服事</strong></summary>
     <p>到「🙋 人員」頁把他編輯成「停用」。之後如果服事表不小心又排到他，會提醒管理員。</p></details>
   <details><summary><strong>新的群組、群組換了</strong></summary>
-    <p>把機器人邀進新群組，在群組打「群組ID」，到「👥 群組」頁新增或修改 LINE_ID。舊群組不用了就改成停用或刪除。機器人被踢出群組時，會通知管理員。</p></details>
+    <p>把機器人邀進新群組，在群組打「/群組ID」，到「👥 群組」頁新增或修改 LINE_ID。舊群組不用了就改成停用或刪除。機器人被踢出群組時，會通知管理員。</p></details>
   <details><summary><strong>服事表排到下一季、開了新分頁</strong></summary>
     <p>最簡單：直接在同一個分頁往下加。如果開了新分頁，要到「⚙️ 設定」把網址換成新分頁的網址。服事表快用完時（預設剩 14 天），會先提醒管理員。</p></details>
   <details><summary><strong>「這個月的 LINE 訊息額度用完了」</strong></summary>
     <p>LINE 免費方案每月 200 則，推播到群組是按群組人數算。詳見 <code>docs/LINE_PRICING.md</code>（有報帳需要的資訊）。</p></details>
   <details><summary><strong>「LINE token 錯誤或已失效」</strong></summary>
     <p>到 LINE Developers 重新發行 Channel access token，貼到「⚙️ 設定 → LINE 金鑰」。</p></details>
-  <details><summary><strong>在群組打「群組ID」機器人沒反應（沒有設定 Webhook 怎麼辦）</strong></summary>
-    <p>「群組ID」指令需要設定 Webhook（見 <code>docs/SETUP_LINE.md</code> 第 5 步）。只有第一次拿 ID 時需要，拿到之後就可以關掉。</p></details>
+  <details><summary><strong>在群組打「/群組ID」機器人沒反應（沒有設定 Webhook 怎麼辦）</strong></summary>
+    <p>「/群組ID」指令需要設定 Webhook（見 <code>docs/SETUP_LINE.md</code> 第 5 步）。只有第一次拿 ID 時需要，拿到之後就可以關掉。</p></details>
   <details><summary><strong>電腦關機 / 睡眠會怎樣</strong></summary>
     <p>關機時不會發送。如果錯過排程時間，12 小時內打開程式會自動補發（已經送過的不會重送）。建議用「開機自動啟動」（見 README）。</p></details>
 </section>
@@ -75,8 +75,8 @@
 <section class="card">
   <h2>💬 在 LINE 可以打的指令</h2>
   <table class="table">
-    <tr><td class="nowrap"><span class="kbd">群組ID</span></td><td>機器人回覆這個群組的 ID（填到群組表用）</td></tr>
-    <tr><td class="nowrap"><span class="kbd">我的ID</span></td><td>機器人回覆你自己的 ID（填到人員表才能 @ 你；填到設定可以收管理員通知）</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/群組ID</span></td><td>機器人回覆這個群組的 ID（填到群組表用）</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/我的ID</span></td><td>機器人回覆你自己的 ID（填到人員表才能 @ 你；填到設定可以收管理員通知）</td></tr>
   </table>
   <p class="muted small">這些回覆不會計入 LINE 每月額度。其他聊天內容機器人一律不回應，不會吵到群組。</p>
 </section>
