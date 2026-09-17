@@ -6,10 +6,8 @@ import json
 from zoneinfo import ZoneInfo
 
 import pytest
-from fastapi.testclient import TestClient
 
-from church_bot.cli import cmd_init
-from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
+from church_bot.config import ScheduleSettings, Settings, save_settings
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
@@ -98,9 +96,54 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
     ("/今天吃什麼", None),  # 不認得的指令不回應
     ("/群組ID 多打的字", None),
     ("", None),
+    ("/我的名字 王小明", Command("my_name", "王小明")),
+    ("/我的名字王小明", Command("my_name", "王小明")),
+    ("/我的名字=王小明", Command("my_name", "王小明")),
+    ("/我的名字", Command("my_name", "")),
+    ("/name Amy Chen", Command("my_name", "Amy Chen")),
+    ("/names Amy", None),
 ])
 def test_parse_command(text, expected):
     assert parse_command(text) == expected
+
+
+def say(text: str, token: str = "r", user: str = "", chat: str = "") -> bytes:
+    source = {"type": "group", "groupId": chat or gid(), "userId": user or uid()}
+    return event_body({"type": "message", "replyToken": token, "source": source,
+                       "message": {"type": "text", "text": text}})
+
+
+def turn_on_name_collection(paths):
+    settings = Settings()
+    settings.chat.collect_names = True
+    save_settings(paths, settings)
+
+
+def test_register_name_is_refused_while_collection_is_off(handler):
+    body = say("/我的名字 林美華")
+    handler.handle(body, sign(body))
+    assert "沒有開放" in FakeLine.replies[-1][1]
+    assert handler.service.history.person(uid())["real_name"] == ""
+
+
+def test_register_name_overwrites_previous_claim(handler, paths):
+    turn_on_name_collection(paths)
+    for text in ("/我的名字 林美", "/我的名字 「林美華」"):
+        body = say(text)
+        handler.handle(body, sign(body))
+    assert handler.service.history.person(uid())["real_name"] == "林美華"
+    assert "已登記：林美華（LINE 名稱：小美）" in FakeLine.replies[-1][1]
+
+    body = say("/我的名字")
+    handler.handle(body, sign(body))
+    assert "你登記過的名字：林美華" in FakeLine.replies[-1][1]
+
+
+def test_register_name_rejects_very_long_names(handler, paths):
+    turn_on_name_collection(paths)
+    body = say("/我的名字 " + "長" * 21)
+    handler.handle(body, sign(body))
+    assert "太長" in FakeLine.replies[-1][1] and handler.service.history.person(uid())["real_name"] == ""
 
 
 def test_message_from_group_is_remembered_as_a_person(handler, paths):
@@ -213,28 +256,6 @@ def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths,
 
 
 # ------------------------------------------------------------------ web
-
-
-@pytest.fixture
-def client(paths):
-    root = paths.root
-    for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv"):
-        (root / "config" / name).write_bytes((ROOT / "config" / name).read_bytes())
-    (root / ".env.example").write_bytes((ROOT / ".env.example").read_bytes())
-    cmd_init(paths, None)
-    settings = load_settings(paths)
-    settings.messenger.kind = "console"
-    settings.schedule.enabled = False
-    save_settings(paths, settings)
-    from church_bot.web.app import create_app
-
-    with TestClient(create_app(paths)) as c:
-        yield c
-
-
-from pathlib import Path  # noqa: E402
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("url", ["/", "/targets", "/members", "/settings", "/runs", "/check", "/help",

@@ -69,3 +69,27 @@ def paths(tmp_path: Path) -> Paths:
     (tmp_path / "config").mkdir()
     (tmp_path / "data").mkdir()
     return Paths(tmp_path)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture
+def client(paths: Paths):
+    """管理網頁（測試模式發送、關掉排程），資料用 cmd_init 建出來的範例。"""
+    from fastapi.testclient import TestClient
+
+    from church_bot.cli import cmd_init
+    from church_bot.config import load_settings, save_settings
+    from church_bot.web.app import create_app
+
+    for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv"):
+        (paths.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
+    (paths.root / ".env.example").write_bytes((REPO_ROOT / ".env.example").read_bytes())
+    cmd_init(paths, None)
+    settings = load_settings(paths)
+    settings.messenger.kind = "console"
+    settings.schedule.enabled = False
+    save_settings(paths, settings)
+    with TestClient(create_app(paths)) as c:
+        yield c

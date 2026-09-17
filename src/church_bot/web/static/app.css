@@ -112,4 +112,19 @@ legend { font-weight: 700; padding: 0 6px; }
 .copied { outline: 2px solid var(--primary); border-radius: 4px; }
 .steps { padding-left: 22px; }
 .steps li { margin-bottom: 10px; }
-.kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 0 6px; font-size: .9em; }
+.kbd { border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 6px; padding: 0 6px; font-size: .9em; white-space: nowrap; }
+
+/* 頁內小導覽、流程圖、開關盒 */
+.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 4px; }
+.subnav a { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; color: var(--text); font-size: 14px; }
+.subnav a:hover { background: var(--line); }
+.flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; margin: 10px 0; }
+.flow-step { flex: 1 1 160px; border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; background: var(--bg); }
+.flow-step strong { display: block; }
+.flow-step span { color: var(--muted); font-size: 13px; }
+.flow-arrow { align-self: center; color: var(--muted); font-size: 20px; }
+.toggle-box { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px;
+              border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 6px 0 12px; }
+.toggle-box.on { background: var(--ok-bg); border-color: var(--ok); }
+.table tr.pending td { background: var(--warn-bg); }
+details > summary { cursor: pointer; margin: 8px 0; }

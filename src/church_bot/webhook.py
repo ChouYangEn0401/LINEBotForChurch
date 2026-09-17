@@ -32,7 +32,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from church_bot.config import load_settings
+from church_bot.config import Settings, load_settings
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers.line import LineMessenger
 from church_bot.models import OutgoingMessage, Target
@@ -46,15 +46,20 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "chat_id": ("群組id", "群id", "群組代號", "groupid", "chatid", "id"),
     "my_id": ("我的id", "myid", "me", "userid"),
     "help": ("說明", "指令", "help", "?"),
+    "my_name": ("我的名字", "名字", "myname", "name"),
 }
 NO_ARGUMENT = {"chat_id", "my_id", "help"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
-_COMMAND_RE = re.compile(r"^/\s*([^\s=:]+)\s*[=:]?\s*(.*)$", re.DOTALL)
+# 長的寫法先比，避免短的寫法把長的吃掉
+_ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
+                         key=lambda pair: -len(pair[0]))
+NAME_MAX_LENGTH = 20
 
 HELP_TEXT = (
     "我是服事提醒小幫手 🙌 指令都是「/」開頭：\n"
     "・/群組ID：這個聊天室的 ID\n"
     "・/我的ID：你自己的 ID\n"
+    "・/我的名字 王小明：登記你的真實姓名（管理員開放時才能用）\n"
     "・/說明：顯示這段說明\n"
     "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
 )
@@ -67,18 +72,38 @@ class Command:
 
 
 def parse_command(text: str) -> Command | None:
-    """「/我的ID」「／群組 ID」「/設定 收集名單=開」→ Command；不是「/」開頭或不認得的指令 → None。"""
+    """「/我的ID」「／群組 ID」「/我的名字 王小明」→ Command；不是「/」開頭或不認得的指令 → None。"""
     normalized = unicodedata.normalize("NFKC", text or "").strip()
     if not normalized.startswith("/"):
         return None
     compact = re.sub(r"\s+", "", normalized[1:]).lower()
     if _WORD_TO_COMMAND.get(compact) in NO_ARGUMENT:
         return Command(_WORD_TO_COMMAND[compact])
-    match = _COMMAND_RE.match(normalized)
-    name = _WORD_TO_COMMAND.get(match[1].lower()) if match else None
-    if name is None or name in NO_ARGUMENT:
-        return None
-    return Command(name, match[2].strip())
+    body = normalized[1:].lstrip()
+    for word, name in _ARGUMENT_WORDS:
+        if body[: len(word)].lower() != word:
+            continue
+        rest = body[len(word):]
+        if word.isascii() and rest and not (rest[0].isspace() or rest[0] in "=:"):
+            continue  # 「/names」不是「/name」；中文指令後面直接接名字（/我的名字王小明）則可以
+        return Command(name, rest.lstrip().lstrip("=:").strip())
+    return None
+
+
+@dataclass(slots=True)
+class _Chat:
+    """處理一則訊息需要的東西：設定、回覆方式、在哪裡、誰說的。"""
+
+    settings: Settings
+    messenger: LineMessenger
+    reply_token: str
+    chat_id: str
+    kind: str
+    user_id: str
+    display_name: str = ""
+
+    def reply(self, text: str) -> None:
+        self.messenger.reply(self.reply_token, text)
 
 
 def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
@@ -119,7 +144,7 @@ class WebhookHandler:
         try:
             for event in events:
                 try:
-                    self._handle_event(event, messenger, settings.line.admin_target_id)
+                    self._handle_event(event, messenger, settings)
                 except ChurchBotError as exc:
                     log.error("處理 LINE 事件失敗：%s", exc)
         finally:
@@ -128,7 +153,7 @@ class WebhookHandler:
 
     # ------------------------------------------------------------------ events
 
-    def _handle_event(self, event: dict, messenger: LineMessenger, admin_id: str) -> None:
+    def _handle_event(self, event: dict, messenger: LineMessenger, settings: Settings) -> None:
         etype = event.get("type")
         source = event.get("source", {})
         kind = source.get("type", "")
@@ -148,7 +173,7 @@ class WebhookHandler:
         elif etype == "leave":
             history.remember_chat(chat_id, kind, status="left")
             log.warning("機器人被移出群組：%s", chat_id)
-            self._alert_left(chat_id, messenger, admin_id)
+            self._alert_left(chat_id, messenger, settings.line.admin_target_id)
         elif etype == "follow":
             history.remember_chat(chat_id, "user")
             name = self._touch_person(chat_id, chat_id, "user", messenger)
@@ -161,22 +186,47 @@ class WebhookHandler:
             name = self._touch_person(user_id, chat_id, kind, messenger) if user_id else ""
             command = parse_command(event["message"].get("text", ""))
             if command is not None:
-                self._handle_command(command, source, chat_id, kind, reply_token, messenger, name)
+                chat = _Chat(settings, messenger, reply_token, chat_id, kind, user_id, name)
+                self._handle_command(command, chat)
 
-    def _handle_command(self, command: Command, source: dict, chat_id: str, kind: str, reply_token: str,
-                        messenger: LineMessenger, name: str = "") -> None:
+    def _handle_command(self, command: Command, chat: _Chat) -> None:
         if command.name == "chat_id":
-            label = {"group": "群組", "room": "聊天室", "user": "你的"}.get(kind, "")
-            messenger.reply(reply_token, f"這個{label} ID：\n{chat_id}")
+            label = {"group": "群組", "room": "聊天室", "user": "你的"}.get(chat.kind, "")
+            chat.reply(f"這個{label} ID：\n{chat.chat_id}")
         elif command.name == "my_id":
-            uid = source.get("userId")
-            if not uid:
-                messenger.reply(reply_token, "抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的ID」。")
+            if not chat.user_id:
+                chat.reply("抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的ID」。")
             else:
-                who = f"你的名字：{name}\n" if name else ""
-                messenger.reply(reply_token, f"{who}你的 LINE ID：\n{uid}")
+                who = f"你的名字：{chat.display_name}\n" if chat.display_name else ""
+                chat.reply(f"{who}你的 LINE ID：\n{chat.user_id}")
+        elif command.name == "my_name":
+            self._register_name(command.arg, chat)
         elif command.name == "help":
-            messenger.reply(reply_token, HELP_TEXT)
+            chat.reply(HELP_TEXT)
+
+    def _register_name(self, arg: str, chat: _Chat) -> None:
+        """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""
+        if not chat.user_id:
+            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
+            return
+        real_name = re.sub(r"\s+", " ", arg).strip().strip("「」『』\"'").strip()
+        history = self.service.history
+        if not real_name:
+            current = (history.person(chat.user_id) or {}).get("real_name", "")
+            status = f"你登記過的名字：{current}（等管理員確認）\n" if current else ""
+            chat.reply(f"{status}登記方式：打「/我的名字 王小明」（換成你的真實姓名）")
+            return
+        if not chat.settings.chat.collect_names:
+            chat.reply("目前沒有開放登記名字 🙏 需要登記時，管理員會先打開這個功能。")
+            return
+        if len(real_name) > NAME_MAX_LENGTH:
+            chat.reply(f"名字太長了（最多 {NAME_MAX_LENGTH} 個字），請再打一次。")
+            return
+        history.claim_real_name(chat.user_id, real_name)
+        log.info("LINE 帳號登記名字：%s → %s（%s）", chat.display_name or "?", real_name, chat.user_id)
+        line_name = f"（LINE 名稱：{chat.display_name}）" if chat.display_name else ""
+        chat.reply(f"收到 🙌 已登記：{real_name}{line_name}\n"
+                   "管理員確認後，服事提醒就會用這個名字對到你。打錯的話再打一次就會蓋掉。")
 
     def _report_new_members(self, event: dict, chat_id: str, kind: str, reply_token: str,
                             messenger: LineMessenger) -> None:

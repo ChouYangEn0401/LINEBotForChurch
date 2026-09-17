@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
@@ -154,6 +155,13 @@ class WebSettings(_Base):
     password: str = ""  # 只從 .env 讀
 
 
+class ChatSettings(_Base):
+    """在 LINE 聊天室打「/」指令時的行為。"""
+
+    # 開放大家打「/我的名字 王小明」登記真實姓名。平常關著，要收集時才打開，避免有人亂填
+    collect_names: bool = False
+
+
 class Settings(_Base):
     source: SourceSettings = Field(default_factory=SourceSettings)
     line: LineSettings = Field(default_factory=LineSettings)
@@ -162,6 +170,7 @@ class Settings(_Base):
     message: MessageSettings = Field(default_factory=MessageSettings)
     behavior: BehaviorSettings = Field(default_factory=BehaviorSettings)
     web: WebSettings = Field(default_factory=WebSettings)
+    chat: ChatSettings = Field(default_factory=ChatSettings)
 
 
 # 機密欄位：(區段, 欄位, 環境變數)。這些值只從 .env 讀，存檔時一律排除。
@@ -321,6 +330,18 @@ def settings_to_yaml_dict(settings: Settings) -> dict:
     for section, key, _ in SECRET_FIELDS:
         data.get(section, {}).pop(key, None)
     return data
+
+
+SETTINGS_LOCK = threading.RLock()
+
+
+def update_settings(paths: Paths, change: Callable[[Settings], None]) -> Settings:
+    """讀 → 改 → 存整段排隊：管理網頁和 LINE 指令同時改設定，也不會互相蓋掉。"""
+    with SETTINGS_LOCK:
+        settings = load_settings(paths)
+        change(settings)
+        save_settings(paths, settings)
+    return settings
 
 
 def save_settings(paths: Paths, settings: Settings) -> None:

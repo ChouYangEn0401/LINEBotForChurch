@@ -12,6 +12,7 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -26,8 +27,11 @@ from pydantic import ValidationError
 
 from church_bot import __version__
 from church_bot.config import (
-    DEFAULT_TEMPLATE, WEEKDAY_ZH, Paths, Settings, load_settings, read_env_file, save_settings, update_env_file,
+    DEFAULT_TEMPLATE, SETTINGS_LOCK, WEEKDAY_ZH, Paths, Settings, load_settings, read_env_file, save_settings,
+    update_env_file, update_settings,
 )
+from church_bot.core.accounts import build_accounts
+from church_bot.core.directory import Directory, normalize_name
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
@@ -50,7 +54,8 @@ SEVERITY_ICON = {"error": "❌", "warning": "⚠️", "info": "ℹ️"}
 
 def _redirect(url: str, msg: str = "", level: str = "ok") -> RedirectResponse:
     if msg:
-        url = f"{url}{'&' if '?' in url else '?'}msg={quote(msg)}&level={level}"
+        path, hash_mark, fragment = url.partition("#")  # 訊息參數要放在 #段落 前面，瀏覽器才會送到伺服器
+        url = f"{path}{'&' if '?' in path else '?'}msg={quote(msg)}&level={level}{hash_mark}{fragment}"
     return RedirectResponse(url, status_code=303)
 
 
@@ -309,11 +314,17 @@ def create_app(paths: Paths) -> FastAPI:
             unknown, unknown_error = service.unknown_names(), ""
         except ChurchBotError as exc:
             unknown, unknown_error = {}, f"{exc.message}（{exc.hint}）" if exc.hint else exc.message
-        known_uids = {m.line_user_id for m in result.items if m.line_user_id}
-        people = [p for p in service.history.people() if p["user_id"] not in known_uids]
+        try:
+            collect_names = load_settings(paths).chat.collect_names
+        except ConfigError:
+            collect_names = False
+        accounts = build_accounts(service.history.people(), result.items)
         editing = next((m for m in result.items if m.name == edit), None)
         return page(request, "members.html", members=result.items, issues=result.issues, unknown=unknown,
-                    unknown_error=unknown_error, people=people, editing=editing)
+                    unknown_error=unknown_error, editing=editing, collect_names=collect_names,
+                    accounts=[a for a in accounts if not a.ignored],
+                    ignored_accounts=[a for a in accounts if a.ignored],
+                    line_names={a.user_id: a.display_name for a in accounts})
 
     @ui.post("/members/save")
     def members_save(name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
@@ -337,23 +348,101 @@ def create_app(paths: Paths) -> FastAPI:
             table.save(remove(table.load().items, name, key=lambda m: m.name))
         return _redirect("/members", f"已刪除「{name}」")
 
-    @ui.post("/members/add-person")
-    def members_add_person(user_id: str = Form(...), name: str = Form("")):
+    # --- LINE 帳號 ↔ 同工名單（按鈕說明見 core/accounts.py） ---
+
+    @ui.post("/members/accounts/add")
+    def account_add(user_id: str = Form(...)):
+        person = service.history.person(user_id)
+        if person is None:
+            return _redirect("/members#accounts", "找不到這個 LINE 帳號（可能已經刪掉了）", "error")
+        claimed = person["real_name"]
+        name = claimed or person["display_name"] or f"新朋友 {user_id[-6:]}"
         with TABLE_WRITE_LOCK:
             table = MemberTable(paths.members_file)
             items = table.load().items
-            if not any(m.line_user_id == user_id for m in items):
-                display = name or f"新朋友 {user_id[-6:]}"
-                items.append(Member(name=display, line_user_id=user_id, active=False,
-                                    note=f"機器人自動收集（{dt.date.today():%m/%d}），確認後把「狀態」改成「服事中」"))
-                table.save(items)
-                return _redirect(f"/members?edit={quote(display)}", f"已加入人員表「{display}」（尚未啟用）")
-        return _redirect("/members", "這個人已經在人員表裡了")
+            if any(m.line_user_id == user_id for m in items):
+                return _redirect("/members#accounts", "這個 LINE 帳號已經在同工名單裡了", "warn")
+            if (same := Directory(items).lookup(name)) is not None:
+                return _redirect("/members#accounts", f"同工名單已經有「{same.name}」（名字或其他寫法是「{name}」），"
+                                                      "是同一個人的話請按「對應」", "error")
+            line_name = f"LINE 名稱：{person['display_name']}；" if person["display_name"] else ""
+            todo = "" if claimed else "，確認真實姓名後改名並勾選「還在服事」"
+            items.append(Member(name=name, line_user_id=user_id, active=bool(claimed),
+                                note=f"{line_name}{dt.date.today():%m/%d} 從 LINE 帳號加入{todo}"))
+            table.save(items)
+        service.history.clear_real_name(user_id)
+        if claimed:
+            return _redirect("/members#accounts", f"已把「{name}」加進同工名單")
+        return _redirect(f"/members?edit={quote(name)}#edit", f"已加入「{name}」（先停用），請把名字改成真實姓名再啟用")
 
-    @ui.post("/members/forget-person")
-    def members_forget_person(user_id: str = Form(...)):
+    @ui.post("/members/accounts/link")
+    def account_link(user_id: str = Form(...), member_name: str = Form(...)):
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            target = next((m for m in items if m.name == member_name), None)
+            if any(m.line_user_id == user_id for m in items):
+                return _redirect("/members#accounts", "這個 LINE 帳號已經對應到同工了", "warn")
+            if target is None:
+                return _redirect("/members#accounts", f"同工名單裡找不到「{member_name}」", "error")
+            if target.line_user_id:
+                return _redirect("/members#accounts", f"「{member_name}」已經對應到另一個 LINE 帳號，請先確認是不是同一個人",
+                                 "error")
+            table.save([replace(m, line_user_id=user_id) if m is target else m for m in items])
+        service.history.clear_real_name(user_id)
+        return _redirect("/members#accounts", f"已把 LINE 帳號對應到「{member_name}」")
+
+    @ui.post("/members/accounts/rename")
+    def account_rename(user_id: str = Form(...)):
+        new_name = (service.history.person(user_id) or {}).get("real_name", "")
+        if not new_name:
+            return _redirect("/members#accounts", "這個帳號沒有登記新的名字", "warn")
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            current = next((m for m in items if m.line_user_id == user_id), None)
+            if current is None:
+                return _redirect("/members#accounts", "這個 LINE 帳號還沒對應到同工，請用「加入」或「對應」", "warn")
+            if (other := Directory([m for m in items if m is not current]).lookup(new_name)) is not None:
+                return _redirect("/members#accounts", f"「{new_name}」已經是同工「{other.name}」的名字或其他寫法，"
+                                                      "請先確認是不是同一個人", "error")
+            # 舊名字留在「其他寫法」：服事表還沒改過來的地方一樣對得到
+            aliases = tuple(a for a in dict.fromkeys((*current.aliases, current.name))
+                            if normalize_name(a) != normalize_name(new_name))
+            table.save([replace(m, name=new_name, aliases=aliases) if m is current else m for m in items])
+        service.history.clear_real_name(user_id)
+        return _redirect("/members#accounts", f"已把「{current.name}」改名成「{new_name}」（舊名字留在「其他寫法」）")
+
+    @ui.post("/members/accounts/ignore")
+    def account_ignore(user_id: str = Form(...)):
+        service.history.clear_real_name(user_id)
+        linked = any(m.line_user_id == user_id for m in MemberTable(paths.members_file).load().items)
+        if linked:  # 已經是同工：只是不採用這次登記的名字，帳號本身照樣列出來
+            return _redirect("/members#accounts", "已略過這次登記的名字，同工名單不變")
+        service.history.set_person_ignored(user_id, True)
+        return _redirect("/members#accounts", "已忽略這個帳號（本人重新登記名字時才會再出現）")
+
+    @ui.post("/members/accounts/unignore")
+    def account_unignore(user_id: str = Form(...)):
+        service.history.set_person_ignored(user_id, False)
+        return _redirect("/members#accounts", "已取消忽略")
+
+    @ui.post("/members/accounts/forget")
+    def account_forget(user_id: str = Form(...)):
         service.history.forget_person(user_id)
-        return _redirect("/members", "已從「自動收集到的人」移除")
+        return _redirect("/members#accounts", "已刪除這個帳號的紀錄（他之後在群組講話還是會再被記下來）")
+
+    @ui.post("/members/collect")
+    def members_collect(enabled: str = Form("")):
+        on = enabled == "1"
+
+        def change(settings: Settings) -> None:
+            settings.chat.collect_names = on
+
+        update_settings(paths, change)
+        if on:
+            return _redirect("/members#accounts", "已開放名字登記：請大家在 LINE 打「/我的名字 真實姓名」。收集完記得關掉")
+        return _redirect("/members#accounts", "已關閉名字登記")
 
     @ui.post("/members/alias")
     def members_alias(raw: str = Form(...), member_name: str = Form("")):
@@ -393,16 +482,17 @@ def create_app(paths: Paths) -> FastAPI:
     @ui.post("/settings", response_class=HTMLResponse)
     async def settings_save(request: Request):
         form = {k: str(v) for k, v in (await request.form()).items()}
-        try:
-            current = load_settings(paths)
-        except ConfigError:
-            current = Settings()  # 設定檔壞了：用預設值為底，存檔後就修好了
-        try:
-            new = apply_form(current, form)
-        except ChurchBotError as exc:
-            return settings_page_response(request, values={**form_values(current), **form},
-                                          error=f"{exc.message}　{exc.hint}".strip())
-        save_settings(paths, new)
+        with SETTINGS_LOCK:
+            try:
+                current = load_settings(paths)
+            except ConfigError:
+                current = Settings()  # 設定檔壞了：用預設值為底，存檔後就修好了
+            try:
+                new = apply_form(current, form)
+            except ChurchBotError as exc:
+                return settings_page_response(request, values={**form_values(current), **form},
+                                              error=f"{exc.message}　{exc.hint}".strip())
+            save_settings(paths, new)
         await run_in_threadpool(scheduler.reload)
         return _redirect("/settings", f"設定已儲存。自動發送：{scheduler.status}")
 
