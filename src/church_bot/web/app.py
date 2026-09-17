@@ -35,7 +35,8 @@ from church_bot.core.directory import Directory, normalize_name
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
-from church_bot.models import DeliveryStatus, Member, OutgoingMessage, RunReport, Severity, Target
+from church_bot.models import DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target
+from church_bot.org import KIND_SUGGESTIONS, OrgReport, OrgTable, OrgUnit, build_org
 from church_bot.remote_config import Verifier
 from church_bot.scheduler import BotScheduler
 from church_bot.service import BotService
@@ -551,6 +552,87 @@ def create_app(paths: Paths) -> FastAPI:
             return _redirect("/settings", "沒有輸入任何新的金鑰，所以沒有變更", "warn")
         update_env_file(paths.env_file, updates)
         return _redirect("/settings", "LINE 金鑰 / 密碼已更新（存在 .env，不會上傳到 git）")
+
+    # ------------------------------------------------------------------ 🧪 lab: 大教會架構（見 org.py）
+
+    def org_report() -> tuple[OrgReport, list[OrgUnit], list[Issue], list[Target], list[Member]]:
+        ctx = service.load()
+        loaded = OrgTable(paths.org_file).load()
+        sizes = {chat_id: count for chat_id, (count, _) in service.history.member_counts().items()}
+        report = build_org(loaded.items, ctx.targets, ctx.members, sizes, ctx.settings.schedule.every_n_weeks)
+        return report, loaded.items, [*loaded.issues, *report.issues], ctx.targets, ctx.members
+
+    @ui.get("/lab/org", response_class=HTMLResponse)
+    def lab_org(request: Request, edit: str = "", parent: str = ""):
+        report, units, issues, targets, members = org_report()
+        editing = next((u for u in units if u.name == edit), None)
+        blocked = ({editing.name} | report.descendants(editing.name)) if editing else set()
+        return page(request, "lab_org.html", report=report, units=units, issues=issues, targets=targets,
+                    members=members, editing=editing, new_parent=parent, group_owners=report.group_owners(),
+                    parent_choices=[u.name for u in units if u.name not in blocked], kinds=KIND_SUGGESTIONS)
+
+    @ui.post("/lab/org/save")
+    def lab_org_save(name: str = Form(""), parent: str = Form(""), kind: str = Form(""), leader: str = Form(""),
+                     groups: list[str] = Form([]), members: str = Form(""), note: str = Form(""),
+                     original_name: str = Form("")):
+        name, parent = name.strip(), parent.strip()
+        back = f"/lab/org?edit={quote(original_name)}#edit" if original_name else "/lab/org#edit"
+        if not name:
+            return _redirect(back, "請填單位名稱", "error")
+        with TABLE_WRITE_LOCK:
+            table = OrgTable(paths.org_file)
+            units = table.load().items
+            if name != original_name and any(u.name == name for u in units):
+                return _redirect(back, f"已經有叫「{name}」的單位了", "error")
+            if original_name and parent:
+                report, *_ = org_report()
+                if parent == original_name or parent in report.descendants(original_name):
+                    return _redirect(back, "上層單位不能選自己或自己底下的單位", "error")
+            unit = OrgUnit(name=name, parent=parent, kind=kind.strip(), leader=leader.strip(),
+                           groups=tuple(g for g in groups if g), members=parse_list(members), note=note.strip())
+            units = upsert(units, unit, key=lambda u: u.name, original_key=original_name or None)
+            if original_name and original_name != name:  # 改名：下層單位的「上層」跟著改
+                units = [replace(u, parent=name) if u.parent == original_name else u for u in units]
+            table.save(units)
+        return _redirect("/lab/org", f"已儲存「{name}」")
+
+    @ui.post("/lab/org/delete")
+    def lab_org_delete(name: str = Form(...)):
+        with TABLE_WRITE_LOCK:
+            table = OrgTable(paths.org_file)
+            units = table.load().items
+            gone = next((u for u in units if u.name == name), None)
+            if gone is None:
+                return _redirect("/lab/org", f"找不到「{name}」", "warn")
+            # 下層單位往上接到被刪單位的上層，不會跟著消失
+            table.save([replace(u, parent=gone.parent) if u.parent == name else u for u in units if u is not gone])
+        return _redirect("/lab/org", f"已刪除「{name}」（它底下的單位移到上一層）")
+
+    @ui.post("/lab/org/refresh-sizes")
+    def lab_org_refresh_sizes():
+        settings = load_settings(paths)
+        if settings.messenger.kind != "line":
+            return _redirect("/lab/org", "目前是測試模式，沒有連 LINE，查不到群組人數", "warn")
+        groups = [t for t in TargetTable(paths.targets_file).load().items if t.line_id[:1] in ("C", "R")
+                  and LINE_ID_RE.match(t.line_id)]
+        messenger = build_messenger(settings, paths)
+        updated, failed = 0, []
+        try:
+            for target in groups:
+                try:
+                    size = messenger.audience_size(target.line_id)
+                except ChurchBotError:
+                    failed.append(target.name)
+                    continue
+                if size is not None:
+                    service.history.set_member_count(target.line_id, size)
+                    updated += 1
+        finally:
+            messenger.close()
+        if failed:
+            return _redirect("/lab/org", f"更新了 {updated} 個群組的人數；查不到：{'、'.join(failed)}（機器人可能不在群組裡了）",
+                             "warn")
+        return _redirect("/lab/org", f"更新了 {updated} 個群組的人數")
 
     # ------------------------------------------------------------------ history & help
 

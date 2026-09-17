@@ -150,6 +150,7 @@
 | [docs/LINE_IDS_AND_MEMBERS.md](docs/LINE_IDS_AND_MEMBERS.md) | 群組 ID、個人 ID 怎麼來；能不能知道群組有哪些人；能不能私訊、怎麼算錢 |
 | [docs/HANDOVER.md](docs/HANDOVER.md) | 交接：目前狀態、已驗證／未驗證、上線清單、帳號與機密、待確認事項 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 程式架構（給工程師） |
+| [docs/LAB_LARGE_CHURCH.md](docs/LAB_LARGE_CHURCH.md) | 🧪 實驗：大教會（牧區 → 區 → 小組）要怎麼管理、要先決定哪些事 |
 
 ---
 

@@ -145,4 +145,26 @@ legend { font-weight: 700; padding: 0 6px; }
 .wf-step.error { border-left-color: var(--err); background: var(--err-bg); }
 .wf-step.off { border-left-color: var(--line); }
 .wf-step .wf-badge { float: right; }
+
+/* 🧪 大教會架構 */
+.topbar nav a.nav-lab { border: 1px dashed var(--muted); }
+.topbar nav a.nav-lab.active { border-style: solid; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; background: var(--bg); }
+.stat-num { font-size: 26px; font-weight: 700; }
+.stat-num small { font-size: 15px; color: var(--muted); font-weight: 400; }
+.stat-label { color: var(--muted); font-size: 13px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip { border: 1px solid var(--line); border-radius: 999px; padding: 1px 10px; font-size: 13px; background: var(--card); }
+.chip.off { color: var(--muted); border-style: dashed; }
+.org-node { border: 1px solid var(--line); border-left: 4px solid var(--primary); border-radius: 10px; padding: 6px 12px; margin: 8px 0; background: var(--card); }
+.org-node .org-node { border-left-color: var(--blue); }
+.org-node .org-node .org-node { border-left-color: var(--warn); }
+.org-node > summary { margin: 2px 0; }
+.org-name { font-weight: 700; font-size: 17px; margin-right: 6px; }
+.org-sum { font-size: 14px; margin: 2px 0 0 18px; }
+.org-body { margin-left: 18px; }
+.actions.compact { margin-top: 6px; gap: 6px; }
+.actions.compact .button, .actions.compact button { padding: 3px 10px; font-size: 13px; }
+textarea.short { min-height: 70px; font-family: inherit; }
 details > summary { cursor: pointer; margin: 8px 0; }

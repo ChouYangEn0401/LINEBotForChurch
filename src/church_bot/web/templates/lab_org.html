@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}大教會架構（實驗）・服事提醒機器人{% endblock %}
+
+{% macro node_card(node) %}
+<details class="org-node" open>
+  <summary>
+    <span class="org-name">{{ node.unit.name }}</span>
+    {% if node.unit.kind %}<span class="tag off">{{ node.unit.kind }}</span>{% endif %}
+    {% if node.unit.leader %}<span class="muted small">負責人：{{ node.unit.leader }}</span>{% endif %}
+    <div class="org-sum">
+      群組 {{ node.totals.active_groups }} 個會收到・約 {{ node.totals.people }} 人・每月約 <strong>{{ node.totals.monthly }}</strong> 則・同工 {{ node.totals.members }} 位
+      {% if node.totals.unknown_sizes %}<span class="tag warning">{{ node.totals.unknown_sizes }} 個群組人數未知</span>{% endif %}
+      {% if node.children %}<span class="muted">（含下層）</span>{% endif %}
+    </div>
+  </summary>
+  <div class="org-body">
+    {% if node.groups %}
+    <div class="chips">
+      {% for g in node.groups %}
+        <span class="chip {{ '' if g.active else 'off' }}">👥 {{ g.target.name }}{% if g.size is not none %}・{{ g.size }} 人{% endif %}{% if not g.active %}（不會收到）{% endif %}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if node.members %}<div class="small">🙋 {{ fmt_list(node.members) }}</div>{% endif %}
+    {% if node.unit.note %}<div class="muted small">📝 {{ node.unit.note }}</div>{% endif %}
+    <div class="actions compact">
+      <a class="button secondary" href="/lab/org?edit={{ node.unit.name | urlencode }}#edit">編輯</a>
+      <a class="button secondary" href="/lab/org?parent={{ node.unit.name | urlencode }}#edit">＋ 新增下層單位</a>
+      <form method="post" action="/lab/org/delete" class="inline" data-confirm="刪除「{{ node.unit.name }}」？它底下的單位會移到上一層，不會一起刪掉。">
+        <input type="hidden" name="name" value="{{ node.unit.name }}"><button type="submit" class="danger">刪除</button></form>
+    </div>
+    {% for child in node.children %}{{ node_card(child) }}{% endfor %}
+  </div>
+</details>
+{% endmacro %}
+
+{% block content %}
+{% set c = report.church %}
+<section class="card">
+  <h2>🧪 大教會架構 <span class="tag warning">實驗功能</span></h2>
+  <p>把教會畫成一棵樹：<strong>牧區 → 區 → 小組</strong>（層數自己決定），每個單位掛上它的 LINE 群組和同工。</p>
+  <p class="muted">目前只用來<strong>看清楚全貌、估算每個單位用掉多少 LINE 則數</strong>，<strong>不會改變實際發送</strong>（發送仍然只看「👥 LINE 群組」頁）。
+    資料存在 <code>config/org.csv</code>，也可以用 Excel 改。</p>
+  <nav class="subnav">
+    <a href="#tree">🌳 架構圖</a><a href="#unassigned">📦 還沒分配（{{ report.unassigned_groups | length }} 群組・{{ report.unassigned_members | length }} 同工）</a>
+    <a href="#edit">➕ 新增單位</a><a href="#ideas">💡 如果要正式支援大教會</a>
+  </nav>
+</section>
+
+<section class="card">
+  <h2>📊 全教會估算</h2>
+  <div class="stats">
+    <div class="stat"><div class="stat-num">{{ units | length }}</div><div class="stat-label">個單位</div></div>
+    <div class="stat"><div class="stat-num">{{ c.active_groups }}<small> / {{ c.groups }}</small></div><div class="stat-label">個群組會收到提醒</div></div>
+    <div class="stat"><div class="stat-num">{{ c.people }}</div><div class="stat-label">人（群組人數加總）</div></div>
+    <div class="stat"><div class="stat-num">{{ c.monthly }}</div><div class="stat-label">預估每月則數</div></div>
+  </div>
+  <p>👉 建議方案：<strong>{{ report.plan }}</strong>
+    <span class="muted small">（群組人數 × 每月發送約 {{ "%.1f" | format(report.sends_per_month) }} 次；價格見 docs/LINE_PRICING.md）</span></p>
+  {% if c.unknown_sizes %}
+    <div class="flash warn">⚠️ 有 {{ c.unknown_sizes }} 個會收到提醒的群組還不知道人數，上面的估算會偏低。按下面的按鈕向 LINE 查詢。</div>
+  {% endif %}
+  <form method="post" action="/lab/org/refresh-sizes" class="inline">
+    <button type="submit" class="secondary">🔄 更新群組人數（向 LINE 查詢，不扣額度）</button></form>
+  {% if issues %}
+  <ul class="issues" style="margin-top:12px">
+    {% for i in issues %}<li class="{{ i.severity.value }}">{{ severity_icon[i.severity.value] }} {{ i.message }}{% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card" id="tree">
+  <h2>🌳 架構圖</h2>
+  {% if report.roots %}
+    {% for node in report.roots %}{{ node_card(node) }}{% endfor %}
+  {% else %}
+    <p>還沒有任何單位。從下面新增第一個（例如「北區」），再用「＋ 新增下層單位」加它底下的小組。</p>
+  {% endif %}
+</section>
+
+<section class="card" id="unassigned">
+  <h2>📦 還沒分配到任何單位</h2>
+  <h3>LINE 群組（{{ report.unassigned_groups | length }}）</h3>
+  {% if report.unassigned_groups %}
+    <div class="chips">
+      {% for g in report.unassigned_groups %}
+        <span class="chip {{ '' if g.active else 'off' }}">👥 {{ g.target.name }}{% if g.size is not none %}・{{ g.size }} 人{% endif %}{% if not g.active %}（不會收到）{% endif %}</span>
+      {% endfor %}
+    </div>
+  {% else %}<p class="muted">每個群組都有歸屬了 👍</p>{% endif %}
+  <h3>同工（{{ report.unassigned_members | length }}，只算「還在服事」的）</h3>
+  {% if report.unassigned_members %}<p class="small">{{ fmt_list(report.unassigned_members) }}</p>
+  {% else %}<p class="muted">每位同工都有歸屬了 👍</p>{% endif %}
+</section>
+
+{% set u = editing %}
+<section class="card" id="edit">
+  <h2>{% if u %}✏️ 編輯「{{ u.name }}」{% else %}➕ 新增單位{% endif %}</h2>
+  <form method="post" action="/lab/org/save" class="form-grid">
+    <input type="hidden" name="original_name" value="{{ u.name if u else '' }}">
+
+    <label for="name">單位名稱</label>
+    <input type="text" id="name" name="name" required value="{{ u.name if u else '' }}" placeholder="例如：北區、北區第一小組">
+
+    <label for="parent">上層單位</label>
+    <select id="parent" name="parent">
+      {% set current_parent = u.parent if u else new_parent %}
+      <option value="">（最上層）</option>
+      {% for name in parent_choices %}<option value="{{ name }}" {{ "selected" if name == current_parent }}>{{ name }}</option>{% endfor %}
+    </select>
+
+    <label for="kind">類型</label>
+    <input type="text" id="kind" name="kind" list="kind-list" value="{{ u.kind if u else '' }}" placeholder="例如：牧區、區、小組">
+    <datalist id="kind-list">{% for k in kinds %}<option value="{{ k }}">{% endfor %}</datalist>
+    <div class="help">隨便寫，只是方便看。</div>
+
+    <label for="leader">負責人</label>
+    <input type="text" id="leader" name="leader" list="member-list" value="{{ u.leader if u else '' }}">
+    <datalist id="member-list">{% for m in members %}<option value="{{ m.name }}">{% endfor %}</datalist>
+
+    <label>LINE 群組</label>
+    <div>
+      {% if targets %}
+        {% for t in targets %}
+          {% set owner = group_owners.get(t.name) %}
+          <label class="checkbox-row"><input type="checkbox" name="groups" value="{{ t.name }}" {{ "checked" if u and t.name in u.groups }}>
+            {{ t.name }}{% if owner and (not u or owner != u.name) %} <span class="muted small">（目前在「{{ owner }}」）</span>{% endif %}</label>
+        {% endfor %}
+      {% else %}<span class="muted">還沒有任何 LINE 群組，先到「👥 LINE 群組」頁新增。</span>{% endif %}
+    </div>
+    <div class="help">只勾「直屬」這個單位的群組；下層單位的群組會自動算進合計。一個群組只放在一個單位。</div>
+
+    <label for="members">同工</label>
+    <textarea id="members" name="members" class="short" placeholder="陳小明、林美華">{{ fmt_list(u.members) if u else '' }}</textarea>
+    <div class="help">用「、」隔開，名字或同工名單上的其他寫法都可以。一個人可以同時在好幾個單位。</div>
+
+    <label for="note">備註</label>
+    <input type="text" id="note" name="note" value="{{ u.note if u else '' }}">
+
+    <div></div>
+    <div class="actions">
+      <button type="submit" class="primary">💾 儲存</button>
+      {% if u %}<a class="button secondary" href="/lab/org">取消編輯</a>{% endif %}
+    </div>
+  </form>
+</section>
+
+<section class="card" id="ideas">
+  <h2>💡 如果要正式支援大教會，需要先決定的事</h2>
+  <p class="muted">這一頁先把「架構」和「成本」看清楚。要真的讓每個牧區自己管、自己發，還有下面幾件事要一起想（完整說明在 <code>docs/LAB_LARGE_CHURCH.md</code>）：</p>
+  <ol class="steps">
+    <li><strong>誰管什麼（權限）</strong>：每個牧區有自己的管理員，只看得到、改得到自己牧區的群組和名單；出問題時通知牧區負責人，全教會的問題才通知總管理員。</li>
+    <li><strong>服事表與發送時間</strong>：各牧區可能有自己的服事表（不同 Google Sheet 或分頁）和發送時間 → 設定要能「每個單位覆寫，沒寫就沿用上層」。</li>
+    <li><strong>費用</strong>：推播按人數算，大教會很快超過免費額度。上面的估算可以拿來決定：只推到同工群、改每兩週一次、或改成只私訊當週服事的人。</li>
+    <li><strong>一個 LINE 官方帳號還是每個牧區一個</strong>：一個帳號集中管理、額度共用；多個帳號額度和帳單分開。放在<strong>同一個 Provider</strong> 底下，同一個人的 LINE ID 才會一樣，名單可以共用。</li>
+    <li><strong>同名同姓</strong>：人一多，「真實姓名」就不夠當唯一的鍵，需要「姓名＋所屬單位」或內部編號，LINE 帳號對應也要跟著改。</li>
+    <li><strong>主機</strong>：要一直收集名字、多個牧區一起用，就需要 24 小時開著、有固定網址的主機，資料也可能要從 CSV 換成資料庫。</li>
+  </ol>
+</section>
+{% endblock %}

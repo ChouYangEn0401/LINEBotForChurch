@@ -21,7 +21,7 @@
     {% for href, label, keys in items %}
       <a href="{{ href }}" class="{{ 'active' if nav in keys }}">{{ label }}</a>
     {% endfor %}
-    {% block extra_nav %}{% endblock %}
+    <a href="/lab/org" class="nav-lab {{ 'active' if nav == 'lab_org' }}" title="實驗功能：不影響實際發送">🧪 大教會（實驗）</a>
   </nav>
   {% if has_password %}
     <form method="post" action="/logout" class="inline logout"><button type="submit" class="secondary">🔒 登出</button></form>
