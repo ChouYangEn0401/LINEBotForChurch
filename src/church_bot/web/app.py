@@ -1,6 +1,6 @@
 """管理網頁（FastAPI + Jinja2，伺服器端產生畫面，不需要任何前端框架或建置步驟）。
 
-頁面：首頁（狀態 + 本週預覽 + 發送）、群組、人員、設定、紀錄、系統檢查、使用說明。
+頁面：首頁（運作流程 + 本週預覽 + 發送）、同工名單、LINE 群組、設定、發送紀錄、說明（含系統檢查）。
 JSON API：/api/*（自動產生的文件在 /docs）。LINE Webhook：/line/webhook（選用）。
 """
 
@@ -44,6 +44,7 @@ from church_bot.sources.google_public import parse_sheet_url
 from church_bot.tables import (
     LINE_ID_RE, TABLE_WRITE_LOCK, MemberTable, TargetTable, describe_line_id, fmt_list, parse_list, remove, upsert,
 )
+from church_bot.web.overview import Step, build_steps
 from church_bot.webhook import SignatureError, WebhookHandler
 
 log = logging.getLogger(__name__)
@@ -242,7 +243,25 @@ def create_app(paths: Paths) -> FastAPI:
             request, "index.html", report=report, plan=plan, last=service.history.last_run(),
             problems=[i for i in report.issues if i.severity is not Severity.INFO],
             infos=[i for i in report.issues if i.severity is Severity.INFO],
+            steps=workflow_steps(report),
         )
+
+    def workflow_steps(report: RunReport) -> list[Step]:
+        try:
+            ctx = service.load()
+        except ChurchBotError:
+            return []  # 設定檔壞了：上面的「需要處理的事項」已經會說明
+        roster, roster_error = None, ""
+        try:
+            roster = service.fetch_roster(ctx.settings, service.now(ctx.settings).date(), use_cache=True)
+        except ChurchBotError as exc:
+            roster_error = exc.message
+        accounts = build_accounts(service.history.people(), ctx.members)
+        unknown = sum(1 for i in report.issues if i.code == "unknown_name")
+        return build_steps(issues=report.issues, settings=ctx.settings, roster=roster, roster_error=roster_error,
+                           members=ctx.members, targets=ctx.targets, unknown_names=unknown,
+                           pending_claims=sum(1 for a in accounts if a.needs_review and not a.ignored),
+                           next_run=scheduler.next_run_text())
 
     @ui.post("/send")
     def send(force: int = Form(0)):
@@ -299,7 +318,7 @@ def create_app(paths: Paths) -> FastAPI:
             if not any(t.line_id == chat_id for t in items):
                 items.append(Target(name=name or f"新群組 {dt.date.today():%m/%d}", line_id=chat_id, enabled=False))
                 table.save(items)
-        return _redirect(f"/targets?edit={quote(name or '')}", "已加入群組表（尚未啟用），確認後勾選「啟用」並儲存")
+        return _redirect(f"/targets?edit={quote(name or '')}", "已加入 LINE 群組（尚未啟用），確認後勾選「啟用」並儲存")
 
     @ui.post("/targets/test")
     def targets_test(name: str = Form(...)):

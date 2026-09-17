@@ -8,8 +8,8 @@
  Sheet/CSV  └──────────────────────────────────┘
                  │
                  ▼ core/parser.py      自動判斷 wide / long / matrix → Roster（日期 × 服事 × 人）
-                 ▼ core/planner.py     挑出這次的聚會、依群組表產生訊息、找出所有問題（Issue）
-                 │    ├ core/directory.py  名字 → 人員表（別名、全形半形、括號註記、猜測）
+                 ▼ core/planner.py     挑出這次的聚會、依 LINE 群組產生訊息、找出所有問題（Issue）
+                 │    ├ core/directory.py  名字 → 同工名單（別名、全形半形、括號註記、猜測）
                  │    └ core/renderer.py   Jinja2 模板 → 純文字 + LINE textV2（@ 人）
                  ▼ core/dispatcher.py  防重複（SQLite）→ 檢查額度 → Messenger.send() → 每則結果
             ┌─ messengers/ ────────────────────┐
@@ -28,7 +28,7 @@
 | `config.py` | `settings.yaml`（pydantic 驗證）+ `.env`（機密）；路徑 |
 | `models.py` | 純資料：Roster、ServiceDay、Target、Member、Issue、RunReport… |
 | `errors.py` | `ChurchBotError(message, hint)` 與子類別 |
-| `tables.py` | 群組表、人員表的 CSV 讀寫（編碼自動判斷、逐列驗證） |
+| `tables.py` | LINE 群組、同工名單的 CSV 讀寫（編碼自動判斷、逐列驗證） |
 | `sources/` | 資料來源：`csv_file`、`google_public`（免金鑰）、`google_service_account` |
 | `core/dates.py` | 日期解析（民國年、缺年份推測、Excel 序號…）與格式化 |
 | `core/parser.py` | 表格 → Roster，三種排法自動判斷 |
@@ -74,7 +74,7 @@
 
 1. 在 `messengers/` 新增類別，實作 `Messenger` protocol：`send`、`check`、`audience_size`、`quota`、`close`。
 2. `config.MessengerSettings.kind` 加上名字；`messengers/__init__.py` 的 `build_messenger()` 和 `MESSENGER_KINDS_ZH` 各加一行。
-3. 群組表的 `LINE_ID` 欄就是「收件者 ID」。換服務時，一起調整 `tables.LINE_ID_RE` 的格式驗證。
+3. LINE 群組的 `LINE_ID` 欄就是「收件者 ID」。換服務時，一起調整 `tables.LINE_ID_RE` 的格式驗證。
 
 ## 設計決策
 

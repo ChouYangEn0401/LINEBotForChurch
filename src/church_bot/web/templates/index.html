@@ -14,6 +14,20 @@
   </div>
 </section>
 
+{% if steps %}
+<h2 class="section-title">運作流程 <span class="muted small">每週自動跑一次，點任一步驟去看細節</span></h2>
+<div class="workflow">
+  {% for s in steps %}
+  <a class="wf-step {{ s.status }}" href="{{ s.href }}">
+    <span class="wf-badge">{{ {"ok": "✅", "warning": "⚠️", "error": "❌", "off": "➖"}[s.status] }}</span>
+    <div class="wf-title">{{ loop.index }}. {{ s.icon }} {{ s.title }}</div>
+    <div class="wf-summary">{{ s.summary }}</div>
+    {% if s.detail %}<div class="wf-detail">{{ s.detail }}</div>{% endif %}
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if problems %}
 <section class="card">
   <h2>需要處理的事項</h2>

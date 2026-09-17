@@ -19,9 +19,10 @@ code { background: var(--line); padding: 1px 6px; border-radius: 6px; font-size:
           background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
 .brand { font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; }
 .topbar nav { display: flex; flex-wrap: wrap; gap: 4px; }
-.topbar nav a { padding: 6px 12px; border-radius: 999px; color: var(--text); text-decoration: none; }
+.topbar nav a { padding: 6px 12px; border-radius: 999px; color: var(--text); text-decoration: none; white-space: nowrap; }
 .topbar nav a:hover { background: var(--line); }
 .topbar nav a.active { background: var(--primary); color: #fff; }
+.topbar .logout { margin-left: auto; }
 
 main { max-width: 1100px; margin: 20px auto; padding: 0 16px; }
 footer { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 16px 40px; }
@@ -128,4 +129,20 @@ legend { font-weight: 700; padding: 0 6px; }
 .toggle-box.on { background: var(--ok-bg); border-color: var(--ok); }
 .table tr.pending td { background: var(--warn-bg); }
 .pending-change { border-color: var(--warn); background: var(--warn-bg); }
+
+.section-title { font-size: 18px; margin: 4px 0 10px; }
+
+/* 首頁「運作流程」 */
+.workflow { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin: 0 0 18px; }
+.wf-step { position: relative; display: block; color: var(--text); text-decoration: none; background: var(--card);
+           border: 1px solid var(--line); border-left-width: 6px; border-radius: 10px; padding: 10px 12px; }
+.wf-step:hover { filter: brightness(0.97); }
+.wf-step .wf-title { font-weight: 700; }
+.wf-step .wf-summary { font-size: 15px; }
+.wf-step .wf-detail { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.wf-step.ok { border-left-color: var(--ok); }
+.wf-step.warning { border-left-color: var(--warn); background: var(--warn-bg); }
+.wf-step.error { border-left-color: var(--err); background: var(--err-bg); }
+.wf-step.off { border-left-color: var(--line); }
+.wf-step .wf-badge { float: right; }
 details > summary { cursor: pointer; margin: 8px 0; }

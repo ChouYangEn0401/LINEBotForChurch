@@ -1,4 +1,4 @@
-"""對照表（CSV）讀寫：``config/targets.csv``（群組表）與 ``config/members.csv``（人員表）。
+"""對照表（CSV）讀寫：``config/targets.csv``（LINE 群組）與 ``config/members.csv``（同工名單）。
 
 為什麼用 CSV：
 * 用 Excel / Numbers / Google Sheet / 記事本都能開，看得見、改得動。
@@ -190,7 +190,7 @@ class CsvTable(Generic[T]):
 
 
 class TargetTable(CsvTable[Target]):
-    title = "群組表"
+    title = "LINE 群組"
     columns = (
         Column("name", "群組名稱", ("名稱", "群組", "name"), required=True),
         Column("line_id", "LINE_ID", ("LINE ID", "ID", "群組ID", "line_id", "to"), required=True),
@@ -251,7 +251,7 @@ class TargetTable(CsvTable[Target]):
         if not any(t.enabled and LINE_ID_RE.match(t.line_id) for t in items):
             issues.append(self._issue(
                 Severity.ERROR, "no_active_target", "目前沒有任何可以收到提醒的群組",
-                "提醒不會送到任何地方。請到「群組」頁新增群組並填好 LINE_ID。",
+                "提醒不會送到任何地方。請到「LINE 群組」頁新增群組並填好 LINE_ID。",
             ))
 
 
@@ -259,7 +259,7 @@ class TargetTable(CsvTable[Target]):
 
 
 class MemberTable(CsvTable[Member]):
-    title = "人員表"
+    title = "同工名單"
     columns = (
         Column("name", "名字", ("姓名", "name", "顯示名稱"), required=True),
         Column("aliases", "其他寫法", ("別名", "綽號", "aliases", "alias")),

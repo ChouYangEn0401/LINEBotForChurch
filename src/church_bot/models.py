@@ -113,7 +113,7 @@ class Member:
 
 @dataclass(frozen=True, slots=True)
 class Person:
-    """服事表上的一個名字，對照完人員表後的結果。"""
+    """服事表上的一個名字，對照完同工名單後的結果。"""
 
     raw: str  # 服事表上原本的寫法
     display: str  # 訊息上顯示的名字

@@ -145,7 +145,7 @@ class BehaviorSettings(_Base):
     resend_if_changed: bool = False
     # 服事表剩不到幾天就提醒管理員「該排下一季了」
     roster_low_warning_days: int = Field(default=14, ge=0, le=365)
-    # 服事表上的名字在人員表對不到時，要不要提醒管理員
+    # 服事表上的名字在同工名單對不到時，要不要提醒管理員
     warn_unknown_names: bool = True
 
 

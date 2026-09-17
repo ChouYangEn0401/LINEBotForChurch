@@ -1,10 +1,12 @@
 {% extends "base.html" %}
-{% block title %}群組・服事提醒機器人{% endblock %}
+{% block title %}LINE 群組・服事提醒機器人{% endblock %}
 {% block content %}
 <section class="card">
-  <h2>👥 群組表：提醒要送到哪些 LINE 群組</h2>
-  <p class="muted">存在 <code>config/targets.csv</code>，也可以用 Excel 打開直接改（<a href="/download/targets.csv">下載一份</a>）。
-    網頁和 Excel 改的是同一個檔案，改完不用重開程式。</p>
+  <h2>👥 LINE 群組：提醒要送到哪裡</h2>
+  <p>每週的提醒會送到下面每個「啟用」的群組。每個群組可以只收一部分，例如敬拜團只收「敬拜、司琴、音控」。</p>
+  <p class="muted">💰 送到群組是<strong>按群組人數</strong>扣 LINE 額度（30 人的群組送一次 = 30 則），群組越少越省。
+    把機器人邀進新群組，它會自動出現在這裡等你啟用。
+    存在 <code>config/targets.csv</code>，也可以用 Excel 打開直接改（<a href="/download/targets.csv">下載一份</a>），改完不用重開程式。</p>
   {% for i in issues if i.severity.value != "info" %}
     <div class="flash {{ 'error' if i.severity.value == 'error' else 'warn' }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
       {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</div>
@@ -51,7 +53,7 @@
 
 {% if chats %}
 <section class="card">
-  <h2>🔔 機器人最近看到的群組（還沒加進群組表）</h2>
+  <h2>🔔 機器人最近看到的群組（還沒加進 LINE 群組）</h2>
   <p class="muted">機器人被邀進群組、或有人在群組裡打「/群組ID」後，會出現在這裡。按「加入」就會幫你填好 LINE_ID。</p>
   <table class="table">
     <thead><tr><th>群組名稱</th><th>LINE_ID</th><th>最後看到</th><th></th></tr></thead>
@@ -83,7 +85,7 @@
 
     <label for="line_id">LINE_ID</label>
     <input type="text" id="line_id" name="line_id" value="{{ t.line_id if t else '' }}" placeholder="群組是 C 開頭、個人是 U 開頭，後面 32 碼">
-    <div class="help">把機器人加進群組，在群組裡打「/群組ID」，機器人會回覆，複製貼上即可（詳見「使用說明」）。</div>
+    <div class="help">把機器人加進群組，在群組裡打「/群組ID」，機器人會回覆，複製貼上即可（詳見「說明」）。</div>
 
     <label>啟用</label>
     <div class="checkbox-row"><input type="checkbox" id="enabled" name="enabled" {{ "checked" if (t is none or t.enabled) }}>
@@ -99,7 +101,7 @@
 
     <label>@ 標記服事的人</label>
     <div class="checkbox-row"><input type="checkbox" id="mention" name="mention" {{ "checked" if t and t.mention }}>
-      <label for="mention">在訊息裡 @ 服事的人（要先在「人員」頁填好他們的 LINE_userId）</label></div>
+      <label for="mention">在訊息裡 @ 服事的人（要先在「同工名單」頁填好他們的 LINE_userId）</label></div>
 
     <label for="note">備註</label>
     <input type="text" id="note" name="note" value="{{ t.note if t else '' }}">

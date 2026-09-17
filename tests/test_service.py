@@ -131,11 +131,11 @@ def test_roster_change_resend_policy(service, paths, fake):
 
 def test_health_check_lists_every_area(service):
     names = [item.name for item in service.health()]
-    assert names[:4] == ["設定檔", "群組表", "人員表", "服事表"] and "管理員通知" in names
+    assert names[:4] == ["設定檔", "LINE 群組", "同工名單", "服事表"] and "管理員通知" in names
 
 
 def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
-    """docs/QUICKSTART_TEST.md 教的做法：群組表的 LINE_ID 填自己的 U... userId，安全地只測試自己。"""
+    """docs/QUICKSTART_TEST.md 教的做法：LINE 群組的 LINE_ID 填自己的 U... userId，安全地只測試自己。"""
     write(paths.config_dir / "roster.csv", ROSTER)
     settings = Settings()
     settings.source.kind, settings.source.csv_path = "csv", "config/roster.csv"
@@ -148,7 +148,7 @@ def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     report, _ = svc.run("cli")
     assert statuses(report) == [("我自己", DeliveryStatus.SENT)]
-    assert fake.texts_to(me) and "王牧師" in fake.texts_to(me)[0]  # 沒設人員表，名字照服事表原樣顯示
+    assert fake.texts_to(me) and "王牧師" in fake.texts_to(me)[0]  # 沒設同工名單，名字照服事表原樣顯示
 
 
 def test_biweekly_schedule_warns_when_lookahead_too_short(paths):

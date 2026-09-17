@@ -7,17 +7,17 @@
 
 指令一律「/」開頭（全形「／」也可以），一般聊天不會誤觸：
 * /群組ID → 回覆這個聊天室的 ID
-* /我的ID → 回覆自己的名字＋userId（填到人員表就能被 @；填到設定就能收管理員通知）
+* /我的ID → 回覆自己的名字＋userId（填到同工名單就能被 @；填到設定就能收管理員通知）
 * /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
 * /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
 * /說明 → 列出指令
 
 支援的事件：
-* 機器人被加進群組 → 在群組回覆群組 ID，並自動加到「群組表」（先不啟用，管理員確認後再打開）
+* 機器人被加進群組 → 在群組回覆群組 ID，並自動加到「LINE 群組」（先不啟用，管理員確認後再打開）
 * 有新成員加入群組 → 在群組回報新成員的名字＋userId（只有手機版 LINE 使用者才會有 userId）
 * 機器人被踢出群組 → 通知管理員（那個群組以後收不到提醒了）
 * 任何人在群組講話 → 背景記錄他的名字＋userId（不用開口特別問，講一句話就記住），
-  在「同工名單」頁會看到「LINE 帳號」，一鍵就能加進人員表
+  在「同工名單」頁會看到「LINE 帳號」，一鍵就能加進同工名單
 
 一般聊天內容一律不回應，不會吵到群組。回覆（Reply API）、查名字（Get profile）都不計入 LINE 每月額度。
 """
@@ -191,7 +191,7 @@ class WebhookHandler:
             history.remember_chat(chat_id, kind, name)
             added = self._auto_add_target(chat_id, name)
             log.info("機器人被加進%s：%s（%s）", "群組" if kind == "group" else "聊天室", name or "?", chat_id)
-            note = "已自動加到管理網頁的「群組」頁（尚未啟用）。" if added else "這個群組已經在「群組」頁裡了。"
+            note = "已自動加到管理網頁的「LINE 群組」頁（尚未啟用）。" if added else "這個群組已經在「LINE 群組」頁裡了。"
             messenger.reply(reply_token, f"大家好！我是服事提醒小幫手 🙌\n這個群組的 ID：\n{chat_id}\n\n管理員：{note}")
         elif etype == "memberJoined":
             self._report_new_members(event, chat_id, kind, reply_token, messenger)

@@ -263,10 +263,10 @@ class BotService:
 
         active = [t for t in ctx.targets if t.enabled and LINE_ID_RE.match(t.line_id)]
         table_errors = [i for i in ctx.issues if i.is_error]
-        items.append(CheckItem("群組表", bool(active) and not table_errors,
+        items.append(CheckItem("LINE 群組", bool(active) and not table_errors,
                                f"共 {len(ctx.targets)} 個群組，{len(active)} 個會收到提醒",
-                               "；".join(i.message for i in table_errors) or ("請到「群組」頁新增群組" if not active else "")))
-        items.append(CheckItem("人員表", None if not ctx.members else True,
+                               "；".join(i.message for i in table_errors) or ("請到「LINE 群組」頁新增群組" if not active else "")))
+        items.append(CheckItem("同工名單", None if not ctx.members else True,
                                f"共 {len(ctx.members)} 位" if ctx.members else "還沒設定（名字會照服事表原樣顯示）"))
 
         today = self.now(s).date()

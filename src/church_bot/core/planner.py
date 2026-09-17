@@ -55,7 +55,7 @@ def active_targets(targets: list[Target]) -> list[Target]:
 
 
 def find_unknown_names(roster: Roster, directory: Directory, since: dt.date) -> dict[str, tuple[str, ...]]:
-    """整份服事表（從 since 開始）裡對不到人員表的名字 → 猜測的人選。給「人員」頁用。"""
+    """整份服事表（從 since 開始）裡對不到同工名單的名字 → 猜測的人選。給「同工名單」頁用。"""
     unknown: dict[str, tuple[str, ...]] = {}
     for day in roster.days:
         if day.date < since:
@@ -123,7 +123,7 @@ class Planner:
                 filters = "、".join([*target.roles, *target.labels])
                 plan.add(Severity.WARNING, "target_nothing",
                          f"「{target.name}」這次沒有符合的服事內容，所以不會發",
-                         f"群組表設定只發「{filters}」，請確認跟服事表上的寫法一樣。" if filters
+                         f"LINE 群組設定只發「{filters}」，請確認跟服事表上的寫法一樣。" if filters
                          else "這幾天的服事表都是空白的。")
 
     def _check_people(self, plan: Plan, targets: list[Target]) -> None:
@@ -139,8 +139,8 @@ class Planner:
                         plan.people.append(person)
                     self._check_person(plan, person, when, a.role, mention_on)
         if self.directory.is_empty and plan.people:
-            plan.add(Severity.INFO, "no_members", "人員表是空的，名字會照服事表原樣顯示",
-                     "不需要 @ 人、名字也不用換的話，可以不設定人員表。")
+            plan.add(Severity.INFO, "no_members", "同工名單是空的，名字會照服事表原樣顯示",
+                     "不需要 @ 人、名字也不用換的話，可以不設定同工名單。")
 
     def _check_person(self, plan: Plan, p: Person, when: str, role: str, mention_on: bool) -> None:
         if self.directory.is_empty:
@@ -148,16 +148,16 @@ class Planner:
         if not p.matched:
             if self.behavior.warn_unknown_names:
                 guess = f"可能是：{'、'.join(p.suggestions)}？" if p.suggestions else ""
-                plan.add(Severity.WARNING, "unknown_name", f"服事表上的「{p.raw}」在人員表找不到（{when} {role}）",
-                         f"{guess}到「人員」頁把它新增，或設成某人的「其他寫法」。訊息仍會照原樣送出。")
+                plan.add(Severity.WARNING, "unknown_name", f"服事表上的「{p.raw}」在同工名單找不到（{when} {role}）",
+                         f"{guess}到「同工名單」頁把它新增，或設成某人的「其他寫法」。訊息仍會照原樣送出。")
             return
         if p.member and not p.member.active:
             plan.add(Severity.WARNING, "inactive_member",
-                     f"「{p.member.name}」在人員表是「停用」，但 {when} 被排了「{role}」",
-                     "確認服事表是不是要換人；如果他回來服事了，把人員表的「啟用」改回「是」。")
+                     f"「{p.member.name}」在同工名單是「停用」，但 {when} 被排了「{role}」",
+                     "確認服事表是不是要換人；如果他回來服事了，把同工名單的「啟用」改回「是」。")
         if mention_on and p.member and not p.member.line_user_id:
             plan.add(Severity.INFO, "no_user_id", f"「{p.member.name}」沒有 LINE_userId，訊息裡不會 @ 到他",
-                     "請他在有機器人的群組打「/我的ID」，把回覆的 ID 填到人員表。")
+                     "請他在有機器人的群組打「/我的ID」，把回覆的 ID 填到同工名單。")
 
     def _check_empty_roles(self, plan: Plan) -> None:
         for day in plan.days:

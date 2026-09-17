@@ -9,18 +9,23 @@
 <body>
 <header class="topbar">
   <a class="brand" href="/">⛪ 服事提醒機器人</a>
-  <nav>
-    {% set items = [
-      ("index", "/", "🏠 首頁"), ("targets", "/targets", "👥 群組"), ("members", "/members", "🙋 人員"),
-      ("settings", "/settings", "⚙️ 設定"), ("runs", "/runs", "📜 紀錄"), ("check", "/check", "🩺 系統檢查"),
-      ("help", "/help", "❓ 使用說明")] %}
-    {% for key, href, label in items %}
-      <a href="{{ href }}" class="{{ 'active' if nav == key or (key == 'runs' and nav == 'run_detail') }}">{{ label }}</a>
+  {# 分頁照「每週提醒的流程」排：服事表的名字對到誰 → 送到哪些群組 → 怎麼送；紀錄和說明放後面 #}
+  {% set items = [
+    ("/", "🏠 首頁", ["index"]),
+    ("/members", "🙋 同工名單", ["members"]),
+    ("/targets", "👥 LINE 群組", ["targets"]),
+    ("/settings", "⚙️ 設定", ["settings"]),
+    ("/runs", "📜 發送紀錄", ["runs", "run_detail"]),
+    ("/help", "❓ 說明", ["help", "check"])] %}
+  <nav class="mainnav">
+    {% for href, label, keys in items %}
+      <a href="{{ href }}" class="{{ 'active' if nav in keys }}">{{ label }}</a>
     {% endfor %}
-    {% if has_password %}
-      <form method="post" action="/logout" class="inline"><button type="submit" class="secondary">🔒 登出</button></form>
-    {% endif %}
+    {% block extra_nav %}{% endblock %}
   </nav>
+  {% if has_password %}
+    <form method="post" action="/logout" class="inline logout"><button type="submit" class="secondary">🔒 登出</button></form>
+  {% endif %}
 </header>
 <main>
   {% if flash %}<div class="flash {{ flash_level }}">{{ flash }}</div>{% endif %}

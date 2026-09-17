@@ -9,9 +9,13 @@
 <form method="post" action="/settings">
 <section class="card">
   <h2>⚙️ 設定</h2>
-  <p class="muted">改完按最下面的「儲存設定」。這些設定存在 <code>config/settings.yaml</code>。</p>
+  <p class="muted">改完按最下面的「💾 儲存設定」。這些設定存在 <code>config/settings.yaml</code>；LINE 金鑰和網頁密碼另外存在 <code>.env</code>（最下面）。</p>
+  <nav class="subnav">
+    <a href="#source">① 服事表</a><a href="#schedule">② 發送時間</a><a href="#message">③ 訊息樣子</a>
+    <a href="#notify">④ 通知管理員</a><a href="#chat">⑤ LINE 指令</a><a href="#advanced">⑥ 進階</a><a href="#secrets">🔑 金鑰與密碼</a>
+  </nav>
 
-  <fieldset>
+  <fieldset id="source">
     <legend>① 服事表從哪裡來</legend>
     <div class="form-grid">
       <label for="source_kind">來源</label>
@@ -40,14 +44,14 @@
       <select id="layout" name="layout">
         {% for k, v in layouts.items() %}<option value="{{ k }}" {{ "selected" if f.layout == k }}>{{ v }}</option>{% endfor %}
       </select>
-      <div class="help">通常選「自動判斷」就好。三種排法的圖解見「使用說明」。</div>
+      <div class="help">通常選「自動判斷」就好。三種排法的圖解見「說明」。</div>
 
       <label for="ignore_columns">不要放進提醒的欄位</label>
       <input type="text" id="ignore_columns" name="ignore_columns" value="{{ f.ignore_columns }}" placeholder="例如：經文、詩歌、星期">
     </div>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="schedule">
     <legend>② 什麼時候自動發送</legend>
     <div class="form-grid">
       <label>自動發送</label>
@@ -75,7 +79,7 @@
     </div>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="message">
     <legend>③ 訊息長什麼樣子</legend>
     <div class="form-grid">
       <label for="title">標題</label>
@@ -105,7 +109,7 @@
     </div>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="notify">
     <legend>④ 出問題時通知誰</legend>
     <div class="form-grid">
       <label for="admin_target_id">管理員 LINE ID</label>
@@ -137,7 +141,7 @@
     </div>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="advanced">
     <legend>⑥ 進階</legend>
     <div class="form-grid">
       <label for="messenger_kind">發送方式</label>
@@ -164,7 +168,7 @@
 
       <label>名字對不到要提醒</label>
       <div class="checkbox-row"><input type="checkbox" id="warn_unknown_names" name="warn_unknown_names" {{ "checked" if f.warn_unknown_names }}>
-        <label for="warn_unknown_names">服事表上的名字在人員表找不到時，提醒管理員</label></div>
+        <label for="warn_unknown_names">服事表上的名字在同工名單找不到時，提醒管理員</label></div>
     </div>
   </fieldset>
 

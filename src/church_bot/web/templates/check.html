@@ -3,7 +3,7 @@
 {% block content %}
 <section class="card">
   <h2>🩺 系統檢查</h2>
-  <p class="muted">一次檢查設定、群組表、人員表、服事表、LINE 連線與額度。第一次設定好、或覺得怪怪的時候按這裡。</p>
+  <p class="muted">一次檢查設定、LINE 群組、同工名單、服事表、LINE 連線與額度。第一次設定好、或覺得怪怪的時候按這裡。</p>
   <table class="table">
     <thead><tr><th></th><th>項目</th><th>狀態</th></tr></thead>
     <tbody>
@@ -16,6 +16,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <div class="actions"><a class="button primary" href="/check">🔄 重新檢查</a><a class="button secondary" href="/">回首頁看預覽</a></div>
+  <div class="actions"><a class="button primary" href="/check">🔄 重新檢查</a><a class="button secondary" href="/">回首頁看預覽</a>
+    <a class="button secondary" href="/help">回說明</a></div>
 </section>
 {% endblock %}
