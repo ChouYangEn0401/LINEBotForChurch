@@ -36,12 +36,15 @@
 | `core/renderer.py` | 訊息排版（Jinja2、textV2 mention） |
 | `core/planner.py` | 決定發給誰、發什麼；產生所有 Issue |
 | `core/dispatcher.py` | 防重複、額度檢查、發送、失敗處理 |
-| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組 |
+| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字、群組成員關係）；舊資料庫開啟時自動補欄位 |
+| `core/accounts.py` | LINE 帳號 ↔ 同工名單的對應狀態（已對應／改名／對應／衝突／加入） |
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
 | `service.py` | 組裝一次完整執行、管理員通知、健康檢查 |
 | `scheduler.py` | APScheduler 每週排程 + 開機補發 |
 | `webhook.py` | LINE Webhook：「/」開頭的聊天指令（`parse_command`）、加入群組、被踢出群組、被動收集 LINE 帳號 |
-| `web/` | FastAPI：管理網頁（Jinja2）+ `/api/*` JSON API |
+| `remote_config.py` | 「/設定」可以改的項目與一次性驗證碼（安全設計寫在檔案開頭） |
+| `org.py` | 🧪 實驗：大教會架構樹、人數與則數合計（見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)） |
+| `web/` | FastAPI：管理網頁（Jinja2）+ `/api/*` JSON API；`web/overview.py` 是首頁「運作流程」 |
 | `cli.py` | `python -m church_bot init / web / check / preview / send` |
 
 ## 錯誤處理原則：不要沉默
@@ -98,7 +101,9 @@ pytest
 
 涵蓋：日期、三種排法、名字對照、訊息排版（含 textV2 跳脫）、規劃與所有問題偵測、CSV 表格（含 Big5）、
 設定與 `.env`、LINE API（`httpx.MockTransport`：重試、409、額度用完、@ 失敗改純文字）、
-整合測試（假的發送端：防重複、失敗通知、token 錯誤停止、額度警告）、Webhook 簽章與事件、網頁（TestClient）。
+整合測試（假的發送端：防重複、失敗通知、token 錯誤停止、額度警告）、Webhook 簽章與事件、聊天指令解析、
+LINE 帳號對應、「/設定」驗證碼（過期、錯三次、只限本人、每日上限）、資料庫升級、大教會架構合計、網頁（TestClient）。
+LINE Webhook 的假物件在 `tests/line_fakes.py`（放在 conftest 會被 pytest 載入成兩份，有狀態的假物件會對不上）。
 
 ## 部署到別的地方（未來）
 
@@ -114,5 +119,5 @@ pytest
 
 - 只私訊「當週有服事的人」（大幅節省 LINE 額度）
 - Email 備援通知（LINE 本身壞掉時）
-- 一個程式管理多份服事表／多個教會
+- 一個程式管理多份服事表／多個牧區（想法見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)）
 - 網頁目前沒有 CSRF 保護：預設只開放本機（127.0.0.1）；開放區網時務必設定密碼
