@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
 
@@ -230,3 +230,25 @@ class OutgoingMessage:
     @property
     def has_mentions(self) -> bool:
         return bool(self.mentions and self.mention_text)
+
+
+def tagged(message: OutgoingMessage, tag: str) -> OutgoingMessage:
+    """在訊息最前面加一行標籤（例如標示這則是自動 Push 還是手動 Reply 送出的）。
+
+    只能用在「實際送出／顯示」的那份文字上：fingerprint 是用規劃階段、還沒加標籤的原始內容算的，
+    這樣同一週的內容不管最後走哪條管道送出，都會算成同一個 fingerprint，防重複發送才不會失準。
+    """
+    return replace(message, text=f"{tag}\n{message.text}",
+                   mention_text=f"{tag}\n{message.mention_text}" if message.mention_text else "")
+
+
+# --------------------------------------------------------------------------- run triggers
+
+TRIGGER_ZH = {
+    "schedule": "自動排程（Push，計費）",
+    "manual": "網頁手動（Push，計費）",
+    "cli": "指令（Push，計費）",
+    "catchup": "開機補發（Push，計費）",
+    "reply": "LINE 回覆（免費）",
+    "preview": "預覽",
+}

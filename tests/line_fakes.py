@@ -57,6 +57,10 @@ class FakeLine:
     def reply(self, token: str, text: str) -> None:
         FakeLine.replies.append((token, text))
 
+    def reply_texts(self, token: str, texts: list[str]) -> None:
+        for text in texts[:5]:
+            FakeLine.replies.append((token, text))
+
     def group_name(self, group_id: str) -> str:
         return "敬拜團"
 

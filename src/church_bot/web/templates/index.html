@@ -12,6 +12,9 @@
     {% if last %}<a href="/runs/{{ last.id }}">{{ last.started_at[:16] | replace("T", " ") }}（{{ last.trigger_zh }}・{{ last.status_zh }}・送出 {{ last.sent }} 則）</a>
     {% else %}還沒有發送過{% endif %}
   </div>
+  {% if quota %}
+  <div class="hero-sub">{{ '⚠️' if quota_low else '📊' }} 本月 LINE 額度：{{ quota.describe() }}</div>
+  {% endif %}
 </section>
 
 {% if steps %}
@@ -70,7 +73,9 @@
       </form>
       <a class="button secondary" href="/">🔄 重新整理預覽</a>
     </div>
-    <p class="muted small">不用每週手動按：到了排程時間會自動發送。這兩個按鈕是給「臨時想提早發」或「服事表改了想重發」用的。</p>
+    <p class="muted small">不用每週手動按：到了排程時間會自動發送。這兩個按鈕是給「臨時想提早發」或「服事表改了想重發」用的。
+      這兩顆按鈕都是 Push（會計費）；如果人在 LINE 群組裡，也可以直接在群組打「/現在提醒」，
+      用免費的 Reply 送出，排程時間到了偵測到內容沒變會自動略過、不會重複扣費。</p>
   {% elif plan and plan.samples %}
     <p>還沒有設定可以收到提醒的群組。先看看訊息會長這樣：</p>
     <div class="bubbles">

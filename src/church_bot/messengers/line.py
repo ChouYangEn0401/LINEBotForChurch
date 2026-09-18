@@ -83,8 +83,15 @@ class LineMessenger:
 
     def reply(self, reply_token: str, text: str) -> None:
         """回覆使用者剛傳的訊息（Reply API 不計入每月額度）。"""
-        self._request("POST", "/v2/bot/message/reply",
-                      json={"replyToken": reply_token, "messages": [{"type": "text", "text": text[:5000]}]})
+        self.reply_texts(reply_token, [text])
+
+    def reply_texts(self, reply_token: str, texts: list[str]) -> None:
+        """一次回覆多則純文字泡泡（Reply API 不計入每月額度）。
+
+        一次最多送 5 則（LINE 限制），且同一個 reply_token 只能用這一次，不能像 push 一樣重複呼叫重送。
+        """
+        messages = [{"type": "text", "text": t[:5000]} for t in texts[:5]]
+        self._request("POST", "/v2/bot/message/reply", json={"replyToken": reply_token, "messages": messages})
 
     @staticmethod
     def _text_v2(message: OutgoingMessage) -> dict:

@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
 
-from church_bot.models import DeliveryStatus, RunReport
+from church_bot.models import TRIGGER_ZH, DeliveryStatus, RunReport
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -119,8 +119,7 @@ class RunSummary:
 
     @property
     def trigger_zh(self) -> str:
-        return {"schedule": "自動排程", "manual": "網頁手動", "cli": "指令", "catchup": "開機補發",
-                "preview": "預覽"}.get(self.trigger, self.trigger)
+        return TRIGGER_ZH.get(self.trigger, self.trigger)
 
 
 class History:

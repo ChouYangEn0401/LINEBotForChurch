@@ -24,14 +24,20 @@ from church_bot.core.planner import DATE_FMT, Plan, Planner, find_unknown_names
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
 from church_bot.messengers import Messenger, build_messenger
-from church_bot.models import Issue, Member, OutgoingMessage, Roster, RunReport, Severity, Target
+from church_bot.messengers.base import Quota
+from church_bot.models import (
+    TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, Roster, RunReport, Severity, Target,
+    tagged,
+)
 from church_bot.sources import build_source
 from church_bot.tables import LINE_ID_RE, MemberTable, TargetTable
 
 log = logging.getLogger(__name__)
 
 ROSTER_CACHE_SECONDS = 60
-TRIGGER_ZH = {"schedule": "自動排程", "manual": "網頁手動", "cli": "指令", "catchup": "開機補發", "preview": "預覽"}
+QUOTA_LOW_THRESHOLD = 50
+REPLY_LIMIT = 4  # 一次 Reply 最多 5 則泡泡，留 1 則給確認訊息
+REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /現在提醒（Reply，免費）送的，跟排程 Push 分開
 
 
 @dataclass(slots=True)
@@ -252,6 +258,70 @@ class BotService:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
         return find_unknown_names(roster, ctx.directory, since=today)
 
+    def quota_status(self) -> Quota | None:
+        """首頁用：本月 LINE 額度。查不到（console 模式、關閉額度檢查、設定壞了、LINE 連不上）就回 None，
+        首頁那一行就不顯示，不影響其他功能。"""
+        try:
+            ctx = self.load()
+        except ChurchBotError:
+            return None
+        if ctx.settings.messenger.kind == "console" or not ctx.settings.messenger.check_quota:
+            return None
+        try:
+            messenger = build_messenger(ctx.settings, self.paths)
+        except ChurchBotError:
+            return None
+        try:
+            return messenger.quota()
+        except ChurchBotError:
+            return None
+        finally:
+            messenger.close()
+
+    def notify_now(self, chat_id: str) -> tuple[list[str], str]:
+        """給 LINE 聊天指令「/現在提醒」用：立即用 Reply 免費送出這個群組這次的提醒（不計入 LINE 額度）。
+
+        回傳 (要用 Reply 送出的訊息內容, 給觸發者看的說明)；訊息內容是空的代表沒有東西要送，說明會講原因。
+        成功送出後會照跟排程送出一樣的方式記錄進歷史，之後排程送到同一筆（target+日期+內容都沒變）時，
+        `History.skip_reason` 會自動判斷「已經送過」而略過，不會重複扣費。
+        """
+        ctx = self.load()
+        target = next((t for t in ctx.targets if t.line_id == chat_id and t.enabled), None)
+        if target is None:
+            return [], "這個聊天室目前不是設定好的提醒群組，要先到管理網頁「LINE 群組」頁新增、啟用才能用這個指令。"
+
+        today = self.now(ctx.settings).date()
+        roster = self.fetch_roster(ctx.settings, today, use_cache=True)
+        planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
+        plan = planner.plan(roster, [target], today)
+        to_send = [
+            pm for pm in plan.messages
+            if self.history.skip_reason(pm.target.line_id, pm.day.date, pm.day.label, pm.fingerprint,
+                                        ctx.settings.behavior.resend_if_changed) is None
+        ]
+        if not to_send:
+            if not plan.messages:
+                return [], f"這幾天服事表沒有「{target.name}」符合的服事內容，沒有東西可以提醒。"
+            return [], "這週的提醒已經送過了，內容沒有變，不用再送一次（服事表改過的話再打一次就會送出新內容）。"
+
+        batch, remainder = to_send[:REPLY_LIMIT], to_send[REPLY_LIMIT:]
+        now = dt.datetime.now().astimezone()
+        report = RunReport(run_id=new_run_id(), trigger="reply", dry_run=False, started_at=now, finished_at=now,
+                           service_date=batch[0].day.date)
+        for pm in batch:
+            report.deliveries.append(Delivery(
+                target_name=pm.target.name, target_id=pm.target.line_id, service_date=pm.day.date,
+                text=tagged(pm.message, REPLY_TAG).text, status=DeliveryStatus.SENT,
+                detail="LINE 指令「/現在提醒」送出（免費）", label=pm.day.label, fingerprint=pm.fingerprint,
+            ))
+        self._record(report)
+        log.info("已用「/現在提醒」免費送出 %d 則提醒到「%s」（Reply，不計入 LINE 額度）", len(batch), target.name)
+
+        note = "✅ 已用 LINE 回覆免費送出，不計入本月額度。排程時間到了會自動偵測到已經送過、不會重複扣費。"
+        if remainder:
+            note += f"\n（還有 {len(remainder)} 則這次沒一起送，Reply 一次最多 5 則；剩下的到排程時間會照常送出。）"
+        return [tagged(pm.message, REPLY_TAG).text for pm in batch], note
+
     def health(self) -> list[CheckItem]:
         items: list[CheckItem] = []
         try:
@@ -289,7 +359,7 @@ class BotService:
                     items.append(CheckItem("LINE 連線", True, f"機器人：{messenger.check()}"))
                     quota = messenger.quota()
                     if quota is not None:
-                        low = quota.remaining is not None and quota.remaining < 50
+                        low = quota.remaining is not None and quota.remaining < QUOTA_LOW_THRESHOLD
                         items.append(CheckItem("LINE 本月額度", not low, quota.describe(),
                                                "額度快用完了，詳見 docs/LINE_PRICING.md" if low else ""))
                 finally:

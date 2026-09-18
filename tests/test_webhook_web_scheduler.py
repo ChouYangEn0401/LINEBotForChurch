@@ -55,6 +55,8 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
     ("/我的名字", Command("my_name", "")),
     ("/name Amy Chen", Command("my_name", "Amy Chen")),
     ("/names Amy", None),
+    ("/現在提醒", Command("notify_now")),
+    ("/立即提醒", Command("notify_now")),
 ])
 def test_parse_command(text, expected):
     assert parse_command(text) == expected
@@ -91,6 +93,40 @@ def test_register_name_rejects_very_long_names(handler, paths):
     body = say("/我的名字 " + "長" * 21)
     handler.handle(body, sign(body))
     assert "太長" in FakeLine.replies[-1][1] and handler.service.history.person(uid())["real_name"] == ""
+
+
+def test_notify_now_requires_admin(handler, paths, monkeypatch):
+    """指令本身呼叫 service.notify_now（另外在 test_service.py 測），這裡只測權限這一層。"""
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    monkeypatch.setattr(BotService, "notify_now",
+                        lambda self, chat_id: (["本週提醒內容"], "✅ 已用 LINE 回覆免費送出"))
+
+    body = say("/現在提醒")  # 預設的 uid() 不是管理員
+    handler.handle(body, sign(body))
+    assert "只有管理員能用" in FakeLine.replies[-1][1]
+
+    body = say("/現在提醒", user=uid("f"))
+    handler.handle(body, sign(body))
+    assert FakeLine.replies[-2:] == [("r", "本週提醒內容"), ("r", "✅ 已用 LINE 回覆免費送出")]
+
+
+def test_notify_now_without_admin_configured_is_refused(handler):
+    body = say("/現在提醒")
+    handler.handle(body, sign(body))
+    assert "還沒有設定管理員" in FakeLine.replies[-1][1]
+
+
+def test_notify_now_with_nothing_to_send_only_replies_the_reason(handler, paths, monkeypatch):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    monkeypatch.setattr(BotService, "notify_now", lambda self, chat_id: ([], "這週已經送過了"))
+
+    body = say("/現在提醒", user=uid("f"))
+    handler.handle(body, sign(body))
+    assert FakeLine.replies[-1] == ("r", "這週已經送過了")
 
 
 def test_message_from_group_is_remembered_as_a_person(handler, paths):

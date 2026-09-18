@@ -6,7 +6,7 @@
 <section class="card">
   <h2>發送結果</h2>
   <p>時間：{{ r.started_at[:19] | replace("T", " ") }}
-     觸發：{{ {"schedule": "自動排程", "manual": "網頁手動", "cli": "指令", "catchup": "開機補發"}.get(r.trigger, r.trigger) }}
+     觸發：{{ trigger_zh.get(r.trigger, r.trigger) }}
      {% if r.dry_run %}（預覽）{% endif %}</p>
   <div class="actions"><a class="button secondary" href="/runs">← 回紀錄列表</a><a class="button secondary" href="/">回首頁</a></div>
 </section>

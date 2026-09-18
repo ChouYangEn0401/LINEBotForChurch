@@ -13,11 +13,12 @@ from church_bot.core.history import History
 from church_bot.core.planner import DATE_FMT, PlannedMessage, Plan
 from church_bot.errors import ChurchBotError, MessengerError
 from church_bot.messengers.base import Messenger
-from church_bot.models import Delivery, DeliveryStatus, Issue, RunReport, Severity
+from church_bot.models import Delivery, DeliveryStatus, Issue, RunReport, Severity, tagged
 
 log = logging.getLogger(__name__)
 
 QUOTA_HINT = "推播到群組是按「群組人數」計算。可到 LINE 官方帳號後台升級方案或等下個月，詳見 docs/LINE_PRICING.md。"
+PUSH_TAG = "🤖 自動發送"  # 讓群組裡看得出這則是排程 Push（計費）送的，跟手動 /現在提醒（免費）分開
 
 
 def _is_fatal(exc: MessengerError) -> bool:
@@ -72,7 +73,7 @@ class Dispatcher:
                 continue
             when = format_date(pm.day.date, DATE_FMT)
             try:
-                result = self.messenger.send(pm.target.line_id, pm.message)
+                result = self.messenger.send(pm.target.line_id, tagged(pm.message, PUSH_TAG))
             except MessengerError as exc:
                 log.error("送到 %s 失敗：%s", pm.target.name, exc)
                 report.deliveries.append(self._delivery(pm, DeliveryStatus.FAILED, str(exc)))
@@ -81,7 +82,7 @@ class Dispatcher:
                 if _is_fatal(exc):
                     abort = exc
                 continue
-            log.info("已送出 %s 的提醒到 %s", when, pm.target.name)
+            log.info("已送出 %s 的提醒到 %s（Push，計入 LINE 額度）", when, pm.target.name)
             report.deliveries.append(self._delivery(pm, DeliveryStatus.SENT, result.note))
             if result.note:
                 severity = Severity.WARNING if result.warn else Severity.INFO
@@ -112,5 +113,6 @@ class Dispatcher:
     def _delivery(pm: PlannedMessage, status: DeliveryStatus, detail: str = "") -> Delivery:
         return Delivery(
             target_name=pm.target.name, target_id=pm.target.line_id, service_date=pm.day.date,
-            text=pm.message.text, status=status, detail=detail, label=pm.day.label, fingerprint=pm.fingerprint,
+            text=tagged(pm.message, PUSH_TAG).text, status=status, detail=detail, label=pm.day.label,
+            fingerprint=pm.fingerprint,
         )

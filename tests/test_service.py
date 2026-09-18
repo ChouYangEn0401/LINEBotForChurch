@@ -66,6 +66,11 @@ def test_run_sends_once_then_skips(service, fake):
     assert [r.trigger for r in service.history.recent_runs()] == ["manual", "schedule", "cli"]
 
 
+def test_scheduled_send_is_tagged_as_automatic(service, fake):
+    service.run("cli")
+    assert fake.texts_to(gid())[0].startswith("🤖 自動發送\n")
+
+
 def test_preview_sends_nothing_and_is_not_recorded(service, fake):
     report, plan = service.preview()
     assert [s for _, s in statuses(report)] == [DeliveryStatus.DRY_RUN] * 2
@@ -127,6 +132,27 @@ def test_roster_change_resend_policy(service, paths, fake):
     save_settings(paths, settings)
     report, _ = service.run("cli")
     assert {d.status for d in report.deliveries} == {DeliveryStatus.SENT}
+
+
+def test_notify_now_reply_then_scheduled_run_skips_that_target(service):
+    texts, note = service.notify_now(gid())
+    assert texts and "王大衛牧師" in texts[0] and texts[0].startswith("🙋 手動發送・免費")
+    assert "不計入本月額度" in note
+    assert [r.trigger for r in service.history.recent_runs()] == ["reply"]
+
+    report, _ = service.run("schedule")
+    assert statuses(report) == [("同工群", DeliveryStatus.SKIPPED), ("敬拜團", DeliveryStatus.SENT)]
+
+
+def test_notify_now_is_idempotent_when_content_unchanged(service):
+    service.notify_now(gid())
+    texts, note = service.notify_now(gid())
+    assert texts == [] and "已經送過了" in note
+
+
+def test_notify_now_rejects_chat_without_a_configured_target(service):
+    texts, note = service.notify_now(gid("z"))
+    assert texts == [] and "不是設定好的提醒群組" in note
 
 
 def test_health_check_lists_every_area(service):

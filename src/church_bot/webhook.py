@@ -10,6 +10,8 @@
 * /我的ID → 回覆自己的名字＋userId（填到同工名單就能被 @；填到設定就能收管理員通知）
 * /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
 * /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
+* /現在提醒 → 只有管理員能用；在設定好的群組裡打，立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度），
+  排程時間到了偵測到內容沒變會自動略過，不會重複扣費
 * /說明 → 列出指令
 
 支援的事件：
@@ -58,8 +60,9 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "my_name": ("我的名字", "名字", "myname", "name"),
     "config": ("設定", "config", "setting", "set"),
     "verify": ("驗證碼", "驗證", "verify", "code"),
+    "notify_now": ("現在提醒", "立即提醒", "發提醒", "notifynow"),
 }
-NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel"}
+NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -72,6 +75,7 @@ HELP_TEXT = (
     "・/我的ID：你自己的 ID\n"
     "・/我的名字 王小明：登記你的真實姓名（管理員開放時才能用）\n"
     "・/設定：用 LINE 修改機器人設定（要驗證碼）\n"
+    "・/現在提醒：立刻免費提醒這個群組（只有管理員能用，不計入 LINE 額度）\n"
     "・/說明：顯示這段說明\n"
     "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
 )
@@ -238,6 +242,8 @@ class WebhookHandler:
         elif command.name == "cancel":
             cancelled = bool(chat.user_id) and self.verifier.cancel(chat.user_id, chat.chat_id)
             chat.reply("已取消這次的設定修改。" if cancelled else "目前沒有等你驗證的設定修改。")
+        elif command.name == "notify_now":
+            self._notify_now(chat)
         elif command.name == "help":
             chat.reply(HELP_TEXT)
 
@@ -325,6 +331,26 @@ class WebhookHandler:
         apply_change(self.service.paths, pending)
         if pending.option.reschedule and self.on_settings_changed is not None:
             self.on_settings_changed()
+
+    # ------------------------------------------------------------------ /現在提醒（免費 Reply，見 service.notify_now）
+
+    def _notify_now(self, chat: _Chat) -> None:
+        if not chat.user_id:
+            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
+            return
+        admin = chat.settings.line.admin_target_id
+        if not admin:
+            chat.reply("這個指令只有管理員能用，但目前還沒有設定管理員 LINE ID。"
+                       "私訊機器人「/我的ID」，把拿到的 ID 填到管理網頁「設定 → 出問題時通知誰」。")
+            return
+        if chat.user_id != admin:
+            chat.reply("這個指令只有管理員能用。")
+            return
+        texts, note = self.service.notify_now(chat.chat_id)
+        if not texts:
+            chat.reply(note)
+            return
+        chat.messenger.reply_texts(chat.reply_token, [*texts, note])
 
     def _register_name(self, arg: str, chat: _Chat) -> None:
         """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""

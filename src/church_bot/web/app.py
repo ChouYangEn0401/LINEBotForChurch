@@ -35,11 +35,11 @@ from church_bot.core.directory import Directory, normalize_name
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
-from church_bot.models import DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target
+from church_bot.models import TRIGGER_ZH, DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target
 from church_bot.org import KIND_SUGGESTIONS, OrgReport, OrgTable, OrgUnit, build_org
 from church_bot.remote_config import Verifier
 from church_bot.scheduler import BotScheduler
-from church_bot.service import BotService
+from church_bot.service import QUOTA_LOW_THRESHOLD, BotService
 from church_bot.sources import SOURCE_KINDS_ZH
 from church_bot.sources.google_public import parse_sheet_url
 from church_bot.tables import (
@@ -151,7 +151,7 @@ def create_app(paths: Paths) -> FastAPI:
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals.update(
         version=__version__, weekday_zh=WEEKDAY_ZH, describe_line_id=describe_line_id, fmt_list=fmt_list,
-        severity_icon=SEVERITY_ICON, status_zh={s.value: s.zh for s in DeliveryStatus},
+        severity_icon=SEVERITY_ICON, status_zh={s.value: s.zh for s in DeliveryStatus}, trigger_zh=TRIGGER_ZH,
         source_kinds=SOURCE_KINDS_ZH, messenger_kinds=MESSENGER_KINDS_ZH, layouts=LAYOUTS_ZH,
     )
 
@@ -240,11 +240,13 @@ def create_app(paths: Paths) -> FastAPI:
     @ui.get("/", response_class=HTMLResponse)
     def index(request: Request):
         report, plan = service.preview()
+        quota = service.quota_status()
+        quota_low = bool(quota and quota.remaining is not None and quota.remaining < QUOTA_LOW_THRESHOLD)
         return page(
             request, "index.html", report=report, plan=plan, last=service.history.last_run(),
             problems=[i for i in report.issues if i.severity is not Severity.INFO],
             infos=[i for i in report.issues if i.severity is Severity.INFO],
-            steps=workflow_steps(report),
+            steps=workflow_steps(report), quota=quota, quota_low=quota_low,
         )
 
     def workflow_steps(report: RunReport) -> list[Step]:
