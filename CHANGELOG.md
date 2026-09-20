@@ -2,6 +2,8 @@
 
 ## 未發佈
 
+- 新功能：Windows 新增 `scripts/windows/3-open-webhook.bat`，雙擊就能開 cloudflared 臨時網址；會先檢查有沒有裝
+  cloudflared、管理網頁有沒有開，並把完整的 Webhook URL（含 `/line/webhook`）自動複製到剪貼簿
 - 新功能：LINE 指令「/現在提醒」——只有管理員能用，在設定好的群組裡打，立刻用「回覆」（Reply）免費送出這週的
   提醒，不計入 LINE 每月額度；排程時間到了偵測到內容沒變會自動略過，等於省下那筆原本要花錢的 Push
 - 新功能：首頁新增「本月 LINE 額度」，不用再點進「系統檢查」頁才看得到

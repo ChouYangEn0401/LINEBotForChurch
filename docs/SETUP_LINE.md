@@ -85,13 +85,13 @@ LINE 沒有地方能直接看到「群組 ID」，要讓機器人「聽到」群
 1. 安裝 cloudflared（只要裝一次）
    - Windows：開「命令提示字元」，輸入 `winget install --id Cloudflare.cloudflared`
    - Mac：在終端機輸入 `brew install cloudflared`
-2. 確認管理網頁開著（`2-start`），**另外開一個**命令視窗，輸入：
-   ```
-   cloudflared tunnel --url http://localhost:8787
-   ```
-3. 畫面會出現一個 `https://xxxx-xxxx.trycloudflare.com` 的網址，把它複製起來。
+2. 確認管理網頁開著（`2-start`），然後：
+   - **Windows：雙擊 `scripts/windows/3-open-webhook.bat`**（會檢查 cloudflared 和管理網頁有沒有開好）
+   - Mac：另外開一個終端機，輸入 `cloudflared tunnel --url http://localhost:8787`
+3. Windows 的視窗會直接顯示完整的 Webhook URL，並**自動複製到剪貼簿**；Mac 則是從畫面找
+   `https://xxxx-xxxx.trycloudflare.com` 的網址複製起來。
 4. 回到 LINE Developers →「Messaging API」分頁 → Webhook settings：
-   - **Webhook URL** 填：`https://xxxx-xxxx.trycloudflare.com/line/webhook`（後面要加 `/line/webhook`）
+   - **Webhook URL** 貼上（Windows 已經幫你複製好了；Mac 要自己在網址後面加 `/line/webhook`，例如 `https://xxxx-xxxx.trycloudflare.com/line/webhook`）
    - 按「**Verify**」，出現 Success 就對了（失敗的話：確認第 3 步的 Channel secret 有貼到管理網頁）
    - 打開「**Use webhook**」
 5. 機器人被邀進群組時，會自己在群組說出群組 ID；已經在群組裡的話，在群組打 **`/群組ID`**。
