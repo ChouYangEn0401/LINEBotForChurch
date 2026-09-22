@@ -29,7 +29,7 @@ def test_big5_file_is_read_and_converted(paths):
 def test_english_headers_and_bool_words(paths):
     write(paths.targets_file, f"name,line_id,enabled,mention\nA,{gid()},Y,V\nB,{gid('c')},no,\n")
     items = TargetTable(paths.targets_file).load().items
-    assert [(t.name, t.enabled, t.mention) for t in items] == [("A", True, True), ("B", False, False)]
+    assert [(t.name, t.enabled, t.mention) for t in items] == [("A", True, True), ("B", False, True)]  # 留空 = 要 @
 
 
 def test_bad_ids_are_errors_with_row_numbers(paths):

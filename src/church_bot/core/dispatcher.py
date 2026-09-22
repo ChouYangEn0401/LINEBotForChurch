@@ -18,7 +18,7 @@ from church_bot.models import Delivery, DeliveryStatus, Issue, RunReport, Severi
 log = logging.getLogger(__name__)
 
 QUOTA_HINT = "推播到群組是按「群組人數」計算。可到 LINE 官方帳號後台升級方案或等下個月，詳見 docs/LINE_PRICING.md。"
-PUSH_TAG = "🤖 自動發送"  # 讓群組裡看得出這則是排程 Push（計費）送的，跟手動 /現在提醒（免費）分開
+PUSH_TAG = "🤖 自動發送"  # 讓群組裡看得出這則是排程 Push（計費）送的，跟手動 /提醒（免費）分開
 
 
 def _is_fatal(exc: MessengerError) -> bool:

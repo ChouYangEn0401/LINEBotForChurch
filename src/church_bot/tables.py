@@ -216,7 +216,7 @@ class TargetTable(CsvTable[Target]):
                 "請填「是」或「否」。這次先當作「否」。",
             ))
             enabled = False
-        mention = parse_bool(row.get("mention", ""), default=False) or False
+        mention = parse_bool(row.get("mention", ""), default=True) is not False  # 留空 = 要 @ 人
 
         if enabled and not line_id:
             issues.append(self._issue(

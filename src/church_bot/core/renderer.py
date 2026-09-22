@@ -75,6 +75,16 @@ class _Row:
     people: tuple[Person, ...]
 
 
+def register_hint(rows: list[_Row]) -> str:
+    """要 @ 人的群組：列出這次沒辦法 @ 到的人（同工名單沒有他的 LINE_userId），教他們怎麼登記。"""
+    names = [p.display for r in rows for p in r.people if not (p.member and p.member.line_user_id)]
+    names = list(dict.fromkeys(names))
+    if not names:
+        return ""
+    return (f"🙋 {'、'.join(names)}：還沒辦法 @ 到你，請在這個群組打「/我的ID」，"
+            "再打「/我的名字 你的名字」登記，之後提醒就會直接 @ 你 🙏")
+
+
 class Renderer:
     def __init__(self, cfg: MessageSettings) -> None:
         self.cfg = cfg
@@ -97,6 +107,9 @@ class Renderer:
         text = self._render(day, target, rows, lambda p: p.display)
         if not (target and target.mention):
             return OutgoingMessage(text=text)
+        hint = register_hint(rows)
+        if hint:
+            text = _tidy(f"{text}\n\n{hint}")
 
         keys: dict[str, str] = {}  # userId → key（同一個人出現兩次共用同一個 key）
 
@@ -108,6 +121,8 @@ class Renderer:
             return f"\x00{keys[uid]}\x00"
 
         raw = self._render(day, target, rows, as_mention)
+        if hint:
+            raw = _tidy(f"{raw}\n\n{hint}")
         if not keys:
             return OutgoingMessage(text=text)
         # textV2：文字裡的 { } 要寫成 {{ }}，佔位符寫成 {key}

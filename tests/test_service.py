@@ -122,32 +122,61 @@ def test_source_problem_never_raises(service, paths):
 
 def test_roster_change_resend_policy(service, paths, fake):
     service.run("cli")
-    write(paths.config_dir / "roster.csv", ROSTER.replace("小明", "美華"))
-    report, _ = service.run("cli")
+    report, _ = service.run("cli")  # 內容沒變 → 不重送
     assert {d.status for d in report.deliveries} == {DeliveryStatus.SKIPPED}
+
+    write(paths.config_dir / "roster.csv", ROSTER.replace("小明", "美華"))
+    report, _ = service.run("cli")  # 預設：服事表改過 → 送新的
+    assert {d.status for d in report.deliveries} == {DeliveryStatus.SENT}
 
     settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
                                         "schedule": {"enabled": False}, "line": {"admin_target_id": ADMIN},
-                                        "behavior": {"resend_if_changed": True}})
+                                        "behavior": {"resend_if_changed": False}})
     save_settings(paths, settings)
-    report, _ = service.run("cli")
-    assert {d.status for d in report.deliveries} == {DeliveryStatus.SENT}
+    write(paths.config_dir / "roster.csv", ROSTER.replace("小明", "喜樂"))
+    report, _ = service.run("cli")  # 關掉「改了再送」→ 送過就不再送
+    assert {d.status for d in report.deliveries} == {DeliveryStatus.SKIPPED}
 
 
 def test_notify_now_reply_then_scheduled_run_skips_that_target(service):
-    texts, note = service.notify_now(gid())
-    assert texts and "王大衛牧師" in texts[0] and texts[0].startswith("🙋 手動發送・免費")
-    assert "不計入本月額度" in note
+    messages, note = service.notify_now(gid())
+    assert messages and "王大衛牧師" in messages[0].text and messages[0].text.startswith("🙋 手動發送・免費")
+    assert "不計入 LINE 額度" in note
     assert [r.trigger for r in service.history.recent_runs()] == ["reply"]
 
     report, _ = service.run("schedule")
     assert statuses(report) == [("同工群", DeliveryStatus.SKIPPED), ("敬拜團", DeliveryStatus.SENT)]
 
 
-def test_notify_now_is_idempotent_when_content_unchanged(service):
+def test_notify_now_always_replies_because_reply_is_free(service):
+    first, _ = service.notify_now(gid())
+    again, _ = service.notify_now(gid())
+    assert again and [m.text for m in again] == [m.text for m in first]
+    report, _ = service.run("schedule")  # 兩次內容一樣，排程還是只略過、不重送
+    assert dict(statuses(report))["同工群"] is DeliveryStatus.SKIPPED
+
+
+def test_failed_reply_is_not_recorded_so_the_schedule_still_sends(service):
+    def broken(items):
+        raise MessengerError("連不上 LINE", "")
+
+    with pytest.raises(MessengerError):
+        service.notify_now(gid(), send=broken)
+    assert service.history.recent_runs() == []
+    report, _ = service.run("schedule")
+    assert dict(statuses(report))["同工群"] is DeliveryStatus.SENT
+
+
+def test_old_reply_does_not_stop_the_scheduled_push(service, paths):
+    """週一有人打 /提醒 看一下，週四的排程還是要照常提醒；2 天內打的才算「已經提醒過」。"""
+    import sqlite3
+
     service.notify_now(gid())
-    texts, note = service.notify_now(gid())
-    assert texts == [] and "已經送過了" in note
+    three_days_ago = (dt.datetime.now().astimezone() - dt.timedelta(days=3)).isoformat(timespec="seconds")
+    with sqlite3.connect(paths.db_file) as conn:
+        conn.execute("UPDATE deliveries SET created_at=?", (three_days_ago,))
+    report, _ = service.run("schedule")
+    assert dict(statuses(report))["同工群"] is DeliveryStatus.SENT
 
 
 def test_notify_now_rejects_chat_without_a_configured_target(service):

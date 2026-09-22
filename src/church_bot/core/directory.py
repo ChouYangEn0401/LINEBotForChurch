@@ -63,5 +63,11 @@ class Directory:
         found: list[str] = []
         if len(key) >= 2:
             found += [m.name for k, m in self._index.items() if len(k) >= 2 and (key in k or k in key)]
-        found += [self._index[k].name for k in difflib.get_close_matches(key, list(self._index), n=limit, cutoff=0.5)]
+        if len(key) >= 3:
+            # 字形相近（打錯字）只在三個字以上才猜：中文姓名常見字重複很多（「建」「國」「心」…），
+            # 兩個字只要共用一個字，difflib 的比對分數就會落在門檻上，很容易猜錯成完全不相干的人
+            # （例如「國良」被猜成「蔡建國」、「雅心」被猜成「許心怡」）。子字串包含（上面那段）不受影響，
+            # 「以諾」對到「王以諾」這種去掉姓的暱稱還是猜得到。
+            found += [self._index[k].name
+                     for k in difflib.get_close_matches(key, list(self._index), n=limit, cutoff=0.5)]
         return tuple(dict.fromkeys(found))[:limit]

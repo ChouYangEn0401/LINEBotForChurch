@@ -10,8 +10,8 @@
 * /我的ID → 回覆自己的名字＋userId（填到同工名單就能被 @；填到設定就能收管理員通知）
 * /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
 * /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
-* /現在提醒 → 只有管理員能用；在設定好的群組裡打，立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度），
-  排程時間到了偵測到內容沒變會自動略過，不會重複扣費
+* /提醒（或 /現在提醒）→ 在設定好的提醒群組裡，誰都可以打；立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度）。
+  排程時間前 2 天內打過、內容也一樣，排程就略過（見 History.skip_reason），服事表改過才會再送
 * /說明 → 列出指令
 
 支援的事件：
@@ -60,7 +60,7 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "my_name": ("我的名字", "名字", "myname", "name"),
     "config": ("設定", "config", "setting", "set"),
     "verify": ("驗證碼", "驗證", "verify", "code"),
-    "notify_now": ("現在提醒", "立即提醒", "發提醒", "notifynow"),
+    "notify_now": ("提醒", "現在提醒", "立即提醒", "發提醒", "remind", "notifynow"),
 }
 NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
@@ -73,9 +73,9 @@ HELP_TEXT = (
     "我是服事提醒小幫手 🙌 指令都是「/」開頭：\n"
     "・/群組ID：這個聊天室的 ID\n"
     "・/我的ID：你自己的 ID\n"
-    "・/我的名字 王小明：登記你的真實姓名（管理員開放時才能用）\n"
+    "・/我的名字 王小明：登記你的真實姓名，之後提醒就能 @ 到你\n"
+    "・/提醒：立刻顯示這週的服事提醒（免費）\n"
     "・/設定：用 LINE 修改機器人設定（要驗證碼）\n"
-    "・/現在提醒：立刻免費提醒這個群組（只有管理員能用，不計入 LINE 額度）\n"
     "・/說明：顯示這段說明\n"
     "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
 )
@@ -332,25 +332,14 @@ class WebhookHandler:
         if pending.option.reschedule and self.on_settings_changed is not None:
             self.on_settings_changed()
 
-    # ------------------------------------------------------------------ /現在提醒（免費 Reply，見 service.notify_now）
+    # ------------------------------------------------------------------ /提醒（免費 Reply，見 service.notify_now）
 
     def _notify_now(self, chat: _Chat) -> None:
-        if not chat.user_id:
-            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
-            return
-        admin = chat.settings.line.admin_target_id
-        if not admin:
-            chat.reply("這個指令只有管理員能用，但目前還沒有設定管理員 LINE ID。"
-                       "私訊機器人「/我的ID」，把拿到的 ID 填到管理網頁「設定 → 出問題時通知誰」。")
-            return
-        if chat.user_id != admin:
-            chat.reply("這個指令只有管理員能用。")
-            return
-        texts, note = self.service.notify_now(chat.chat_id)
-        if not texts:
+        # 誰都可以打：Reply 免費，而且只會回在「LINE 群組」頁啟用的群組（service.notify_now 會檢查）
+        messages, note = self.service.notify_now(
+            chat.chat_id, send=lambda items: chat.messenger.reply_texts(chat.reply_token, items))
+        if not messages:
             chat.reply(note)
-            return
-        chat.messenger.reply_texts(chat.reply_token, [*texts, note])
 
     def _register_name(self, arg: str, chat: _Chat) -> None:
         """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""

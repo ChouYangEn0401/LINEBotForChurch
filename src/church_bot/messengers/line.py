@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 import uuid
 from typing import Callable
@@ -20,6 +21,8 @@ import httpx
 from church_bot.errors import ConfigError, MessengerError
 from church_bot.messengers.base import Quota, SendResult
 from church_bot.models import OutgoingMessage
+
+log = logging.getLogger(__name__)
 
 API_BASE = "https://api.line.me"
 TOKEN_HINT = (
@@ -85,13 +88,28 @@ class LineMessenger:
         """回覆使用者剛傳的訊息（Reply API 不計入每月額度）。"""
         self.reply_texts(reply_token, [text])
 
-    def reply_texts(self, reply_token: str, texts: list[str]) -> None:
-        """一次回覆多則純文字泡泡（Reply API 不計入每月額度）。
+    def reply_texts(self, reply_token: str, texts: list[str | OutgoingMessage]) -> None:
+        """一次回覆多則泡泡（Reply API 不計入每月額度）；OutgoingMessage 有 @ 人的會用 textV2 送。
 
-        一次最多送 5 則（LINE 限制），且同一個 reply_token 只能用這一次，不能像 push 一樣重複呼叫重送。
+        一次最多送 5 則（LINE 限制），且同一個 reply_token 只能成功用一次。
+        @ 標記被 LINE 拒絕（400，reply_token 還沒被用掉）時，改用純文字再回一次。
         """
-        messages = [{"type": "text", "text": t[:5000]} for t in texts[:5]]
-        self._request("POST", "/v2/bot/message/reply", json={"replyToken": reply_token, "messages": messages})
+        items = [OutgoingMessage(text=t) if isinstance(t, str) else t for t in texts[:5]]
+
+        def post(messages: list[dict]) -> None:
+            self._request("POST", "/v2/bot/message/reply", json={"replyToken": reply_token, "messages": messages})
+
+        plain = [{"type": "text", "text": m.text[:5000]} for m in items]
+        if not any(m.has_mentions for m in items):
+            post(plain)
+            return
+        try:
+            post([self._text_v2(m) if m.has_mentions else p for m, p in zip(items, plain)])
+        except MessengerError as exc:
+            if exc.status_code != 400:
+                raise
+            log.warning("@ 標記被 LINE 拒絕，改用純文字回覆：%s", exc.message)
+            post(plain)
 
     @staticmethod
     def _text_v2(message: OutgoingMessage) -> dict:

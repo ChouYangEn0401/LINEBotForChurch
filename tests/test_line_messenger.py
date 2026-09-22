@@ -95,3 +95,18 @@ def test_quota_and_audience_size():
 def test_missing_token_is_a_config_error():
     with pytest.raises(ConfigError):
         LineMessenger("")
+
+
+def test_reply_with_mentions_uses_text_v2_and_falls_back_to_plain_text():
+    bodies: list[dict] = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(400 if len(bodies) == 1 else 200, json={"message": "bad"})
+
+    tagged = OutgoingMessage("司琴：小明", mention_text="司琴：{m0}", mentions=(("m0", uid()),))
+    make(handler).reply_texts("tok", [tagged, "✅ 已免費送出"])
+    first, second = (b["messages"] for b in bodies)
+    assert first[0]["type"] == "textV2" and first[0]["substitution"]["m0"]["mentionee"]["userId"] == uid()
+    assert first[1] == {"type": "text", "text": "✅ 已免費送出"}
+    assert [m["type"] for m in second] == ["text", "text"] and second[0]["text"] == "司琴：小明"

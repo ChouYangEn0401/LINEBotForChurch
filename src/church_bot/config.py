@@ -88,7 +88,7 @@ class MessengerSettings(_Base):
 class ScheduleSettings(_Base):
     enabled: bool = True
     timezone: str = "Asia/Taipei"
-    day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "sat"
+    day_of_week: Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"] = "thu"
     time: str = "20:00"
     # 每幾週發送一次：1 = 每週；2 = 每兩週發一次（大約可以省一半的 LINE 則數，見 docs/LINE_PRICING.md）
     # 用「每兩週」的話，記得把 behavior.lookahead_days 也改成至少 14，不然下一次發送前的那週服事不會出現在提醒裡
@@ -141,8 +141,10 @@ class MessageSettings(_Base):
 class BehaviorSettings(_Base):
     # 從「今天」往後看幾天內的聚會（含今天）。每週提醒一次的話 7 就夠了
     lookahead_days: int = Field(default=7, ge=1, le=60)
-    # 已經送過同一天的提醒，服事表後來又改了，要不要自動再送一次
-    resend_if_changed: bool = False
+    # 已經送過同一天的提醒（包含有人先打 /提醒），排程時間到了：
+    #   true  = 內容沒變就略過、服事表改過就送新的（預設，保證大家拿到的是最新的名單）
+    #   false = 送過就不再送
+    resend_if_changed: bool = True
     # 服事表剩不到幾天就提醒管理員「該排下一季了」
     roster_low_warning_days: int = Field(default=14, ge=0, le=365)
     # 服事表上的名字在同工名單對不到時，要不要提醒管理員
@@ -158,8 +160,8 @@ class WebSettings(_Base):
 class ChatSettings(_Base):
     """在 LINE 聊天室打「/」指令時的行為。"""
 
-    # 開放大家打「/我的名字 王小明」登記真實姓名。平常關著，要收集時才打開，避免有人亂填
-    collect_names: bool = False
+    # 開放大家打「/我的名字 王小明」登記真實姓名（登記後要管理員在「同工名單」頁確認才生效，亂填也不會直接影響提醒）
+    collect_names: bool = True
     # 允許在 LINE 打「/設定 名稱=值」修改少數設定；每次都要輸入一次性驗證碼（見 remote_config.py）
     remote_config: bool = True
     # 驗證碼除了顯示在執行程式的畫面，也用 LINE 私訊管理員（每次算 1 則，每天最多 10 次）

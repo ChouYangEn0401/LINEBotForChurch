@@ -88,6 +88,9 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 )
 
 
+REPLY_COVERS = dt.timedelta(days=2)  # 「/提醒」送過多久以內，排程時間到了內容沒變就不再 Push
+
+
 def _now() -> str:
     return dt.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -154,19 +157,27 @@ class History:
     # ------------------------------------------------------------------ dedup
 
     def skip_reason(self, target_id: str, service_date: dt.date, label: str, fp: str,
-                    resend_if_changed: bool) -> str | None:
-        """回傳「為什麼這則不用再送」；None 代表要送。"""
+                    resend_if_changed: bool, now: dt.datetime | None = None) -> str | None:
+        """回傳「為什麼這則不用再送」；None 代表要送。
+
+        排程 Push 送過的一律算數；有人打「/提醒」（免費 Reply）送過的，只有在 REPLY_COVERS 之內才算
+        ——週一有人打 /提醒 看一下，週四的排程還是要照常提醒大家；前一天晚上才打的，週四就不用再送。
+        """
+        now = now or dt.datetime.now().astimezone()
         with self._conn() as conn:
-            row = conn.execute(
-                "SELECT fingerprint, created_at FROM deliveries WHERE target_id=? AND service_date=? AND label=? "
-                "AND status=? ORDER BY id DESC LIMIT 1",
+            rows = conn.execute(
+                "SELECT d.fingerprint, d.created_at, r.trigger FROM deliveries d LEFT JOIN runs r ON r.id = d.run_id "
+                "WHERE d.target_id=? AND d.service_date=? AND d.label=? AND d.status=? ORDER BY d.id DESC",
                 (target_id, service_date.isoformat(), label, DeliveryStatus.SENT.value),
-            ).fetchone()
+            ).fetchall()
+        row = next((r for r in rows if r["trigger"] != "reply"
+                    or now - dt.datetime.fromisoformat(r["created_at"]) <= REPLY_COVERS), None)
         if row is None:
             return None
         if resend_if_changed and row["fingerprint"] != fp:
             return None
-        return f"{row['created_at'][:16].replace('T', ' ')} 已經送過了"
+        via = "（有人打 /提醒）" if row["trigger"] == "reply" else ""
+        return f"{row['created_at'][:16].replace('T', ' ')} 已經送過了{via}"
 
     # ------------------------------------------------------------------ runs
 

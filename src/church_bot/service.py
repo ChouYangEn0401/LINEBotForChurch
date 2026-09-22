@@ -11,6 +11,7 @@ import logging
 import secrets
 import threading
 import time
+from typing import Callable
 from dataclasses import dataclass, field
 from zoneinfo import ZoneInfo
 
@@ -37,7 +38,7 @@ log = logging.getLogger(__name__)
 ROSTER_CACHE_SECONDS = 60
 QUOTA_LOW_THRESHOLD = 50
 REPLY_LIMIT = 4  # 一次 Reply 最多 5 則泡泡，留 1 則給確認訊息
-REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /現在提醒（Reply，免費）送的，跟排程 Push 分開
+REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /提醒（Reply，免費）送的，跟排程 Push 分開
 
 
 @dataclass(slots=True)
@@ -278,12 +279,14 @@ class BotService:
         finally:
             messenger.close()
 
-    def notify_now(self, chat_id: str) -> tuple[list[str], str]:
-        """給 LINE 聊天指令「/現在提醒」用：立即用 Reply 免費送出這個群組這次的提醒（不計入 LINE 額度）。
+    def notify_now(self, chat_id: str, send: Callable[[list[OutgoingMessage | str]], None] | None = None,
+                   ) -> tuple[list[OutgoingMessage], str]:
+        """給 LINE 聊天指令「/提醒」用：立即用 Reply 免費送出這個群組這次的提醒（不計入 LINE 額度）。
 
-        回傳 (要用 Reply 送出的訊息內容, 給觸發者看的說明)；訊息內容是空的代表沒有東西要送，說明會講原因。
-        成功送出後會照跟排程送出一樣的方式記錄進歷史，之後排程送到同一筆（target+日期+內容都沒變）時，
-        `History.skip_reason` 會自動判斷「已經送過」而略過，不會重複扣費。
+        回傳 (要用 Reply 送出的訊息, 給觸發者看的說明)；訊息是空的代表沒有東西要送，說明會講原因。
+        Reply 免費，所以不管之前送過沒都照送（有人問「這週誰服事」就能馬上看到最新的）。
+        ``send`` 是真正送出的動作（訊息 + 說明一起）；**送成功才記錄**，送失敗就丟出錯誤、什麼都不記，
+        排程時間到了照常 Push。記錄之後，排程在 2 天內（見 `History.skip_reason`）內容沒變就略過，不會重複扣費。
         """
         ctx = self.load()
         target = next((t for t in ctx.targets if t.line_id == chat_id and t.enabled), None)
@@ -294,17 +297,18 @@ class BotService:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
         planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
         plan = planner.plan(roster, [target], today)
-        to_send = [
-            pm for pm in plan.messages
-            if self.history.skip_reason(pm.target.line_id, pm.day.date, pm.day.label, pm.fingerprint,
-                                        ctx.settings.behavior.resend_if_changed) is None
-        ]
+        to_send = plan.messages
         if not to_send:
-            if not plan.messages:
-                return [], f"這幾天服事表沒有「{target.name}」符合的服事內容，沒有東西可以提醒。"
-            return [], "這週的提醒已經送過了，內容沒有變，不用再送一次（服事表改過的話再打一次就會送出新內容）。"
+            return [], f"這幾天服事表沒有「{target.name}」符合的服事內容，沒有東西可以提醒。"
 
         batch, remainder = to_send[:REPLY_LIMIT], to_send[REPLY_LIMIT:]
+        messages = [tagged(pm.message, REPLY_TAG) for pm in batch]
+        note = "✅ 已免費送出（不計入 LINE 額度）"
+        if remainder:
+            note += f"\n（還有 {len(remainder)} 則這次沒一起送，Reply 一次最多 5 則；剩下的到排程時間會照常送出。）"
+        if send is not None:
+            send([*messages, note])  # 失敗會丟出錯誤，下面的紀錄就不會寫
+
         now = dt.datetime.now().astimezone()
         report = RunReport(run_id=new_run_id(), trigger="reply", dry_run=False, started_at=now, finished_at=now,
                            service_date=batch[0].day.date)
@@ -312,15 +316,11 @@ class BotService:
             report.deliveries.append(Delivery(
                 target_name=pm.target.name, target_id=pm.target.line_id, service_date=pm.day.date,
                 text=tagged(pm.message, REPLY_TAG).text, status=DeliveryStatus.SENT,
-                detail="LINE 指令「/現在提醒」送出（免費）", label=pm.day.label, fingerprint=pm.fingerprint,
+                detail="LINE 指令「/提醒」送出（免費）", label=pm.day.label, fingerprint=pm.fingerprint,
             ))
         self._record(report)
-        log.info("已用「/現在提醒」免費送出 %d 則提醒到「%s」（Reply，不計入 LINE 額度）", len(batch), target.name)
-
-        note = "✅ 已用 LINE 回覆免費送出，不計入本月額度。排程時間到了會自動偵測到已經送過、不會重複扣費。"
-        if remainder:
-            note += f"\n（還有 {len(remainder)} 則這次沒一起送，Reply 一次最多 5 則；剩下的到排程時間會照常送出。）"
-        return [tagged(pm.message, REPLY_TAG).text for pm in batch], note
+        log.info("已用「/提醒」免費送出 %d 則提醒到「%s」（Reply，不計入 LINE 額度）", len(batch), target.name)
+        return messages, note
 
     def health(self) -> list[CheckItem]:
         items: list[CheckItem] = []

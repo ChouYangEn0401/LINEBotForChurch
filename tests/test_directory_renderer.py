@@ -83,3 +83,27 @@ def test_template_errors_are_config_errors():
     with pytest.raises(ConfigError) as exc:
         Renderer(MessageSettings(template="{{ titel }}")).validate()
     assert "titel" in exc.value.message
+
+
+def test_people_who_cannot_be_tagged_are_told_how_to_register():
+    directory = Directory([Member("陳小明", ("小明",), line_user_id=uid())])
+    message = Renderer(MessageSettings()).render(DAY, directory, Target("g", gid(), mention=True))
+    assert message.has_mentions  # 陳小明有 userId → @ 他
+    for text in (message.text, message.mention_text):
+        assert "王牧師：還沒辦法 @ 到你" in text and "/我的ID" in text and "/我的名字" in text
+    assert "陳小明：" not in message.text
+
+
+def test_no_register_hint_when_group_does_not_tag():
+    text = Renderer(MessageSettings()).render(DAY, Directory([]), Target("g", gid(), mention=False)).text
+    assert "/我的ID" not in text
+
+
+def test_two_character_names_do_not_get_noisy_fuzzy_guesses():
+    """兩個字的名字只要共用一個字，difflib 分數就會壓線通過，容易亂猜（例如「國良」被猜成「蔡建國」）。
+    子字串包含（去掉姓的暱稱，例如「以諾」→「王以諾」）不受影響，只有「字形相近」的猜測改成三個字以上才猜。
+    """
+    d = Directory([Member("蔡建國", ("建國", "蔡弟兄")), Member("許心怡", ("心怡",)), Member("王以諾", ())])
+    assert d.resolve("國良").suggestions == ()  # 跟「建國」只差共用一個「國」字，不該被猜到
+    assert d.resolve("雅心").suggestions == ()  # 跟「心怡」只差共用一個「心」字，不該被猜到
+    assert d.resolve("以諾").suggestions == ("王以諾",)  # 去掉姓的暱稱：子字串包含，還是要猜得到

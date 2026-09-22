@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from church_bot.config import ScheduleSettings, Settings, save_settings
+from church_bot.models import OutgoingMessage
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
@@ -68,7 +69,10 @@ def turn_on_name_collection(paths):
     save_settings(paths, settings)
 
 
-def test_register_name_is_refused_while_collection_is_off(handler):
+def test_register_name_is_refused_while_collection_is_off(handler, paths):
+    settings = Settings()
+    settings.chat.collect_names = False
+    save_settings(paths, settings)
     body = say("/我的名字 林美華")
     handler.handle(body, sign(body))
     assert "沒有開放" in FakeLine.replies[-1][1]
@@ -95,34 +99,31 @@ def test_register_name_rejects_very_long_names(handler, paths):
     assert "太長" in FakeLine.replies[-1][1] and handler.service.history.person(uid())["real_name"] == ""
 
 
-def test_notify_now_requires_admin(handler, paths, monkeypatch):
-    """指令本身呼叫 service.notify_now（另外在 test_service.py 測），這裡只測權限這一層。"""
-    settings = Settings()
-    settings.line.admin_target_id = uid("f")
-    save_settings(paths, settings)
-    monkeypatch.setattr(BotService, "notify_now",
-                        lambda self, chat_id: (["本週提醒內容"], "✅ 已用 LINE 回覆免費送出"))
+def test_remind_command_works_for_anyone(handler, monkeypatch):
+    """指令本身呼叫 service.notify_now（另外在 test_service.py 測），這裡只測指令這一層：不是管理員也能用。"""
+    def fake_notify(self, chat_id, send=None):
+        messages, note = [OutgoingMessage(text="本週提醒內容")], "✅ 已免費送出"
+        send([*messages, note])
+        return messages, note
 
-    body = say("/現在提醒")  # 預設的 uid() 不是管理員
+    monkeypatch.setattr(BotService, "notify_now", fake_notify)
+    for text in ("/提醒", "/現在提醒"):
+        body = say(text)  # 預設的 uid() 不是管理員
+        handler.handle(body, sign(body))
+        assert FakeLine.replies[-2:] == [("r", "本週提醒內容"), ("r", "✅ 已免費送出")]
+
+
+def test_remind_in_a_chat_that_is_not_a_target_explains_why(handler):
+    body = say("/提醒")
     handler.handle(body, sign(body))
-    assert "只有管理員能用" in FakeLine.replies[-1][1]
-
-    body = say("/現在提醒", user=uid("f"))
-    handler.handle(body, sign(body))
-    assert FakeLine.replies[-2:] == [("r", "本週提醒內容"), ("r", "✅ 已用 LINE 回覆免費送出")]
-
-
-def test_notify_now_without_admin_configured_is_refused(handler):
-    body = say("/現在提醒")
-    handler.handle(body, sign(body))
-    assert "還沒有設定管理員" in FakeLine.replies[-1][1]
+    assert "不是設定好的提醒群組" in FakeLine.replies[-1][1]
 
 
 def test_notify_now_with_nothing_to_send_only_replies_the_reason(handler, paths, monkeypatch):
     settings = Settings()
     settings.line.admin_target_id = uid("f")
     save_settings(paths, settings)
-    monkeypatch.setattr(BotService, "notify_now", lambda self, chat_id: ([], "這週已經送過了"))
+    monkeypatch.setattr(BotService, "notify_now", lambda self, chat_id, send=None: ([], "這週已經送過了"))
 
     body = say("/現在提醒", user=uid("f"))
     handler.handle(body, sign(body))

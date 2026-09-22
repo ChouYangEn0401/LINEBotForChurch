@@ -96,7 +96,7 @@ class Target:
     enabled: bool = True
     roles: tuple[str, ...] = ()  # 只發這些服事項目；空 = 全部
     labels: tuple[str, ...] = ()  # 只發這些聚會；空 = 全部
-    mention: bool = False  # 要不要在訊息裡 @ 服事的人
+    mention: bool = True  # 要不要在訊息裡 @ 服事的人（對不到 LINE 帳號的人照樣印名字）
     note: str = ""
 
 

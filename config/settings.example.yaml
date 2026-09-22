@@ -51,7 +51,8 @@ schedule:
   enabled: true
   timezone: Asia/Taipei
   # mon tue wed thu fri sat sun（星期一～星期日）
-  day_of_week: sat
+  # 建議聚會前幾天，例如週四：大家有時間準備，發送當下才讀服事表，一定是最新的
+  day_of_week: thu
   time: "20:00"
   # 每幾週發送一次：1 = 每週（預設）；2 = 每兩週一次，大約可省一半 LINE 則數，見 docs/LINE_PRICING.md
   # 改成 2 以上時，記得把下面 behavior.lookahead_days 也改成至少「每幾週 × 7」天
@@ -83,8 +84,10 @@ message:
 behavior:
   # 從今天起往後看幾天內的聚會（含今天）。每週提醒一次就填 7；每兩週提醒一次就填 14 以上
   lookahead_days: 7
-  # 已經送過某天的提醒，之後服事表又改了，要不要自動再送一次（false = 不要，避免洗版）
-  resend_if_changed: false
+  # 已經送過某天的提醒（包含有人先在群組打 /提醒），排程時間到了：
+  #   true  = 內容沒變就略過、服事表改過就送新的（推薦，保證大家拿到最新的名單）
+  #   false = 送過就不再送
+  resend_if_changed: true
   # 服事表剩不到幾天就提醒管理員「該排下一期了」
   roster_low_warning_days: 14
   # 服事表上的名字在同工名單找不到時，要不要提醒管理員
@@ -96,9 +99,9 @@ web:
   port: 8787
 
 chat:
-  # 開放大家在 LINE 打「/我的名字 王小明」登記真實姓名（登記後要管理員在「同工名單」頁確認才會生效）
-  # 平常建議關著（false），要收集時才打開，用完關掉，避免有人亂填
-  collect_names: false
+  # 開放大家在 LINE 打「/我的名字 王小明」登記真實姓名（登記後要管理員在「同工名單」頁確認才會生效，
+  # 所以有人亂填也不會直接影響提醒）。提醒訊息會請「還沒辦法 @ 到的人」用這個指令登記，建議開著
+  collect_names: true
   # 允許在 LINE 打「/設定 收集名單=開」這類指令修改少數設定（每次都要一次性驗證碼）
   remote_config: true
   # 驗證碼除了顯示在執行程式的畫面，也用 LINE 私訊管理員（line.admin_target_id；每次 1 則，每天最多 10 次）

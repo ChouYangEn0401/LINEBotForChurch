@@ -134,6 +134,7 @@ def test_line_pushes_are_capped_per_day():
 def line_handler(handler, paths):
     settings = Settings()
     settings.line.admin_target_id = uid("f")
+    settings.chat.collect_names = False  # 這組測試用「收集名單 關 → 開」來練習改設定
     save_settings(paths, settings)
     return handler
 
@@ -204,6 +205,9 @@ def test_web_shows_pending_change_and_can_approve(client, paths):
 
 
 def test_web_reject(client, paths):
+    settings = load_settings(paths)
+    settings.chat.collect_names = False
+    save_settings(paths, settings)
     verifier = client.app.state.webhook.verifier
     verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
     client.post("/remote-config/reject")
