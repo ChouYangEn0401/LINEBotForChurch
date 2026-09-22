@@ -2,14 +2,14 @@
 
 ## 未發佈
 
-- 新功能：`weekly-on.bat` / `weekly-off.bat`——用 Windows 工作排程器每 15 分鐘在背景檢查一次（沒有視窗），
-  到了設定的發送時間就發，**不用再一直開著 2-start**。發送時間、每幾週、自動發送開關都照設定檔，改設定不用重開；
-  錯過的（關機、睡眠）開機後 12 小時內會補發；失敗的（例如剛睡醒網路還沒連上）15 分鐘後再試，最多 3 次
-- 新功能：`cli.bat`——給 Telegram 機器人、排程器等其他程式呼叫：不問問題、不等按鍵，跑完就結束並回傳結束代碼。
-  新增 `send --scheduled`（到時間、還沒發才發，隨時呼叫都安全）
+- 新功能：每週提醒改由 **Telegram 機器人排程**，呼叫 `cli.bat`——不問問題、不等按鍵，跑完就結束並回傳結束代碼，
+  **不用再一直開著 2-start**。`send` 新增 `--retries`／`--retry-wait`（讀不到服事表、LINE 暫時連不上才重試；
+  設定錯、沒群組、額度用完不重試）和 `--popup`（最後還是失敗就在電腦跳出小視窗）；重試期間先不通知管理員，只發最後一次
+- 修正：讀不到服事表時，原本不會用 LINE 通知管理員（還沒建立發送方式就出錯了）——現在會另外建立一個來通知
 - 新功能：免費模式一鍵完成——`3-open-webhook.bat` 會自己開管理網頁、開臨時網址，並**自動登記成 LINE 的 Webhook URL**
-  （新指令 `set-webhook`、`tunnel`），不用再手動複製貼上；找不到 cloudflared 時也會去預設安裝位置找
-- 修正：同時有兩個程式要發送（例如 2-start 的排程和 Windows 工作排程器剛好同一秒）會重複 Push——
+  （LINE Messaging API「Set webhook endpoint URL」，新指令 `set-webhook`、`tunnel`），不用再手動複製貼上；
+  找不到 cloudflared 時也會去預設安裝位置找
+- 修正：同時有兩個程式要發送（例如 2-start 的排程和 Telegram 剛好同一秒）會重複 Push——
   發送改成跨程式排隊（`data/send.lock`），第二個會看到「已經送過」而略過
 - 修正：臨時網址剛建好就登記，LINE 會回「Invalid webhook endpoint URL」——現在會等網址生效、被拒絕會自動重試；
   原本經過 PowerShell 轉手的做法會把輸出卡住看不到，改成由 Python 直接讀 cloudflared 的輸出

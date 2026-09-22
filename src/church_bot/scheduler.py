@@ -1,6 +1,7 @@
-"""自動排程：2-start 開著時在程式裡排程；或用 Windows 工作排程器在背景跑（見 wintask.py，不用開著視窗）。
+"""管理網頁（2-start）內建的自動排程：視窗開著時才會運作。
 
-兩種方式都用 ``scheduled_skip_reason`` 判斷「現在該不該發」，規則一樣。
+平常建議由 Telegram 機器人排程（時間到了呼叫 ``cli.bat send``，見 cli.py），這裡的「自動發送」可以在設定關掉；
+兩邊都開著也不會發兩次（防重複 + 跨程式的鎖，見 locking.py）。
 * 每週固定時間執行一次 ``BotService.run("schedule")``；設定「每幾週發送一次」時，
   不符合的那幾週會直接跳過（判斷方式見 ``is_active_week``，跟哪一次啟動程式無關，重開機也不會錯亂）。
 * 開機補發：如果排程時間電腦剛好關機 / 睡眠，之後 12 小時內打開程式會自動補發一次。
@@ -25,8 +26,6 @@ log = logging.getLogger(__name__)
 
 JOB_ID = "weekly-reminder"
 CATCHUP_HOURS = 12
-MAX_SCHEDULED_ATTEMPTS = 3  # 同一次排程失敗了最多重試到幾次（Windows 工作排程器每 15 分鐘檢查一次）
-_SENDING_TRIGGERS = ("schedule", "catchup", "manual", "cli")  # 這些跑過才算「這一次發過了」；/提醒 不算
 _WEEK_EPOCH = dt.date(2024, 1, 1)  # 固定基準點（星期一）；只用來算「第幾週」，不代表任何實際意義
 
 
@@ -54,11 +53,9 @@ def previous_fire_time(cfg: ScheduleSettings, now: dt.datetime) -> dt.datetime:
 
 
 def scheduled_skip_reason(service: BotService, now: dt.datetime | None = None) -> str | None:
-    """「現在該不該跑一次排程發送」；None = 該跑，否則回傳不跑的原因。
+    """開機補發用：「現在該不該補跑一次排程」；None = 該跑，否則回傳不跑的原因。
 
-    規則跟程式內建的排程（含開機補發）一樣：自動發送要開著、這週是發送週、排程時間已經到了但沒超過
-    CATCHUP_HOURS、這一次還沒跑過。所以可以隨時、重複呼叫（Windows 工作排程器每 15 分鐘叫一次、
-    Telegram 叫、同時開著 2-start 也一樣），真正會發的只有「到時間、還沒發」的那一次。
+    自動發送要開著、這週是發送週、排程時間已經到了但沒超過 CATCHUP_HOURS、這一次還沒跑過（/提醒 不算）。
     """
     cfg = load_settings(service.paths).schedule
     if not cfg.enabled:
@@ -67,13 +64,9 @@ def scheduled_skip_reason(service: BotService, now: dt.datetime | None = None) -
     fire = previous_fire_time(cfg, now)
     if now - fire > dt.timedelta(hours=CATCHUP_HOURS):
         return f"還沒到發送時間（{cfg.describe()}，下次：{next_fire_time(cfg, now):%m/%d %H:%M}）"
-    runs = [r for r in service.history.recent_runs(limit=50) if r.trigger in _SENDING_TRIGGERS
-            and dt.datetime.fromisoformat(r.started_at) >= fire]
-    if any(r.status != "error" for r in runs):
+    last = service.history.last_run(("schedule", "catchup", "manual", "cli"))
+    if last and dt.datetime.fromisoformat(last.started_at) >= fire:
         return f"{fire:%m/%d %H:%M} 這一次已經發過了"
-    # 失敗的（例如電腦剛睡醒、網路還沒連上就去讀服事表）下次檢查再試；最多試幾次，免得一直通知管理員
-    if len(runs) >= MAX_SCHEDULED_ATTEMPTS:
-        return f"{fire:%m/%d %H:%M} 這一次試了 {len(runs)} 次都失敗，先不試了（管理員已收到通知）"
     return None
 
 

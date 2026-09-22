@@ -77,7 +77,8 @@ class Dispatcher:
             except MessengerError as exc:
                 log.error("送到 %s 失敗：%s", pm.target.name, exc)
                 report.deliveries.append(self._delivery(pm, DeliveryStatus.FAILED, str(exc)))
-                report.issues.append(Issue(Severity.ERROR, "send_failed",
+                code = "send_failed_temporarily" if exc.retryable else "send_failed"  # 暫時性的：等一下重試可能就好
+                report.issues.append(Issue(Severity.ERROR, code,
                                            f"「{pm.target.name}」沒有收到 {when} 的提醒：{exc.message}", exc.hint))
                 if _is_fatal(exc):
                     abort = exc

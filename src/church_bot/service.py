@@ -40,6 +40,9 @@ log = logging.getLogger(__name__)
 ROSTER_CACHE_SECONDS = 60
 QUOTA_LOW_THRESHOLD = 50
 REPLY_LIMIT = 4  # 一次 Reply 最多 5 則泡泡，留 1 則給確認訊息
+# 「等一下再試可能就好」的問題：讀不到服事表（網路、Google）、LINE 暫時連不上、沒預料到的錯誤。
+# 設定錯、沒有群組、LINE 拒絕（機器人被踢、額度用完）這種，重試也沒用。
+RETRYABLE_CODES = frozenset({"SourceError", "unexpected", "send_failed_temporarily"})
 REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /提醒（Reply，免費）送的，跟排程 Push 分開
 
 
@@ -71,6 +74,10 @@ class CheckItem:
 
 def new_run_id() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S-") + secrets.token_hex(2)
+
+
+def worth_retrying(report: RunReport) -> bool:
+    return any(i.code in RETRYABLE_CODES for i in report.issues if i.is_error)
 
 
 def build_admin_alert(report: RunReport, limit: int = 8) -> str:
@@ -167,8 +174,10 @@ class BotService:
 
     # ------------------------------------------------------------------ running
 
-    def run(self, trigger: str, *, dry_run: bool = False, force: bool = False,
-            use_cache: bool = False) -> tuple[RunReport, Plan | None]:
+    def run(self, trigger: str, *, dry_run: bool = False, force: bool = False, use_cache: bool = False,
+            will_retry: bool = False) -> tuple[RunReport, Plan | None]:
+        """will_retry：呼叫的人等一下會重試（cli send --retries）。這次的問題如果是重試可能就好的，
+        先不通知管理員，免得每試一次就扣一則 LINE；最後一次還是失敗才通知。"""
         # 真的發送時要跟其他程式排隊（見 locking.py）；預覽不發送，不用排
         send_lock = nullcontext() if dry_run else process_lock(self.paths.data_dir / "send.lock")
         with self._run_lock, send_lock:
@@ -206,7 +215,7 @@ class BotService:
                                            "請把 data/church_bot.log 傳給維護的人。"))
             finally:
                 report.finished_at = dt.datetime.now().astimezone()
-                if not dry_run and ctx is not None:
+                if not dry_run and ctx is not None and not (will_retry and worth_retrying(report)):
                     self._alert_admin(ctx.settings, messenger, report)
                 if not dry_run:  # 預覽不記錄：網頁每次打開都會預覽，記下來只會讓資料庫一直變大
                     self._record(report)
@@ -226,15 +235,22 @@ class BotService:
             report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但沒有設定「管理員」，所以沒辦法用 LINE 通知你",
                                        "到「設定」頁填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
             return
-        if messenger is None:
-            log.error("有問題需要通知管理員，但目前沒有可用的發送方式")
-            return
+        own: Messenger | None = None
+        if messenger is None:  # 例如讀不到服事表：還沒走到建立發送方式那一步就出錯了，這種最需要通知
+            try:
+                own = messenger = build_messenger(settings, self.paths)
+            except ChurchBotError as exc:
+                log.error("有問題需要通知管理員，但目前沒有可用的發送方式：%s", exc)
+                return
         try:
             messenger.send(admin, OutgoingMessage(text=build_admin_alert(report)))
             log.info("已通知管理員")
         except ChurchBotError as exc:
             log.error("通知管理員失敗：%s", exc)
             report.issues.append(Issue(Severity.ERROR, "admin_alert_failed", f"通知管理員失敗：{exc.message}", exc.hint))
+        finally:
+            if own is not None:
+                own.close()
 
     def _record(self, report: RunReport) -> None:
         try:

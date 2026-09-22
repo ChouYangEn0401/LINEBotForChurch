@@ -75,7 +75,8 @@ def build_steps(*, issues: list[Issue], settings: Settings, roster: Roster | Non
         steps.append(Step("⏰", "自動發送", "/settings#advanced", "warning", "測試模式：不會真的送到 LINE",
                           schedule.describe()))
     elif not schedule.enabled:
-        steps.append(Step("⏰", "自動發送", "/settings#schedule", "off", "已關閉", "要手動按「立刻發送」"))
+        steps.append(Step("⏰", "自動發送", "/settings#schedule", "off", "由 Telegram 排程",
+                          "時間到了由 Telegram 呼叫 cli.bat send；也可以按「立刻發送」"))
     else:
         steps.append(Step("⏰", "自動發送", "/settings#schedule", "ok", schedule.describe(), f"下次：{next_run}"))
     return steps

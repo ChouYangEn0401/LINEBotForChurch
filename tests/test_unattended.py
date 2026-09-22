@@ -1,4 +1,4 @@
-"""不用一直開著視窗的用法：排程判斷（send --scheduled）、跨程式的鎖、Windows 工作排程器、自動登記 Webhook。"""
+"""給 Telegram 排程呼叫的發送（重試、失敗跳視窗）、跨程式的鎖、開機補發的判斷、免費模式（自動登記 Webhook）。"""
 
 import argparse
 import datetime as dt
@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from church_bot import wintask
 from church_bot.cli import cmd_send, cmd_set_webhook
 from church_bot.config import Settings, save_settings
 from church_bot.errors import MessengerError
@@ -21,10 +20,11 @@ from church_bot.models import RunReport, Target
 from church_bot.scheduler import scheduled_skip_reason
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
-from tests.conftest import FakeMessenger, gid, write
+from tests.conftest import FakeMessenger, gid, uid, write
 
 TZ = ZoneInfo("Asia/Taipei")
 THU_2005 = dt.datetime(2026, 10, 1, 20, 5, tzinfo=TZ)  # 週四 20:05，預設排程（週四 20:00）剛過
+ADMIN = uid("f")
 
 
 @pytest.fixture
@@ -40,6 +40,7 @@ def service(paths, fake) -> BotService:
     settings = Settings()
     settings.source.kind = "csv"
     settings.source.csv_path = "config/roster.csv"
+    settings.line.admin_target_id = ADMIN
     save_settings(paths, settings)
     TargetTable(paths.targets_file).save([Target("同工群", gid()), Target("敬拜團", gid("c"))])
     svc = BotService(paths)
@@ -52,7 +53,7 @@ def ran_at(service: BotService, when: dt.datetime, trigger: str = "schedule") ->
                                      finished_at=when))
 
 
-# ------------------------------------------------------------------ send --scheduled 的判斷
+# ------------------------------------------------------------------ 開機補發的判斷（2-start 內建排程）
 
 
 def test_scheduled_run_is_due_only_right_after_the_scheduled_time(service):
@@ -71,23 +72,6 @@ def test_scheduled_run_happens_once_per_fire_time(service):
     assert scheduled_skip_reason(service, THU_2005 + dt.timedelta(days=7)) is None
 
 
-def test_failed_scheduled_run_is_retried_a_few_times(service):
-    """電腦剛睡醒、網路還沒連上就去讀服事表會失敗：下一次檢查（15 分鐘後）再試，但最多 3 次，免得一直通知管理員。"""
-    from church_bot.models import Issue, Severity
-
-    def failed_at(when):
-        report = RunReport(run_id=f"f-{when:%H%M%S}", trigger="schedule", dry_run=False, started_at=when,
-                           finished_at=when)
-        report.issues.append(Issue(Severity.ERROR, "SourceError", "讀不到服事表"))
-        service.history.record(report)
-
-    failed_at(THU_2005 - dt.timedelta(minutes=5))
-    assert scheduled_skip_reason(service, THU_2005 + dt.timedelta(minutes=10)) is None  # 再試一次
-    failed_at(THU_2005 + dt.timedelta(minutes=10))
-    failed_at(THU_2005 + dt.timedelta(minutes=25))
-    assert "試了 3 次都失敗" in scheduled_skip_reason(service, THU_2005 + dt.timedelta(minutes=40))
-
-
 def test_scheduled_run_respects_the_auto_send_switch(service, paths):
     settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
                                         "schedule": {"enabled": False}})
@@ -95,26 +79,88 @@ def test_scheduled_run_respects_the_auto_send_switch(service, paths):
     assert "自動發送已關閉" in scheduled_skip_reason(service, THU_2005)
 
 
-def test_send_scheduled_does_nothing_when_not_due(service, paths, fake, monkeypatch, capsys):
-    monkeypatch.setattr("church_bot.scheduler.scheduled_skip_reason", lambda svc: "還沒到發送時間")
-    assert cmd_send(paths, argparse.Namespace(scheduled=True, force=False)) == 0
-    assert "這次不發" in capsys.readouterr().out
-    assert fake.sent == [] and BotService(paths).history.recent_runs() == []
+# ------------------------------------------------------------------ Telegram 呼叫的 send：重試、失敗跳視窗
 
 
-def test_send_scheduled_sends_and_is_labelled_as_the_schedule(service, paths, fake, monkeypatch):
-    monkeypatch.setattr("church_bot.scheduler.scheduled_skip_reason", lambda svc: None)
+def send_args(**overrides):
+    return argparse.Namespace(**{"force": False, "retries": 0, "retry_wait": 0, "popup": False, **overrides})
+
+
+@pytest.fixture
+def popups(monkeypatch):
+    shown: list[tuple[str, str]] = []
+    # cmd_send 自己建 BotService，「今天」要跟 service fixture 一樣固定住，服事表才不會過期
     monkeypatch.setattr(BotService, "now", lambda self, settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=TZ))
-    cmd_send(paths, argparse.Namespace(scheduled=True, force=False))
-    assert {to for to, _ in fake.sent} == {gid(), gid("c")}
-    assert [r.trigger for r in BotService(paths).history.recent_runs()] == ["schedule"]
+    monkeypatch.setattr("church_bot.cli._popup", lambda title, text: shown.append((title, text)))
+    monkeypatch.setattr("church_bot.cli.time.sleep", lambda seconds: None)
+    return shown
+
+
+def flaky_roster(monkeypatch, failures: int) -> None:
+    """前幾次讀服事表失敗（例如網路剛好斷掉），之後正常。"""
+    from church_bot.errors import SourceError
+
+    original = BotService.fetch_roster
+    calls = {"n": 0}
+
+    def fetch(self, *args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] <= failures:
+            raise SourceError("連不上 Google Sheet", "檢查網路")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(BotService, "fetch_roster", fetch)
+
+
+def test_send_retries_a_temporary_failure_then_succeeds(service, paths, fake, popups, monkeypatch, capsys):
+    flaky_roster(monkeypatch, failures=1)
+    assert cmd_send(paths, send_args(retries=3, popup=True)) == 0
+    assert {to for to, _ in fake.sent if to != ADMIN} == {gid(), gid("c")}
+    # 第一次失敗先不通知管理員（不浪費 LINE 則數）；成功那次只有平常的提醒事項（服事表快用完）
+    assert all("連不上 Google Sheet" not in text for text in fake.texts_to(ADMIN))
+    assert popups == []
+    assert "第 1 次沒成功" in capsys.readouterr().out
+
+
+def test_send_gives_up_after_retries_alerts_admin_once_and_pops_up(service, paths, fake, popups, monkeypatch):
+    flaky_roster(monkeypatch, failures=99)
+    assert cmd_send(paths, send_args(retries=2, popup=True)) == 1
+    assert len(BotService(paths).history.recent_runs()) == 3  # 1 次 + 重試 2 次
+    assert len(fake.texts_to(ADMIN)) == 1  # 只有最後一次才通知管理員
+    assert len(popups) == 1 and "連不上 Google Sheet" in popups[0][1]
+
+
+def test_send_does_not_retry_problems_that_waiting_cannot_fix(service, paths, fake, popups):
+    TargetTable(paths.targets_file).save([Target("同工群", gid(), enabled=False)])  # 沒有啟用的群組
+    assert cmd_send(paths, send_args(retries=3, popup=True)) == 1
+    assert len(BotService(paths).history.recent_runs()) == 1
+    assert len(popups) == 1
+
+
+def test_send_without_popup_flag_never_pops_up(service, paths, fake, popups, monkeypatch):
+    flaky_roster(monkeypatch, failures=99)
+    assert cmd_send(paths, send_args()) == 1
+    assert popups == []
+
+
+def test_line_network_failure_counts_as_temporary(service, fake):
+    from church_bot.errors import MessengerError
+    from church_bot.service import worth_retrying
+
+    fake.fail[gid()] = MessengerError("連不上 LINE", "檢查網路", retryable=True)
+    report, _ = service.run("cli")
+    assert worth_retrying(report)
+    fake.fail[gid("c")] = MessengerError("機器人不在群組裡", "", status_code=403)
+    fake.fail.pop(gid())
+    report, _ = service.run("cli", force=True)
+    assert not worth_retrying(report)
 
 
 # ------------------------------------------------------------------ 跨程式的鎖
 
 
 def test_two_programs_sending_at_the_same_moment_only_send_once(service, paths, fake):
-    """2-start 的排程和 Windows 工作排程器剛好同一秒發送：第二個要等第一個記錄完，再查就會略過。"""
+    """2-start 的排程和 Telegram 呼叫的 cli.bat 剛好同一秒發送：第二個要等第一個記錄完，再查就會略過。"""
     original = fake.send
 
     def slow_send(to, message):
@@ -129,7 +175,7 @@ def test_two_programs_sending_at_the_same_moment_only_send_once(service, paths, 
         t.start()
     for t in threads:
         t.join()
-    assert sorted(to for to, _ in fake.sent) == sorted([gid(), gid("c")])
+    assert sorted(to for to, _ in fake.sent if to != ADMIN) == sorted([gid(), gid("c")])
 
 
 def test_lock_gives_up_waiting_instead_of_skipping_the_reminder(tmp_path):
@@ -253,42 +299,6 @@ def test_register_gives_up_with_a_clear_message(paths, monkeypatch):
 
 def test_set_webhook_rejects_plain_http(paths, capsys):
     assert cmd_set_webhook(paths, argparse.Namespace(url="http://localhost:8787", tries=1, wait=0)) == 2
-
-
-# ------------------------------------------------------------------ Windows 工作排程器
-
-
-def test_task_command_is_valid_python_that_runs_send_scheduled(paths):
-    exe, args = wintask.task_command(paths)
-    assert exe.lower().endswith(("pythonw.exe", "python.exe", "python", "pythonw"))
-    assert args.startswith('-c "') and args.endswith('"')
-    code = args[4:-1]
-    compile(code, "<task>", "exec")
-    assert "['send', '--scheduled']" in code and repr(str(paths.root / "src")) in code
-
-
-def test_install_script_quotes_for_powershell(paths):
-    script = wintask.install_script(paths)
-    assert f"-TaskName '{wintask.TASK_NAME}'" in script
-    assert "''send'', ''--scheduled''" in script  # PowerShell 單引號字串裡的 ' 要寫兩次
-    assert "-StartWhenAvailable" in script and "-AllowStartIfOnBatteries" in script
-    assert "-Minutes 15" in script
-
-
-def test_status_parsing(monkeypatch):
-    monkeypatch.setattr(wintask, "_powershell", lambda script: "MISSING\r\n")
-    assert wintask.status() is None
-    monkeypatch.setattr(wintask, "_powershell", lambda script: "STATE=Ready\r\nLAST=1999/11/30 00:00\r\n"
-                                                               "RESULT=267011\r\nNEXT=2026/09/22 21:15\r\n")
-    never = wintask.status()
-    assert never.state == "Ready" and never.last_run == "" and never.last_ok is None
-    monkeypatch.setattr(wintask, "_powershell", lambda script: "STATE=Ready\r\nLAST=2026/09/22 21:00\r\n"
-                                                               "RESULT=1\r\nNEXT=2026/09/22 21:15\r\n")
-    assert wintask.status().last_ok is False
-    monkeypatch.setattr(wintask, "_powershell", lambda script: "STATE=Running\r\nLAST=2026/09/22 21:00\r\n"
-                                                               "RESULT=267009\r\nNEXT=2026/09/22 21:15\r\n")
-    running = wintask.status()
-    assert running.running and running.last_ok is None  # 正在跑不是錯誤
 
 
 # ------------------------------------------------------------------ 免費模式：Python 自己開 cloudflared

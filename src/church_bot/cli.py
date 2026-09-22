@@ -1,8 +1,8 @@
 """指令列入口：``python -m church_bot <指令>``。
 
 一般使用者不用記這些：雙擊 scripts 資料夾裡的檔案就好。
-要從別的程式（Telegram 機器人、排程器）呼叫，用 scripts/windows/cli.bat：不會問問題、不會停下來等按鍵，
-跑完就結束，結束代碼 0 = 正常、1 = 有錯誤、2 = 設定有問題。
+每週提醒由 Telegram 機器人排程：時間到了呼叫 scripts/windows/cli.bat send --retries 3 --retry-wait 300 --popup。
+cli.bat 不會問問題、不會停下來等按鍵，跑完就結束，結束代碼 0 = 正常、1 = 有錯誤、2 = 設定有問題。
 """
 
 from __future__ import annotations
@@ -11,9 +11,12 @@ import argparse
 import datetime as dt
 import shutil
 import socket
+import subprocess
 import sys
 import threading
+import time
 import webbrowser
+from pathlib import Path
 
 from church_bot import __version__
 from church_bot.config import Paths, load_settings
@@ -142,57 +145,51 @@ def cmd_preview(paths: Paths, _: argparse.Namespace) -> int:
 
 
 def cmd_send(paths: Paths, args: argparse.Namespace) -> int:
-    from church_bot.scheduler import scheduled_skip_reason
-    from church_bot.service import BotService
+    """發送一次（已經送過、內容沒變的會自動略過）。Telegram 排程就是呼叫這個。
+
+    --retries：讀不到服事表、LINE 暫時連不上這種「等一下可能就好」的問題，等 --retry-wait 秒再試。
+    --popup：最後還是有錯誤，就在這台電腦跳出小視窗通知。
+    """
+    from church_bot.service import RETRYABLE_CODES, BotService, worth_retrying
 
     service = BotService(paths)
-    trigger = "cli"
-    if args.scheduled:  # 照排程規則：沒到時間、已經發過、自動發送關著，就什麼都不做
-        reason = scheduled_skip_reason(service)
-        if reason:
-            _print(f"⏭️ 這次不發：{reason}")
-            return 0
-        trigger = "schedule"
-    report, plan = service.run(trigger, force=args.force)
+    attempts = max(args.retries, 0) + 1
+    for attempt in range(1, attempts + 1):
+        left = attempts - attempt
+        report, plan = service.run("cli", force=args.force, will_retry=left > 0)
+        if left == 0 or not worth_retrying(report):
+            break
+        reason = next(i.message for i in report.issues if i.is_error and i.code in RETRYABLE_CODES)
+        _print(f"⚠️ 第 {attempt} 次沒成功：{reason}")
+        _print(f"   {args.retry_wait:g} 秒後再試（還會再試 {left} 次）")
+        time.sleep(args.retry_wait)
     print_report(report, plan)
+    if report.has_errors and args.popup:
+        _popup("服事提醒機器人：提醒沒有順利送出", _popup_text(report))
     return 1 if report.has_errors else 0
 
 
-# --------------------------------------------------------------------------- Windows 工作排程器
+def _popup_text(report: RunReport, limit: int = 5) -> str:
+    problems = [i for i in report.issues if i.is_error]
+    lines = [f"已送出 {report.count_sent} 則、失敗 {report.count_failed} 則。", ""]
+    lines += [i.one_line() for i in problems[:limit]]
+    if len(problems) > limit:
+        lines.append(f"…還有 {len(problems) - limit} 項")
+    lines += ["", "詳細請打開管理網頁（2-start），或看 data/church_bot.log。"]
+    return "\n".join(lines)
 
 
-def cmd_task(paths: Paths, args: argparse.Namespace) -> int:
-    from church_bot import wintask
-    from church_bot.scheduler import next_fire_time
-
-    settings = load_settings(paths)
-    if args.action == "on":
-        wintask.install(paths)
-        _print("✅ 已開啟「每週自動發送」：Windows 會在背景每 15 分鐘檢查一次（不會跳出視窗），到了時間就發。")
-        _print(f"   發送時間照設定：{settings.schedule.describe()}（改設定就好，不用重新開這個）")
-        _print("   不用再一直開著 2-start 視窗；電腦要開著（錯過的話開機後會補發，最多補 12 小時內的）。")
-    elif args.action == "off":
-        wintask.uninstall()
-        _print("已關閉「每週自動發送（Windows 工作排程器）」。")
-        return 0
-    status = wintask.status()
-    if status is None:
-        _print("➖ 「每週自動發送（Windows 工作排程器）」目前沒有開。要開請雙擊 weekly-on.bat。")
-        return 0
-    now = dt.datetime.now().astimezone()
-    _print(f"✅ 「每週自動發送」開著（{status.state}）")
-    if settings.schedule.enabled:
-        _print(f"   下次發送：{next_fire_time(settings.schedule, now):%Y/%m/%d %H:%M}（{settings.schedule.describe()}）")
-    else:
-        _print("   ⚠️ 但設定裡的「自動發送」是關的，所以不會發。到網頁「設定 → ②」打開。")
-    if not status.last_run:
-        last = "還沒檢查過"
-    elif status.running:
-        last = f"{status.last_run}（正在執行）"
-    else:
-        last = f"{status.last_run}（{'正常' if status.last_ok else '有錯誤，請看 data/church_bot.log'}）"
-    _print(f"   上次背景檢查：{last}")
-    return 0
+def _popup(title: str, text: str) -> None:
+    """在這台電腦跳出小視窗。另開一個程式顯示，呼叫的人（Telegram）不用等使用者按確定就能結束。"""
+    if sys.platform != "win32":
+        return
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    code = "import ctypes, sys; ctypes.windll.user32.MessageBoxW(0, sys.argv[1], sys.argv[2], 0x30 | 0x10000 | 0x40000)"
+    try:
+        subprocess.Popen([str(pythonw if pythonw.exists() else sys.executable), "-c", code, text, title],
+                         creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+    except OSError as exc:
+        _print(f"（跳不出通知視窗：{exc}）")
 
 
 # --------------------------------------------------------------------------- LINE Webhook（免費模式）
@@ -248,7 +245,10 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
         _print("⚠️ 管理網頁開放給其他電腦連線，但沒有設定密碼！請在 .env 設定 UI_PASSWORD。")
 
     _print(f"✅ 管理網頁：{url}")
-    _print("   要關掉請按 Ctrl + C。每週提醒：開了 weekly-on 就不用管這個視窗；沒開的話這個視窗要開著才會發。")
+    _print("   要關掉請按 Ctrl + C。")
+    if settings.schedule.enabled:
+        _print(f"   設定裡的「自動發送」開著：這個視窗開著的時候，{settings.schedule.describe()} 會自動發"
+               "（用 Telegram 排程的話可以到設定關掉，重複觸發也不會發兩次）。")
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(paths), host=host, port=port, log_level="warning")
@@ -273,10 +273,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("preview", help="預覽這次會發的訊息（不會真的送出）")
     send = sub.add_parser("send", help="立刻發送一次")
     send.add_argument("--force", action="store_true", help="已經送過的也再送一次")
-    send.add_argument("--scheduled", action="store_true",
-                      help="照排程規則：到了發送時間、還沒發過才發（給工作排程器、Telegram 定時呼叫用）")
-    task = sub.add_parser("task", help="Windows 每週自動發送（不用一直開著視窗）：on / off / status")
-    task.add_argument("action", choices=["on", "off", "status"], nargs="?", default="status")
+    send.add_argument("--retries", type=int, default=0, help="讀不到服事表、LINE 暫時連不上時，最多再試幾次（預設 0）")
+    send.add_argument("--retry-wait", type=float, default=300, help="每次重試前等幾秒（預設 300 = 5 分鐘）")
+    send.add_argument("--popup", action="store_true", help="最後還是失敗的話，在這台電腦跳出小視窗通知")
     hook = sub.add_parser("set-webhook", help="把臨時網址登記成 LINE 的 Webhook URL，並請 LINE 測試連線")
     hook.add_argument("url", help="https:// 開頭的網址（沒加 /line/webhook 會自動補上）")
     hook.add_argument("--tries", type=int, default=12, help=argparse.SUPPRESS)
@@ -288,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
-            "task": cmd_task, "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
+            "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -80,7 +80,7 @@
 
 ## 8. 已知限制
 
-- 電腦關機時不會發送（開機後 12 小時內會補發）。每週自動發送用 Windows 工作排程器（`weekly-on.bat`），只在使用者登入 Windows 時執行；專案資料夾搬家要重新雙擊一次。
+- 電腦關機時不會發送。每週提醒由 Telegram 機器人排程（呼叫 `cli.bat send`），Telegram 沒開就不會發；`--popup` 的通知視窗只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
 - LINE token 失效時，連管理員通知也送不出去，只能看網頁或 log。
 - 免費的一般 LINE 帳號**拿不到群組完整成員名單**（見 [LINE_IDS_AND_MEMBERS.md](LINE_IDS_AND_MEMBERS.md)）。
 - 管理網頁沒有 CSRF 防護：預設只開放這台電腦；要開放給其他電腦時，務必設定密碼。

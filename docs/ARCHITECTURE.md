@@ -85,7 +85,7 @@
 |---|---|
 | 對照表用 CSV | Excel／Numbers／Google Sheet 都能開，網頁也能改，非工程師看得懂 |
 | 不用 line-bot-sdk | 只用到幾個 REST API；少一個大型依賴；錯誤訊息能完全翻成白話 |
-| 排程放在程式裡（APScheduler） | 不用教使用者設定 Windows 工作排程器／cron；網頁能直接改時間；可以開機補發 |
+| 排程放在程式裡（APScheduler） | 不用教使用者設定 Windows 工作排程器／cron；網頁能直接改時間；可以開機補發。已經有常駐的 Telegram 機器人時，改由它呼叫 `cli.bat send`（重試、失敗跳視窗見 cli.py），內建排程可以關掉 |
 | 伺服器端畫面（Jinja2），不用前端框架 | 沒有建置步驟、離線可用、好維護 |
 | 機密只放 `.env`，由網頁寫入 | `settings.yaml` 可以安心備份；避免 Windows 記事本把 `.env` 存成 `.env.txt` |
 | 防重複：SQLite 記錄（群組, 日期, 聚會）+ `X-Line-Retry-Key` | 排程重跑、補發、連點都不會重複；網路重試 LINE 也保證不重複 |

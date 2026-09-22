@@ -60,9 +60,8 @@
 3. 輸入 `bash`（後面打一個空格），把 `scripts/mac/1-install.sh` **拖進終端機視窗**，按 Enter。
 4. 用同樣方法執行 `scripts/mac/2-start.sh`，瀏覽器會打開管理網頁 <http://127.0.0.1:8787>。
 
-> `2-start` 是**管理網頁**，改設定、看預覽時才需要開。每週自動提醒建議用下面第 6 步的 **`weekly-on.bat`**：
-> 開一次之後，Windows 會在背景自己發，**不用一直開著任何視窗**（電腦要開著）。
-> 沒開 `weekly-on` 的話，就要讓 `2-start` 的視窗一直開著才會自動提醒。
+> `2-start` 是**管理網頁**，改設定、看預覽時才需要開。每週提醒由 **Telegram 機器人排程**（見下面第 6 步），
+> 時間到了呼叫一次發送指令、發完就結束，不用一直開著任何視窗。
 
 ---
 
@@ -78,8 +77,14 @@
 3. **設定群組**：把機器人邀進 LINE 群組，在群組打「/群組ID」，到「👥 LINE 群組」新增群組、貼上 ID，按「測試」確認收得到。
 4. **設定管理員**：私訊機器人「/我的ID」，把 ID 填到「⚙️ 設定 → ④ 出問題時通知誰」。
 5. **系統檢查**：打開「❓ 說明 → 🩺 系統檢查」，全部 ✅ 就完成了！
-6. **開啟每週自動發送**：Windows **雙擊 `scripts\windows\weekly-on.bat`**（只要一次；之後不用開著任何視窗，
-   Windows 會在背景每 15 分鐘檢查一次，到了設定的時間就發）。Mac 請改用 `scripts/mac/autostart-on.sh`（讓 2-start 開機自動執行）。
+6. **在 Telegram 機器人加每週排程**：每週四 20:00 執行下面這行（重試、失敗跳視窗都包含在參數裡）：
+
+   ```
+   C:\Users\user\Documents\LINEBotForChurch\scripts\windows\cli.bat send --retries 3 --retry-wait 300 --popup
+   ```
+
+   Telegram 排程之後，「⚙️ 設定 → ② 自動發送」（管理網頁內建、`2-start` 開著才會發）可以關掉；兩邊都開著也不會發兩次。
+   沒有 Telegram 的話，改成把自動發送打開，並讓 `2-start` 一直開著（`autostart-on.bat` 可以開機自動執行）。
 
 ---
 
@@ -101,17 +106,21 @@
 
 | 情況 | 怎麼做 | 要不要錢（LINE 額度） | 要開著什麼 |
 |---|---|---|---|
-| **每週固定提醒** | 什麼都不用做（`weekly-on.bat` 開過一次就好） | Push：按群組人數扣免費額度（每月 200 則） | 不用，電腦開著就好 |
-| **服事表改了，想馬上通知** | 雙擊 `send-now.bat`；或從 Telegram 等程式呼叫 `cli.bat send` | Push：同上；內容沒變的不會重送 | 不用 |
+| **每週固定提醒** | Telegram 每週四 20:00 自動呼叫（上面第 6 步） | Push：按群組人數扣免費額度（每月 200 則） | Telegram 機器人開著就好 |
+| **服事表改了，想馬上通知** | 在 Telegram 下指令呼叫 `cli.bat send`；或雙擊 `send-now.bat` | Push：同上；內容沒變的不會重送 | 不用 |
 | **想免費讓群組看到、或讓大家登記 ID／名字** | 雙擊 **`3-open-webhook.bat`**（免費模式），在群組打 `/提醒`，用完關掉 | 免費（Reply） | 那個視窗開著的時候才有效 |
 
 - **免費模式**會自己打開管理網頁、開臨時網址，並**自動登記到 LINE**，不用再手動貼 Webhook URL（第一次要先裝 cloudflared，
   並在 LINE Developers 打開一次「Use webhook」，見 [docs/SETUP_LINE.md](docs/SETUP_LINE.md) 第 5 步）。
-- **給其他程式呼叫（Telegram 機器人、排程器）用 `scripts\windows\cli.bat`**：不會問問題、不會等按鍵，跑完就結束。
-  `cli.bat send --scheduled`（到時間、還沒發才發，隨時呼叫都安全）、`cli.bat send`（現在發）、`cli.bat preview`（只看不發）、
-  `cli.bat check`（健康檢查）。結束代碼：0 = 正常、1 = 有要處理的事、2 = 設定有問題。
-- 同時開著好幾種也沒關係：有防重複＋跨程式的鎖，同一週同樣的內容只會發一次。
-- 其他：`check.bat`（健康檢查＋預覽）、`weekly-off.bat`（關掉每週自動發送）。Mac 對應的是 `scripts/mac/*.sh`。
+- **Telegram 呼叫 `scripts\windows\cli.bat`**：不會問問題、不會等按鍵，跑完就結束。
+  - `cli.bat send`：發送（已經送過、內容沒變的自動略過；有人 2 天內打過 `/提醒` 也算送過）
+  - `--retries 3 --retry-wait 300`：讀不到服事表、LINE 暫時連不上這種「等一下可能就好」的問題，每 5 分鐘再試、最多 3 次
+    （設定錯、沒有群組、額度用完這種重試也沒用，就不等）；最多重試完約 15 分鐘才結束，Telegram 那邊請讓它在背景跑
+  - `--popup`：最後還是失敗，就在這台電腦跳出小視窗通知（管理員的 LINE 通知也只發最後一次，不會每試一次就扣一則）
+  - `cli.bat preview`（只看不發）、`cli.bat check`（健康檢查）
+  - 結束代碼：0 = 正常、1 = 有要處理的事、2 = 設定有問題
+- 同時從好幾個地方觸發也沒關係：有防重複＋跨程式的鎖，同一週同樣的內容只會發一次。
+- 其他：`check.bat`（健康檢查＋預覽）。Mac 對應的是 `scripts/mac/*.sh`。
 
 ---
 

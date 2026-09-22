@@ -65,7 +65,7 @@
 
       <label for="time">幾點</label>
       <input type="time" id="time" name="time" value="{{ f.time }}">
-      <div class="help">建議在聚會前幾天，例如星期四晚上 8 點（發送當下才讀服事表，一定是最新的）。<strong>電腦要開著</strong>才會發送。雙擊過 <code>weekly-on.bat</code> 的話，不用開著這個程式，Windows 會在背景發；沒有的話，這個程式要在執行才會發。剛好關機錯過，12 小時內開機會自動補發。</div>
+      <div class="help">建議在聚會前幾天，例如星期四晚上 8 點（發送當下才讀服事表，一定是最新的）。這裡是管理網頁內建的自動發送，<strong>這個程式開著</strong>才會發。平常用 Telegram 排程的話（時間到了呼叫 <code>cli.bat send</code>）可以把「自動發送」關掉；兩邊都開著也不會發兩次。</div>
 
       <label for="every_n_weeks">每幾週發送一次</label>
       <input type="number" id="every_n_weeks" name="every_n_weeks" min="1" max="8" value="{{ f.every_n_weeks }}">
