@@ -150,6 +150,23 @@ class LineMessenger:
             return None
         return int(self._request("GET", f"/v2/bot/{kind}/{to}/members/count").json().get("count", 0))
 
+    # ------------------------------------------------------------------ webhook（免費模式用：自動登記臨時網址）
+
+    def set_webhook(self, url: str) -> None:
+        """把 LINE Developers 後台的 Webhook URL 改成這個網址（跟手動貼上一樣）。"""
+        self._request("PUT", "/v2/bot/channel/webhook/endpoint", json={"endpoint": url})
+
+    def webhook_info(self) -> tuple[str, bool]:
+        """(目前登記的網址, 後台「Use webhook」有沒有打開)。"""
+        data = self._request("GET", "/v2/bot/channel/webhook/endpoint").json()
+        return str(data.get("endpoint", "")), bool(data.get("active"))
+
+    def test_webhook(self) -> tuple[bool, str]:
+        """請 LINE 對登記的網址送一次測試（跟後台按 Verify 一樣）。回傳 (成功嗎, 說明)。"""
+        data = self._request("POST", "/v2/bot/channel/webhook/test", json={}).json()
+        detail = str(data.get("detail") or data.get("reason") or "")
+        return bool(data.get("success")), f"{data.get('statusCode', '')} {detail}".strip()
+
     def group_name(self, group_id: str) -> str:
         try:
             return str(self._request("GET", f"/v2/bot/group/{group_id}/summary").json().get("groupName", ""))

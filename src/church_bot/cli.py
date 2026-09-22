@@ -1,6 +1,8 @@
 """指令列入口：``python -m church_bot <指令>``。
 
 一般使用者不用記這些：雙擊 scripts 資料夾裡的檔案就好。
+要從別的程式（Telegram 機器人、排程器）呼叫，用 scripts/windows/cli.bat：不會問問題、不會停下來等按鍵，
+跑完就結束，結束代碼 0 = 正常、1 = 有錯誤、2 = 設定有問題。
 """
 
 from __future__ import annotations
@@ -35,10 +37,12 @@ DEMO_ROWS = [
 
 
 def _print(text: str = "") -> None:
+    # flush：被別的程式呼叫（Telegram、排程器）時輸出不是直接到螢幕，不 flush 會整段卡到結束才出現
     try:
-        print(text)
+        print(text, flush=True)
     except UnicodeEncodeError:  # 極舊的命令列：印不出 emoji 就換成 ?
-        print(text.encode(sys.stdout.encoding or "ascii", errors="replace").decode(sys.stdout.encoding or "ascii"))
+        print(text.encode(sys.stdout.encoding or "ascii", errors="replace").decode(sys.stdout.encoding or "ascii"),
+              flush=True)
 
 
 # --------------------------------------------------------------------------- init
@@ -138,11 +142,78 @@ def cmd_preview(paths: Paths, _: argparse.Namespace) -> int:
 
 
 def cmd_send(paths: Paths, args: argparse.Namespace) -> int:
+    from church_bot.scheduler import scheduled_skip_reason
     from church_bot.service import BotService
 
-    report, plan = BotService(paths).run("cli", force=args.force)
+    service = BotService(paths)
+    trigger = "cli"
+    if args.scheduled:  # 照排程規則：沒到時間、已經發過、自動發送關著，就什麼都不做
+        reason = scheduled_skip_reason(service)
+        if reason:
+            _print(f"⏭️ 這次不發：{reason}")
+            return 0
+        trigger = "schedule"
+    report, plan = service.run(trigger, force=args.force)
     print_report(report, plan)
     return 1 if report.has_errors else 0
+
+
+# --------------------------------------------------------------------------- Windows 工作排程器
+
+
+def cmd_task(paths: Paths, args: argparse.Namespace) -> int:
+    from church_bot import wintask
+    from church_bot.scheduler import next_fire_time
+
+    settings = load_settings(paths)
+    if args.action == "on":
+        wintask.install(paths)
+        _print("✅ 已開啟「每週自動發送」：Windows 會在背景每 15 分鐘檢查一次（不會跳出視窗），到了時間就發。")
+        _print(f"   發送時間照設定：{settings.schedule.describe()}（改設定就好，不用重新開這個）")
+        _print("   不用再一直開著 2-start 視窗；電腦要開著（錯過的話開機後會補發，最多補 12 小時內的）。")
+    elif args.action == "off":
+        wintask.uninstall()
+        _print("已關閉「每週自動發送（Windows 工作排程器）」。")
+        return 0
+    status = wintask.status()
+    if status is None:
+        _print("➖ 「每週自動發送（Windows 工作排程器）」目前沒有開。要開請雙擊 weekly-on.bat。")
+        return 0
+    now = dt.datetime.now().astimezone()
+    _print(f"✅ 「每週自動發送」開著（{status.state}）")
+    if settings.schedule.enabled:
+        _print(f"   下次發送：{next_fire_time(settings.schedule, now):%Y/%m/%d %H:%M}（{settings.schedule.describe()}）")
+    else:
+        _print("   ⚠️ 但設定裡的「自動發送」是關的，所以不會發。到網頁「設定 → ②」打開。")
+    if not status.last_run:
+        last = "還沒檢查過"
+    elif status.running:
+        last = f"{status.last_run}（正在執行）"
+    else:
+        last = f"{status.last_run}（{'正常' if status.last_ok else '有錯誤，請看 data/church_bot.log'}）"
+    _print(f"   上次背景檢查：{last}")
+    return 0
+
+
+# --------------------------------------------------------------------------- LINE Webhook（免費模式）
+
+
+def cmd_set_webhook(paths: Paths, args: argparse.Namespace) -> int:
+    """把網址登記成 LINE 的 Webhook URL（免費模式會自動做；這個指令給自己架固定網址的人用）。"""
+    from church_bot.tunnel import register_webhook
+
+    if not args.url.strip().startswith("https://"):
+        _print("❌ Webhook 網址一定要是 https:// 開頭")
+        return 2
+    return 0 if register_webhook(paths, args.url, _print, tries=args.tries, wait=args.wait) else 1
+
+
+def cmd_tunnel(paths: Paths, args: argparse.Namespace) -> int:
+    """免費模式：開 Cloudflare 臨時網址 + 自動登記到 LINE，一直開著直到關掉視窗或 Ctrl+C（見 tunnel.py）。"""
+    from church_bot.tunnel import register_webhook, run_tunnel
+
+    command = [args.cloudflared, "tunnel", "--url", f"http://localhost:{args.port}"]
+    return run_tunnel(command, lambda url: register_webhook(paths, url, _print), _print)
 
 
 # --------------------------------------------------------------------------- web
@@ -177,7 +248,7 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
         _print("⚠️ 管理網頁開放給其他電腦連線，但沒有設定密碼！請在 .env 設定 UI_PASSWORD。")
 
     _print(f"✅ 管理網頁：{url}")
-    _print("   這個視窗要一直開著，自動提醒才會運作。要關掉請按 Ctrl + C。")
+    _print("   要關掉請按 Ctrl + C。每週提醒：開了 weekly-on 就不用管這個視窗；沒開的話這個視窗要開著才會發。")
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(paths), host=host, port=port, log_level="warning")
@@ -202,10 +273,22 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("preview", help="預覽這次會發的訊息（不會真的送出）")
     send = sub.add_parser("send", help="立刻發送一次")
     send.add_argument("--force", action="store_true", help="已經送過的也再送一次")
+    send.add_argument("--scheduled", action="store_true",
+                      help="照排程規則：到了發送時間、還沒發過才發（給工作排程器、Telegram 定時呼叫用）")
+    task = sub.add_parser("task", help="Windows 每週自動發送（不用一直開著視窗）：on / off / status")
+    task.add_argument("action", choices=["on", "off", "status"], nargs="?", default="status")
+    hook = sub.add_parser("set-webhook", help="把臨時網址登記成 LINE 的 Webhook URL，並請 LINE 測試連線")
+    hook.add_argument("url", help="https:// 開頭的網址（沒加 /line/webhook 會自動補上）")
+    hook.add_argument("--tries", type=int, default=12, help=argparse.SUPPRESS)
+    hook.add_argument("--wait", type=float, default=5.0, help=argparse.SUPPRESS)
+    tunnel = sub.add_parser("tunnel", help="免費模式：開臨時網址並自動登記到 LINE（開著的時候群組指令才會回）")
+    tunnel.add_argument("--port", type=int, default=8787, help="管理網頁的 port")
+    tunnel.add_argument("--cloudflared", default="cloudflared", help="cloudflared 的位置")
     return parser
 
 
-COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send}
+COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
+            "task": cmd_task, "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
 
 
 def main(argv: list[str] | None = None) -> int:

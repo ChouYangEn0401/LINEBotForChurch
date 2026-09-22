@@ -60,9 +60,9 @@
 3. 輸入 `bash`（後面打一個空格），把 `scripts/mac/1-install.sh` **拖進終端機視窗**，按 Enter。
 4. 用同樣方法執行 `scripts/mac/2-start.sh`，瀏覽器會打開管理網頁 <http://127.0.0.1:8787>。
 
-> **`2-start` 的視窗要一直開著**，每週才會自動提醒；關掉這個視窗（或電腦關機／睡眠），排程就不會執行。
-> 想要開機自動執行，看下面第 6 步。這跟 [docs/SETUP_LINE.md](docs/SETUP_LINE.md) 提到的 cloudflared 是兩件不同的事
-> （cloudflared 關掉只會讓 LINE 群組裡的指令沒反應，不影響每週自動提醒），詳細對照見該文件第 5 步的說明框。
+> `2-start` 是**管理網頁**，改設定、看預覽時才需要開。每週自動提醒建議用下面第 6 步的 **`weekly-on.bat`**：
+> 開一次之後，Windows 會在背景自己發，**不用一直開著任何視窗**（電腦要開著）。
+> 沒開 `weekly-on` 的話，就要讓 `2-start` 的視窗一直開著才會自動提醒。
 
 ---
 
@@ -78,7 +78,8 @@
 3. **設定群組**：把機器人邀進 LINE 群組，在群組打「/群組ID」，到「👥 LINE 群組」新增群組、貼上 ID，按「測試」確認收得到。
 4. **設定管理員**：私訊機器人「/我的ID」，把 ID 填到「⚙️ 設定 → ④ 出問題時通知誰」。
 5. **系統檢查**：打開「❓ 說明 → 🩺 系統檢查」，全部 ✅ 就完成了！
-6. **（建議）開機自動執行**：Windows 雙擊 `scripts\windows\autostart-on.bat`；Mac 執行 `scripts/mac/autostart-on.sh`。
+6. **開啟每週自動發送**：Windows **雙擊 `scripts\windows\weekly-on.bat`**（只要一次；之後不用開著任何視窗，
+   Windows 會在背景每 15 分鐘檢查一次，到了設定的時間就發）。Mac 請改用 `scripts/mac/autostart-on.sh`（讓 2-start 開機自動執行）。
 
 ---
 
@@ -96,7 +97,21 @@
 | 看以前發了什麼、有沒有失敗 | 📜 發送紀錄 |
 | 覺得怪怪的 | ❓ 說明 → 🩺 系統檢查 |
 
-也可以雙擊 `check.bat`／`check.sh`（健康檢查＋預覽）或 `send-now.bat`／`send-now.sh`（立刻發送）。
+### 三種發送方式，挑方便的用
+
+| 情況 | 怎麼做 | 要不要錢（LINE 額度） | 要開著什麼 |
+|---|---|---|---|
+| **每週固定提醒** | 什麼都不用做（`weekly-on.bat` 開過一次就好） | Push：按群組人數扣免費額度（每月 200 則） | 不用，電腦開著就好 |
+| **服事表改了，想馬上通知** | 雙擊 `send-now.bat`；或從 Telegram 等程式呼叫 `cli.bat send` | Push：同上；內容沒變的不會重送 | 不用 |
+| **想免費讓群組看到、或讓大家登記 ID／名字** | 雙擊 **`3-open-webhook.bat`**（免費模式），在群組打 `/提醒`，用完關掉 | 免費（Reply） | 那個視窗開著的時候才有效 |
+
+- **免費模式**會自己打開管理網頁、開臨時網址，並**自動登記到 LINE**，不用再手動貼 Webhook URL（第一次要先裝 cloudflared，
+  並在 LINE Developers 打開一次「Use webhook」，見 [docs/SETUP_LINE.md](docs/SETUP_LINE.md) 第 5 步）。
+- **給其他程式呼叫（Telegram 機器人、排程器）用 `scripts\windows\cli.bat`**：不會問問題、不會等按鍵，跑完就結束。
+  `cli.bat send --scheduled`（到時間、還沒發才發，隨時呼叫都安全）、`cli.bat send`（現在發）、`cli.bat preview`（只看不發）、
+  `cli.bat check`（健康檢查）。結束代碼：0 = 正常、1 = 有要處理的事、2 = 設定有問題。
+- 同時開著好幾種也沒關係：有防重複＋跨程式的鎖，同一週同樣的內容只會發一次。
+- 其他：`check.bat`（健康檢查＋預覽）、`weekly-off.bat`（關掉每週自動發送）。Mac 對應的是 `scripts/mac/*.sh`。
 
 ---
 
@@ -138,6 +153,7 @@
 | `data/church_bot.log` | 紀錄檔；出問題時把它傳給維護的人 | 不用 |
 | `config/org.csv` | 🧪 實驗：大教會架構（牧區 → 小組） | 可以，用 Excel 開就能改 |
 | `data/church_bot.db` | 發送紀錄（防止重複發送）、收集到的 LINE 帳號 | 不用；刪掉會忘記送過什麼和還沒對應的 LINE 帳號 |
+| `data/send.lock` | 發送時排隊用的鎖（避免兩個程式同時發） | 不用，也不用刪 |
 
 > 🔒 `.env`、`settings.yaml`、`config/` 底下所有 CSV、`service-account.json`、`data/` 都設定成**不會上傳到 git**，範例檔（`*.example.*`）才會。
 

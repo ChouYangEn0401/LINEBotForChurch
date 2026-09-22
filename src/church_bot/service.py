@@ -11,8 +11,9 @@ import logging
 import secrets
 import threading
 import time
-from typing import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass, field
+from typing import Callable
 from zoneinfo import ZoneInfo
 
 from church_bot.config import Paths, Settings, load_settings
@@ -24,6 +25,7 @@ from church_bot.core.parser import parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, find_unknown_names
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
+from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
 from church_bot.messengers.base import Quota
 from church_bot.models import (
@@ -167,7 +169,9 @@ class BotService:
 
     def run(self, trigger: str, *, dry_run: bool = False, force: bool = False,
             use_cache: bool = False) -> tuple[RunReport, Plan | None]:
-        with self._run_lock:
+        # 真的發送時要跟其他程式排隊（見 locking.py）；預覽不發送，不用排
+        send_lock = nullcontext() if dry_run else process_lock(self.paths.data_dir / "send.lock")
+        with self._run_lock, send_lock:
             started = dt.datetime.now().astimezone()
             report = RunReport(run_id=new_run_id(), trigger=trigger, dry_run=dry_run, started_at=started)
             plan: Plan | None = None

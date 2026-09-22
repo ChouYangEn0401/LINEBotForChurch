@@ -85,19 +85,21 @@ LINE 沒有地方能直接看到「群組 ID」，要讓機器人「聽到」群
 1. 安裝 cloudflared（只要裝一次）
    - Windows：開「命令提示字元」，輸入 `winget install --id Cloudflare.cloudflared`
    - Mac：在終端機輸入 `brew install cloudflared`
-2. 確認管理網頁開著（`2-start`），然後：
-   - **Windows：雙擊 `scripts/windows/3-open-webhook.bat`**（會檢查 cloudflared 和管理網頁有沒有開好）
-   - Mac：另外開一個終端機，輸入 `cloudflared tunnel --url http://localhost:8787`
-3. Windows 的視窗會直接顯示完整的 Webhook URL，並**自動複製到剪貼簿**；Mac 則是從畫面找
-   `https://xxxx-xxxx.trycloudflare.com` 的網址複製起來。
-4. 回到 LINE Developers →「Messaging API」分頁 → Webhook settings：
-   - **Webhook URL** 貼上（Windows 已經幫你複製好了；Mac 要自己在網址後面加 `/line/webhook`，例如 `https://xxxx-xxxx.trycloudflare.com/line/webhook`）
+2. **Windows：雙擊 `scripts/windows/3-open-webhook.bat`（免費模式）**。它會自己打開管理網頁（沒開的話）、
+   開臨時網址，並**自動登記成 LINE 的 Webhook URL、請 LINE 測試連線**，大約半分鐘到一分鐘，看到
+   「✅ 免費模式開好了」就好，**不用自己複製貼上**。
+   - Mac：先開 `2-start`，另外開一個終端機輸入 `cloudflared tunnel --url http://localhost:8787`，
+     再照下面第 4 步手動貼（網址後面要加 `/line/webhook`）；或把網址交給
+     `bash scripts/mac/cli.sh set-webhook https://xxxx-xxxx.trycloudflare.com` 自動登記。
+3. 如果畫面說登記沒成功，會把網址複製到剪貼簿，照第 4 步手動貼就好。
+4. **第一次**要到 LINE Developers →「Messaging API」分頁 → Webhook settings **打開「Use webhook」**（只要開一次，
+   之後一直開著；免費模式偵測到沒開會提醒你）。手動貼的話：
+   - **Webhook URL** 貼上 `https://xxxx-xxxx.trycloudflare.com/line/webhook`
    - 按「**Verify**」，出現 Success 就對了（失敗的話：確認第 3 步的 Channel secret 有貼到管理網頁）
-   - 打開「**Use webhook**」
 5. 機器人被邀進群組時，會自己在群組說出群組 ID；已經在群組裡的話，在群組打 **`/群組ID`**。
 6. 拿自己的 ID：私訊機器人 **`/我的ID`**（填到「⚙️ 設定 → ④ 出問題時通知誰」）。
-7. 拿完 ID 後，可以把 cloudflared 視窗關掉（按 Ctrl + C）。**每週提醒不需要 Webhook**。
-   以後要再抓新群組的 ID，重做第 2～4 步（每次的網址都不一樣，要重新貼）。
+7. 拿完 ID 後，可以把免費模式的視窗關掉。**每週提醒不需要 Webhook**。
+   以後要再用群組指令，重新雙擊 `3-open-webhook.bat` 就好（每次網址都不一樣，但會自動重新登記）。
 
    > ⚠️ **常見誤解：cloudflared／Webhook 開不開，跟每週提醒要不要錢是兩件事，沒有關係。**
    > Webhook 只負責「讓 LINE 把群組裡的訊息送進你的電腦」，這件事本身一直都是免費的，跟開多久無關。
@@ -115,12 +117,12 @@ LINE 沒有地方能直接看到「群組 ID」，要讓機器人「聽到」群
    >
    > | 關掉的是… | 會發生什麼事 |
    > |---|---|
-   > | **cloudflared 視窗**（本步驟教的，按 Ctrl+C） | LINE 沒辦法把群組裡打的指令送進來，所以 `/群組ID`、`/我的ID`、`/我的名字`、`/設定`、`/提醒` 都會沒反應（要用的時候重開一次 cloudflared、重貼 Webhook URL 就好）。**每週自動提醒完全不受影響，照常會送。** |
-   > | **`2-start` 視窗**（或整台電腦關機／睡眠） | 連同**排程一起關掉**，每週自動提醒**不會**執行。12 小時內重新打開程式，會自動偵測並補發一次（有防重複機制保護，不會送兩次）；超過 12 小時就等於這週沒發到，要等下一次排程，或到管理網頁按「📤 立刻發送」／回到群組打「/提醒」補救。 |
+   > | **cloudflared 視窗**（本步驟教的，按 Ctrl+C） | LINE 沒辦法把群組裡打的指令送進來，所以 `/群組ID`、`/我的ID`、`/我的名字`、`/設定`、`/提醒` 都會沒反應（要用的時候重新雙擊 `3-open-webhook.bat` 就好，會自動重新登記）。**每週自動提醒完全不受影響，照常會送。** |
+   > | **`2-start` 視窗**（或整台電腦關機／睡眠） | **有開 `weekly-on.bat` 的話：不影響**，Windows 會在背景照常發。沒開的話：連同**排程一起關掉**，每週自動提醒**不會**執行。12 小時內重新打開程式，會自動偵測並補發一次（有防重複機制保護，不會送兩次）；超過 12 小時就等於這週沒發到，要等下一次排程，或到管理網頁按「📤 立刻發送」／回到群組打「/提醒」補救。 |
    >
-   > 換句話說：**`2-start` 這個視窗才是真正決定「自動提醒會不會準時發生」的東西，要一直開著**（或設定「開機自動執行」，
-   > 見 [README.md](../README.md) 第 6 步）；cloudflared 只是「讓群組裡的指令有反應」用的，跟排程無關，可以照第 7 步的建議收工就關掉。
-   > 但如果收工後還想用 `/提醒` 這類需要打指令的功能，要用的當下就得先照第 2～4 步重開一次 cloudflared。
+   > 換句話說：**決定「自動提醒會不會準時發生」的是 `weekly-on.bat`（推薦，開一次就好）或一直開著的 `2-start`**
+   > （見 [README.md](../README.md) 第 6 步）；cloudflared 只是「讓群組裡的指令有反應」用的，跟排程無關，可以照第 7 步的建議收工就關掉。
+   > 但如果收工後還想用 `/提醒` 這類需要打指令的功能，要用的當下就得先重新雙擊一次 `3-open-webhook.bat`。
 8. （選用）想一次收集大家的真實姓名：到「🙋 同工名單 → LINE 帳號」按「開放登記」，請大家在群組打 **`/我的名字 真實姓名`**，
    **收集的這段期間 cloudflared 要一直開著**；收完按「關閉登記」再關掉 cloudflared。開著的時間比較長，**請一定先設「網頁密碼」**。
    其他指令（`/設定` 等）見管理網頁「❓ 說明 → 在 LINE 可以打的指令」。
