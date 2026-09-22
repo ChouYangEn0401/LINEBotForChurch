@@ -36,6 +36,8 @@ _SPACE_RE = re.compile(r"\s+")
 _CJK_NAME_RE = re.compile(r"^[㐀-鿿豈-﫿·・‧]+$")
 _SEPARATORS = set("、,，;；/／&＆+＋\n\r")
 _OPEN, _CLOSE = set("(（[【「"), set(")）]】」")
+# 排班用的輔助欄位（不是服事項目）：表頭「完全等於」這些字就不會出現在提醒裡
+_BOOKKEEPING_HEADERS = {"月份", "月", "週次", "週別", "週", "第幾週", "星期", "禮拜", "month", "week", "weekday", "no", "#"}
 
 
 def clean_header(text: str) -> str:
@@ -173,7 +175,12 @@ class RosterParser:
         return bool(h) and any(_norm(a) and _norm(a) in h for a in getattr(self.cfg.columns, key))
 
     def _is_ignored(self, header: str) -> bool:
-        return self._match(header, "ignore")
+        return _norm(header) in _BOOKKEEPING_HEADERS or self._match(header, "ignore")
+
+    def _text(self, row: list[str], idx: int | None) -> str:
+        """備註、聚會名稱這種「一段文字」的格子；寫「-」「無」之類的就當作空白。"""
+        text = _cell(row, idx)
+        return "" if text.lower() in {m.strip().lower() for m in self.cfg.empty_markers} else text
 
     def _map_columns(self, cells: list[str]) -> dict[str, int]:
         cols: dict[str, int] = {}
@@ -246,15 +253,15 @@ class RosterParser:
                     if has_content:
                         self._bad_row(r_idx + 1, date_text)
                     continue  # 沒內容的看不懂列（例如「十月」分隔列）直接跳過
-                label = _cell(row, label_col)
+                label = self._text(row, label_col)
             elif has_content and last_date:
-                date, label = last_date, _cell(row, label_col) or last_label  # 合併儲存格
+                date, label = last_date, self._text(row, label_col) or last_label  # 合併儲存格
             else:
                 continue
             last_date, last_label = date, label
             for i, role in role_cols:
                 builder.add(date, label, role, split_names(_cell(row, i), self.cfg.empty_markers))
-            builder.note(date, label, _cell(row, note_col))
+            builder.note(date, label, self._text(row, note_col))
         return builder.build()
 
     def _parse_long(self, rows: list[list[str]], layout: _Layout) -> tuple[ServiceDay, ...]:
@@ -284,7 +291,7 @@ class RosterParser:
             last_date, last_label = date, label
             role = role_text or last_role
             last_role = role
-            builder.note(date, label, _cell(row, c.get("note")))
+            builder.note(date, label, self._text(row, c.get("note")))
             if role and not self._is_ignored(role):
                 builder.add(date, label, role, split_names(person, self.cfg.empty_markers))
         return builder.build()
@@ -310,7 +317,7 @@ class RosterParser:
                 labels.update({j: _cell(row, j) for j, _ in date_cols if _cell(row, j)})
                 continue
             if self._match(role, "note"):
-                notes.update({j: _cell(row, j) for j, _ in date_cols if _cell(row, j)})
+                notes.update({j: self._text(row, j) for j, _ in date_cols if self._text(row, j)})
                 continue
             for j, _ in date_cols:
                 cells.append((role, j, split_names(_cell(row, j), self.cfg.empty_markers)))

@@ -114,3 +114,16 @@ def test_forced_long_without_columns_errors():
 )
 def test_split_names(cell, expected):
     assert split_names(cell, SourceSettings().empty_markers) == expected
+
+
+def test_bookkeeping_columns_and_dash_note_are_dropped():
+    """實際教會服事表的樣子：最左邊空一欄、有「月份」「週次」、備註寫「-」。"""
+    roster = parse([
+        ["", "月份", "週次", "日期", "特別活動/備註", "會前禱", "招待", "回應司琴"],
+        ["", "10月", "第一週", "10/4", "-", "以諾", "子安、欣妍", "-"],
+        ["", "10月", "第二週", "10/11", "惠如姐團主崇", "晨光", "柏翰", "-"],
+    ])
+    first, second = roster.days
+    assert first.date == dt.date(2026, 10, 4) and first.note == ""
+    assert roles(first) == {"會前禱": ("以諾",), "招待": ("子安", "欣妍"), "回應司琴": ()}
+    assert second.note == "惠如姐團主崇"
