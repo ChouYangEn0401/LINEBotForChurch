@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import jinja2
 from fastapi import APIRouter, Depends, FastAPI, Form, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.encoders import jsonable_encoder
@@ -235,6 +236,11 @@ def create_app(paths: Paths) -> FastAPI:
     @app.exception_handler(Exception)
     async def unexpected_error(request: Request, exc: Exception) -> HTMLResponse:
         log.exception("網頁發生未預期的錯誤")
+        if isinstance(exc, jinja2.UndefinedError):
+            # 畫面（templates/）每次都重新讀檔，程式（.py）卻是開程式時就載入的：更新完程式沒有重開，
+            # 就會變成「新的畫面配舊的程式」，畫面要的東西程式還沒給。關掉重開就好，不是資料壞掉。
+            return page(request, "error.html", message="程式更新過了，但這個視窗還在跑舊的版本",
+                        hint="請把執行機器人的黑色視窗關掉，再雙擊一次 2-start（資料都沒事）。")
         return page(request, "error.html", message=f"程式發生未預期的錯誤：{exc!r}",
                     hint="請把 data/church_bot.log 傳給維護的人。")
 

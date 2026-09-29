@@ -416,3 +416,19 @@ def test_changing_password_forces_everyone_to_log_in_again(client, paths):
     assert client.get("/").status_code == 200
     write(paths.env_file, "UI_PASSWORD=new\n")
     assert client.get("/").status_code == 401  # 舊的 cookie 對不上新密碼，立刻失效
+
+
+def test_stale_process_gets_a_restart_hint_instead_of_a_scary_error(client, monkeypatch):
+    """畫面每次重新讀檔、程式是開機時載入的：更新完沒重開 = 新畫面配舊程式（畫面要的變數程式還沒給）。"""
+    import jinja2
+    from fastapi.testclient import TestClient
+
+    from church_bot.web import app as web_app
+
+    def missing_variable(*args, **kwargs):
+        raise jinja2.UndefinedError("'editing_team' is undefined")
+
+    monkeypatch.setattr(web_app.MemberTable, "load", missing_variable)
+    quiet = TestClient(client.app, raise_server_exceptions=False)  # 不要把例外再丟出來，看畫面就好
+    body = quiet.get("/members").text
+    assert "這個視窗還在跑舊的版本" in body and "2-start" in body
