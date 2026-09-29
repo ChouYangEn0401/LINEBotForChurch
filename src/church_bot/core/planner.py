@@ -97,7 +97,7 @@ class Planner:
             if last < plan.today:
                 plan.add(Severity.ERROR, "roster_expired",
                          f"服事表已經用完了（最後一天是 {format_date(last, DATE_FMT)}），這次沒有東西可以提醒",
-                         "請把新的服事表加進 Google Sheet；如果換了新分頁，記得到「設定」更新網址。")
+                         "請把新的服事表加進 Google Sheet；如果換了新分頁，記得到「服事表」頁換成新的網址。")
             else:
                 plan.add(Severity.ERROR, "roster_gap", f"{span} 服事表裡沒有任何聚會，這次沒有東西可以提醒",
                          "如果這週真的沒有聚會可以忽略；否則請檢查服事表的日期有沒有寫錯。")
@@ -106,7 +106,7 @@ class Planner:
         if remaining < self.behavior.roster_low_warning_days:
             plan.add(Severity.WARNING, "roster_low",
                      f"服事表只排到 {format_date(last, DATE_FMT)}（剩 {remaining} 天），該排下一期了",
-                     "排好後直接加在同一張表下面就好；如果開了新分頁，記得到「設定」更新網址。")
+                     "排好後直接加在同一張表下面就好；如果開了新分頁，記得到「服事表」頁換成新的網址。")
 
     def _build_messages(self, plan: Plan, targets: list[Target]) -> None:
         for target in active_targets(targets):

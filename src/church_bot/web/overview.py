@@ -1,6 +1,7 @@
-"""首頁的「運作流程」：服事表 → 同工名單 → LINE 群組 → 自動發送，每一步現在的狀況、有問題要去哪裡改。
+"""主控台的「運作流程」與「需要處理的事」：服事表 → 同工名單 → LINE 群組 → 自動發送，
+每一步現在的狀況、有問題要去哪一頁改。
 
-讓不熟電腦的人一眼看懂「這幾頁是怎麼串起來的」，也知道紅色、黃色是卡在哪一步。
+讓不熟電腦的人一眼看懂「這幾頁是怎麼串起來的」，也知道紅色、黃色是卡在哪一步、按哪裡去處理。
 """
 
 from __future__ import annotations
@@ -17,6 +18,24 @@ ROSTER_WARNINGS = {"roster_low", "row_unreadable", "row_unreadable_more", "day_d
 MEMBER_WARNINGS = {"unknown_name", "inactive_member", "member_dup_name", "member_bad_uid"}
 TARGET_ERRORS = {"no_active_target", "target_no_id", "target_bad_id", "table_error"}
 TARGET_WARNINGS = {"target_nothing", "target_dup_id"}
+
+# 問題代碼（或代碼開頭）→ (要去哪一頁, 按鈕上的字)。主控台「需要處理的事」每一項旁邊的「去處理」就是查這張表。
+_ISSUE_LINKS: tuple[tuple[tuple[str, ...], str, str], ...] = (
+    (("unknown_name", "inactive_member", "member_"), "/members", "到同工名單處理"),
+    (("inactive_team", "team_"), "/members/teams", "到小團處理"),
+    (("target_", "no_active_target"), "/targets", "到 LINE 群組處理"),
+    (("roster_", "row_unreadable", "SourceError", "sheet_error", "day_", "layout"), "/roster", "看服事表"),
+    (("lookahead_too_short", "ConfigError", "table_error", "messenger_unavailable", "no_admin",
+      "admin_alert_failed", "quota", "send_failed", "MessengerError"), "/settings", "到設定處理"),
+)
+
+
+def issue_link(code: str) -> tuple[str, str]:
+    """回傳 (網址, 按鈕文字)；不認得的問題就回主控台自己（空網址 = 不顯示按鈕）。"""
+    for prefixes, href, label in _ISSUE_LINKS:
+        if any(code == p or code.startswith(p) for p in prefixes):
+            return href, label
+    return "", ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +63,11 @@ def build_steps(*, issues: list[Issue], settings: Settings, roster: Roster | Non
     steps: list[Step] = []
 
     if roster is None:
-        steps.append(Step("📄", "服事表", "/settings#source", "error", "讀不到服事表", roster_error))
+        steps.append(Step("📄", "服事表", "/roster", "error", "讀不到服事表", roster_error))
     else:
         last = format_date(roster.last_date, "%Y/%-m/%-d") if roster.last_date else "（沒有日期）"
         status = _worst(issues, ROSTER_ERRORS, ROSTER_WARNINGS)
-        steps.append(Step("📄", "服事表", "/settings#source", status, f"排到 {last}", roster.source))
+        steps.append(Step("📄", "服事表", "/roster", status, f"排到 {last}", roster.source))
 
     parts = [f"{len(members)} 位同工"] if members else ["還沒設定（選用）"]
     if unknown_names:

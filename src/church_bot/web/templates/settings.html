@@ -1,22 +1,115 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}設定・服事提醒機器人{% endblock %}
 {% block content %}
+{% call ui.page_head("⚙️ 設定", "管理員才需要來這裡。分成幾個頁籤，改完按「儲存設定」。服事表本身請到「服事表」頁；名單、群組各有自己的頁面。") %}
+  <a class="button secondary" href="/check">🩺 系統檢查</a>
+{% endcall %}
+
 {% if broken %}
-  <div class="flash error">❌ 設定檔讀不懂：{{ broken }}<br>下面先顯示預設值，按「儲存設定」就會用畫面上的值重寫設定檔。</div>
+  {% call ui.notice("error", "設定檔讀不懂：" ~ broken) %}下面先顯示預設值，按「儲存設定」就會用畫面上的值重寫設定檔。{% endcall %}
 {% endif %}
-{% if error %}<div class="flash error">❌ 還沒儲存：{{ error }}</div>{% endif %}
+{% if error %}{% call ui.notice("error", "還沒儲存") %}{{ error }}{% endcall %}{% endif %}
 
-<form method="post" action="/settings">
-<section class="card">
-  <h2>⚙️ 設定</h2>
-  <p class="muted">改完按最下面的「💾 儲存設定」。這些設定存在 <code>config/settings.yaml</code>；LINE 金鑰和網頁密碼另外存在 <code>.env</code>（最下面）。</p>
-  <nav class="subnav">
-    <a href="#source">① 服事表</a><a href="#schedule">② 發送時間</a><a href="#message">③ 訊息樣子</a>
-    <a href="#notify">④ 通知管理員</a><a href="#chat">⑤ LINE 指令</a><a href="#advanced">⑥ 進階</a><a href="#secrets">🔑 金鑰與密碼</a>
-  </nav>
+<div class="tabs" role="tablist" data-tabs="settings">
+  <button type="button" class="tab" role="tab" data-tab="schedule">⏰ 發送時間</button>
+  <button type="button" class="tab" role="tab" data-tab="message">💬 訊息樣子</button>
+  <button type="button" class="tab" role="tab" data-tab="notify">🔔 通知與 LINE 指令</button>
+  <button type="button" class="tab" role="tab" data-tab="source">📄 服事表來源</button>
+  <button type="button" class="tab" role="tab" data-tab="advanced">🧰 進階</button>
+  <button type="button" class="tab" role="tab" data-tab="secrets">🔑 金鑰與密碼</button>
+</div>
 
-  <fieldset id="source">
-    <legend>① 服事表從哪裡來</legend>
+<form method="post" action="/settings" id="settings-form">
+  <section class="card tab-panel" data-tab-panel="schedule" id="schedule">
+    <div class="card-head"><h2>⏰ 什麼時候自動發送</h2></div>
+    <div class="form-grid">
+      <label>這台程式的自動發送 {{ ui.info("這是管理網頁內建的排程，「2-start」開著才會發。平常用 Telegram 機器人排程呼叫 cli.bat send 的話，這裡可以關掉；兩邊都開也不會發兩次。") }}</label>
+      <div class="checkbox-row"><input type="checkbox" id="schedule_enabled" name="schedule_enabled" {{ "checked" if f.schedule_enabled }}>
+        <label for="schedule_enabled">開啟（每週自動發一次）</label></div>
+      <div class="help">目前狀態：{{ schedule_status }}。</div>
+
+      <label for="day_of_week">星期幾</label>
+      <select id="day_of_week" name="day_of_week">
+        {% for k, v in weekday_zh.items() %}<option value="{{ k }}" {{ "selected" if f.day_of_week == k }}>{{ v }}</option>{% endfor %}
+      </select>
+
+      <label for="time">幾點</label>
+      <input type="time" id="time" name="time" value="{{ f.time }}">
+      <div class="help">建議聚會前幾天，例如星期四晚上 8 點。發送當下才讀服事表，一定是最新的。</div>
+
+      <label for="every_n_weeks">每幾週發送一次</label>
+      <input type="number" id="every_n_weeks" name="every_n_weeks" min="1" max="8" value="{{ f.every_n_weeks }}">
+      <div class="help">1 = 每週（預設）。改成 2 大約可以省一半 LINE 則數，但要同時把「進階 → 往後看幾天」改成至少 <code>每幾週 × 7</code> 天，不然中間那週的服事不會出現；設錯系統會提醒。</div>
+
+      <label for="timezone">時區</label>
+      <input type="text" id="timezone" name="timezone" value="{{ f.timezone }}">
+      <div class="help">台灣請用 Asia/Taipei，不用改。</div>
+    </div>
+  </section>
+
+  <section class="card tab-panel" data-tab-panel="message" id="message">
+    <div class="card-head"><h2>💬 訊息長什麼樣子</h2></div>
+    <div class="form-grid">
+      <label for="title">標題</label>
+      <input type="text" id="title" name="title" value="{{ f.title }}">
+
+      <label for="footer">結尾文字</label>
+      <input type="text" id="footer" name="footer" value="{{ f.footer }}">
+
+      <label for="date_format">日期格式</label>
+      <input type="text" id="date_format" name="date_format" value="{{ f.date_format }}">
+      <div class="help">%-m = 月、%-d = 日、%Y = 西元年、{roc_year} = 民國年、{weekday} = 週日、{weekday_long} = 星期日。例如「%-m/%-d（{weekday}）」→ 9/13（週日）</div>
+
+      <label for="role_order">服事項目順序</label>
+      <input type="text" id="role_order" name="role_order" value="{{ f.role_order }}" placeholder="留空 = 照服事表的欄位順序">
+      <div class="help">例如「講員、司會、敬拜、司琴」。寫部分字也可以。</div>
+
+      <label for="name_separator">多人時用什麼隔開</label>
+      <input type="text" id="name_separator" name="name_separator" value="{{ f.name_separator }}">
+
+      <label for="template">訊息模板（進階）</label>
+      <div>
+        <textarea id="template" name="template" data-default="{{ default_template }}">{{ f.template }}</textarea>
+        <div class="actions compact"><button type="button" class="secondary small" data-reset-template>↩️ 恢復預設模板</button></div>
+      </div>
+      <div class="help">可用：{{ "{{ title }}" }} 標題、{{ "{{ date_text }}" }} 日期、{{ "{{ label }}" }} 聚會、{{ "{{ note }}" }} 備註、{{ "{{ footer }}" }} 結尾；
+        服事清單用 {{ "{% for a in assignments %}" }}…{{ "{{ a.role }}" }}：{{ "{{ a.names }}" }}…{{ "{% endfor %}" }}。改壞了按「恢復預設模板」就好。</div>
+    </div>
+  </section>
+
+  <section class="card tab-panel" data-tab-panel="notify" id="notify">
+    <div class="card-head"><h2>🔔 出問題時通知誰</h2></div>
+    <div class="form-grid">
+      <label for="admin_target_id">管理員 LINE ID</label>
+      <input type="text" id="admin_target_id" name="admin_target_id" value="{{ f.admin_target_id }}" placeholder="U 開頭（個人，建議）或 C 開頭（群組）">
+      <div class="help">服事表沒更新、名字對不到、LINE 送不出去…都會通知這個人。先加機器人好友，再私訊它 <span class="kbd">/我的ID</span> 就能拿到。
+        建議填個人：通知群組的話每次都會按群組人數扣 LINE 額度。</div>
+    </div>
+    <div class="card-head" id="chat"><h2>💬 LINE 聊天室指令</h2></div>
+    <p class="muted small">大家在群組或私訊機器人打「/」開頭的指令（例如 <span class="kbd">/我的ID</span>）。需要開著 Webhook（免費模式）才會有反應，見「說明」。</p>
+    <div class="form-grid">
+      <label>名字登記</label>
+      <div class="checkbox-row"><input type="checkbox" id="collect_names" name="collect_names" {{ "checked" if f.collect_names }}>
+        <label for="collect_names">開放大家打 <span class="kbd">/我的名字 王小明</span> 登記真實姓名</label></div>
+      <div class="help">登記後要到「同工名單 → LINE 帳號」確認才會生效。「LINE 帳號」頁上面也有同一個開關。</div>
+
+      <label>用 LINE 改設定</label>
+      <div class="checkbox-row"><input type="checkbox" id="remote_config" name="remote_config" {{ "checked" if f.remote_config }}>
+        <label for="remote_config">允許打 <span class="kbd">/設定 收集名單=開</span> 修改少數設定</label></div>
+      <div class="help">每次修改都要一次性驗證碼（6 位數、5 分鐘有效、錯 3 次作廢）。能改的只有「收集名單」「自動發送」「每幾週」；
+        LINE 金鑰、密碼、管理員永遠不能從聊天室改。有人正在等驗證時，網頁最上面會出現「核准／拒絕」。</div>
+
+      <label>驗證碼私訊管理員</label>
+      <div class="checkbox-row"><input type="checkbox" id="send_code_to_admin" name="send_code_to_admin" {{ "checked" if f.send_code_to_admin }}>
+        <label for="send_code_to_admin">除了顯示在執行機器人的視窗，也用 LINE 私訊給上面的管理員</label></div>
+      <div class="help">每次私訊算 1 則，每天最多 10 次，超過就只顯示在視窗上。</div>
+    </div>
+  </section>
+
+  <section class="card tab-panel" data-tab-panel="source" id="source">
+    <div class="card-head"><h2>📄 服事表從哪裡來</h2></div>
+    <p class="muted small">最常見的「貼 Google Sheet 網址」在 <a href="/roster">服事表</a> 頁就能做；這裡是其他來源和進階選項。</p>
     <div class="form-grid">
       <label for="source_kind">來源</label>
       <select id="source_kind" name="source_kind">
@@ -47,108 +140,19 @@
       <div class="help">通常選「自動判斷」就好。三種排法的圖解見「說明」。</div>
 
       <label for="ignore_columns">不要放進提醒的欄位</label>
-      <input type="text" id="ignore_columns" name="ignore_columns" value="{{ f.ignore_columns }}" placeholder="例如：經文、詩歌、星期">
+      <input type="text" id="ignore_columns" name="ignore_columns" value="{{ f.ignore_columns }}" placeholder="例如：經文、詩歌">
+      <div class="help">「月份」「週次」「星期」這種排班用欄位會自動略過，不用填。</div>
     </div>
-  </fieldset>
+  </section>
 
-  <fieldset id="schedule">
-    <legend>② 什麼時候自動發送</legend>
-    <div class="form-grid">
-      <label>自動發送</label>
-      <div class="checkbox-row"><input type="checkbox" id="schedule_enabled" name="schedule_enabled" {{ "checked" if f.schedule_enabled }}>
-        <label for="schedule_enabled">開啟（每週自動發一次）</label></div>
-
-      <label for="day_of_week">星期幾</label>
-      <select id="day_of_week" name="day_of_week">
-        {% for k, v in weekday_zh.items() %}<option value="{{ k }}" {{ "selected" if f.day_of_week == k }}>{{ v }}</option>{% endfor %}
-      </select>
-
-      <label for="time">幾點</label>
-      <input type="time" id="time" name="time" value="{{ f.time }}">
-      <div class="help">建議在聚會前幾天，例如星期四晚上 8 點（發送當下才讀服事表，一定是最新的）。這裡是管理網頁內建的自動發送，<strong>這個程式開著</strong>才會發。平常用 Telegram 排程的話（時間到了呼叫 <code>cli.bat send</code>）可以把「自動發送」關掉；兩邊都開著也不會發兩次。</div>
-
-      <label for="every_n_weeks">每幾週發送一次</label>
-      <input type="number" id="every_n_weeks" name="every_n_weeks" min="1" max="8" value="{{ f.every_n_weeks }}">
-      <div class="help">1 = 每週發送（預設）。改成 2 大約可以省一半的 LINE 則數（見 docs/LINE_PRICING.md）——
-        但請記得同時把下面「往後看幾天」改成至少 <code>每幾週 × 7</code> 天，不然中間那一週的服事不會出現在提醒裡；
-        設定錯的話系統會提醒你。</div>
-
-      <label for="timezone">時區</label>
-      <input type="text" id="timezone" name="timezone" value="{{ f.timezone }}">
-      <div class="help">台灣請用 Asia/Taipei，不用改。</div>
-    </div>
-  </fieldset>
-
-  <fieldset id="message">
-    <legend>③ 訊息長什麼樣子</legend>
-    <div class="form-grid">
-      <label for="title">標題</label>
-      <input type="text" id="title" name="title" value="{{ f.title }}">
-
-      <label for="footer">結尾文字</label>
-      <input type="text" id="footer" name="footer" value="{{ f.footer }}">
-
-      <label for="date_format">日期格式</label>
-      <input type="text" id="date_format" name="date_format" value="{{ f.date_format }}">
-      <div class="help">%-m = 月、%-d = 日、%Y = 西元年、{roc_year} = 民國年、{weekday} = 週日、{weekday_long} = 星期日。例如「%-m/%-d（{weekday}）」→ 9/13（週日）</div>
-
-      <label for="role_order">服事項目順序</label>
-      <input type="text" id="role_order" name="role_order" value="{{ f.role_order }}" placeholder="留空 = 照服事表的欄位順序">
-      <div class="help">例如「講員、司會、敬拜、司琴」。寫部分字也可以。</div>
-
-      <label for="name_separator">多人時用什麼隔開</label>
-      <input type="text" id="name_separator" name="name_separator" value="{{ f.name_separator }}">
-
-      <label for="template">訊息模板（進階）</label>
-      <div>
-        <textarea id="template" name="template" data-default="{{ default_template }}">{{ f.template }}</textarea>
-        <div class="actions"><button type="button" class="secondary" data-reset-template>↩️ 恢復預設模板</button></div>
-      </div>
-      <div class="help">可用：{{ "{{ title }}" }} 標題、{{ "{{ date_text }}" }} 日期、{{ "{{ label }}" }} 聚會、{{ "{{ note }}" }} 備註、{{ "{{ footer }}" }} 結尾；
-        服事清單用 {{ "{% for a in assignments %}" }}…{{ "{{ a.role }}" }}：{{ "{{ a.names }}" }}…{{ "{% endfor %}" }}。改壞了按「恢復預設模板」就好。</div>
-    </div>
-  </fieldset>
-
-  <fieldset id="notify">
-    <legend>④ 出問題時通知誰</legend>
-    <div class="form-grid">
-      <label for="admin_target_id">管理員 LINE ID</label>
-      <input type="text" id="admin_target_id" name="admin_target_id" value="{{ f.admin_target_id }}" placeholder="U 開頭（個人，建議）或 C 開頭（群組）">
-      <div class="help">服事表沒更新、名字對不到、LINE 送不出去…都會通知這個人。先加機器人好友，再私訊它「/我的ID」就能拿到。
-        建議填個人：通知群組的話每次都會按群組人數扣 LINE 額度。</div>
-    </div>
-  </fieldset>
-
-  <fieldset id="chat">
-    <legend>⑤ LINE 聊天室指令</legend>
-    <p class="muted small">大家在群組或私訊機器人打「/」開頭的指令（例如 <span class="kbd">/我的ID</span>）。需要設定 Webhook 才會有反應，見「說明」。</p>
-    <div class="form-grid">
-      <label>名字登記</label>
-      <div class="checkbox-row"><input type="checkbox" id="collect_names" name="collect_names" {{ "checked" if f.collect_names }}>
-        <label for="collect_names">開放大家打 <span class="kbd">/我的名字 王小明</span> 登記真實姓名</label></div>
-      <div class="help">登記後要到「同工名單 → LINE 帳號」確認才會生效。平常建議關著，要收集時再打開，避免有人亂填。</div>
-
-      <label>用 LINE 改設定</label>
-      <div class="checkbox-row"><input type="checkbox" id="remote_config" name="remote_config" {{ "checked" if f.remote_config }}>
-        <label for="remote_config">允許打 <span class="kbd">/設定 收集名單=開</span> 修改少數設定</label></div>
-      <div class="help">每次修改都要輸入一次性驗證碼（6 位數、5 分鐘有效、錯 3 次作廢）。能改的只有「收集名單」「自動發送」「每幾週」，
-        LINE 金鑰、密碼、管理員永遠不能從聊天室改。有人正在等驗證時，這個網頁最上面也會出現「核准／拒絕」按鈕。</div>
-
-      <label>驗證碼私訊管理員</label>
-      <div class="checkbox-row"><input type="checkbox" id="send_code_to_admin" name="send_code_to_admin" {{ "checked" if f.send_code_to_admin }}>
-        <label for="send_code_to_admin">除了顯示在執行機器人的視窗，也用 LINE 私訊給上面的管理員</label></div>
-      <div class="help">每次私訊算 1 則（管理員填群組的話按人數算），每天最多 10 次，超過就只顯示在視窗上，不會被有心人拿來耗光額度。</div>
-    </div>
-  </fieldset>
-
-  <fieldset id="advanced">
-    <legend>⑥ 進階</legend>
+  <section class="card tab-panel" data-tab-panel="advanced" id="advanced">
+    <div class="card-head"><h2>🧰 進階</h2></div>
     <div class="form-grid">
       <label for="messenger_kind">發送方式</label>
       <select id="messenger_kind" name="messenger_kind">
         {% for k, v in messenger_kinds.items() %}<option value="{{ k }}" {{ "selected" if f.messenger_kind == k }}>{{ v }}</option>{% endfor %}
       </select>
-      <div class="help">還沒申請好 LINE 時，可以先選「測試模式」把整個流程跑一遍。</div>
+      <div class="help">還沒申請好 LINE 時，可以先選「測試模式」把整個流程跑一遍（訊息只會寫到 data/outbox.log）。</div>
 
       <label>檢查 LINE 額度</label>
       <div class="checkbox-row"><input type="checkbox" id="check_quota" name="check_quota" {{ "checked" if f.check_quota }}>
@@ -160,25 +164,31 @@
 
       <label for="roster_low_warning_days">服事表剩幾天要提醒</label>
       <input type="number" id="roster_low_warning_days" name="roster_low_warning_days" min="0" max="365" value="{{ f.roster_low_warning_days }}">
-      <div class="help">服事表排到的最後一天，距離今天少於這個天數，就提醒管理員「該排下一期了」。</div>
+      <div class="help">服事表排到的最後一天距離今天少於這個天數，就提醒管理員「該排下一期了」。</div>
 
       <label>服事表改了要重發</label>
       <div class="checkbox-row"><input type="checkbox" id="resend_if_changed" name="resend_if_changed" {{ "checked" if f.resend_if_changed }}>
-        <label for="resend_if_changed">已經送過的提醒，服事表後來改了就自動再送一次（預設關閉，避免洗版）</label></div>
+        <label for="resend_if_changed">已經送過的提醒，服事表後來改了就自動再送一次</label></div>
 
       <label>名字對不到要提醒</label>
       <div class="checkbox-row"><input type="checkbox" id="warn_unknown_names" name="warn_unknown_names" {{ "checked" if f.warn_unknown_names }}>
         <label for="warn_unknown_names">服事表上的名字在同工名單找不到時，提醒管理員</label></div>
     </div>
-  </fieldset>
+    <details class="lab-link">
+      <summary>🧪 實驗功能</summary>
+      <p><a href="/lab/org">大教會架構（牧區 → 區 → 小組）</a>：把教會畫成一棵樹、估算每個單位的 LINE 則數。不影響實際發送。</p>
+    </details>
+  </section>
 
-  <div class="actions"><button type="submit" class="primary big">💾 儲存設定</button></div>
-</section>
+  <div class="save-bar" data-for-panels="schedule message notify source advanced">
+    <span class="muted small">改了上面任何頁籤的內容，都按這一顆就好。<span class="admin-only">設定存在 <code>config/settings.yaml</code>。</span></span>
+    <button type="submit" class="primary big">💾 儲存設定</button>
+  </div>
 </form>
 
-<section class="card" id="secrets">
-  <h2>🔑 LINE 金鑰與網頁密碼</h2>
-  <p class="muted">這些是機密，只存在這台電腦的 <code>.env</code> 檔案，不會上傳到 git。已經設定過的欄位留空就不會改變。</p>
+<section class="card tab-panel" data-tab-panel="secrets" id="secrets">
+  <div class="card-head"><h2>🔑 LINE 金鑰與網頁密碼</h2></div>
+  <p class="muted small">這些是機密，只存在這台電腦的 <code>.env</code> 檔案，不會上傳到 git。已經設定過的欄位留空就不會改變。</p>
   <form method="post" action="/settings/secrets" class="form-grid">
     <label for="token">Channel access token</label>
     <input type="password" id="token" name="token" autocomplete="off" placeholder="{{ token_status or '還沒設定' }}">
@@ -186,11 +196,11 @@
 
     <label for="secret">Channel secret</label>
     <input type="password" id="secret" name="secret" autocomplete="off" placeholder="{{ secret_status or '還沒設定（選用）' }}">
-    <div class="help">「Basic settings」分頁。只有要用「在群組打 /群組ID 自動抓」功能才需要。</div>
+    <div class="help">「Basic settings」分頁。只有要用聊天指令（/群組ID、/我的名字…）才需要。</div>
 
     <label for="password">網頁密碼</label>
     <input type="password" id="password" name="password" autocomplete="new-password" placeholder="{{ password_status or '沒有密碼（只有這台電腦能打開）' }}">
-    <div class="help">設定後，打開網頁的任何一頁都會先看到登入畫面，要填這個密碼才能繼續；改密碼後，所有人（包含你自己）都要重新登入一次。
+    <div class="help">設定後，打開網頁的任何一頁都會先看到登入畫面；改密碼後，所有人（包含你自己）都要重新登入一次。
       <label class="checkbox-row" style="font-weight:normal"><input type="checkbox" name="clear_password"> 取消密碼</label></div>
 
     <div></div>

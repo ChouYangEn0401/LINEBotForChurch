@@ -141,7 +141,7 @@ def permissions_text(settings: Settings, admin_name: str = "") -> str:
         admin_note = "　拿得到驗證碼、收得到錯誤通知、可以打 /別周測試、可以開管理網頁"
     else:
         admin_line = "・管理員：還沒設定 ⚠️"
-        admin_note = "　請管理員私訊機器人「/我的ID」，把 ID 填到管理網頁「設定 → 通知管理員」"
+        admin_note = "　請管理員私訊機器人「/我的ID」，把 ID 填到管理網頁「設定 → 🔔 通知」"
     switches = (f"收集名單「{'開' if settings.chat.collect_names else '關'}」"
                 f"・自動發送「{'開' if settings.schedule.enabled else '關'}」"
                 f"・用 LINE 改設定「{'開' if settings.chat.remote_config else '關'}」")
@@ -245,9 +245,9 @@ class WebhookHandler:
         """回傳處理了幾個事件。簽章不對丟 SignatureError；沒設定 secret 丟 ConfigError。"""
         settings = load_settings(self.service.paths)
         if not settings.line.channel_secret:
-            raise ConfigError("收到 LINE Webhook，但沒有設定 LINE_CHANNEL_SECRET", "到「設定 → LINE 金鑰」填入 Channel secret。")
+            raise ConfigError("收到 LINE Webhook，但沒有設定 LINE_CHANNEL_SECRET", "到「設定 → 🔑 金鑰與密碼」填入 Channel secret。")
         if not verify_signature(settings.line.channel_secret, body, signature):
-            raise SignatureError("LINE Webhook 簽章不符（Channel secret 可能填錯）", "確認「設定 → LINE 金鑰」的 Channel secret。")
+            raise SignatureError("LINE Webhook 簽章不符（Channel secret 可能填錯）", "確認「設定 → 🔑 金鑰與密碼」的 Channel secret。")
         events = json.loads(body.decode("utf-8") or "{}").get("events", [])
         if not events:
             return 0  # LINE 後台按「Verify」時會送空的事件
@@ -342,7 +342,7 @@ class WebhookHandler:
     def _request_change(self, arg: str, chat: _Chat) -> None:
         settings = chat.settings
         if not settings.chat.remote_config:
-            chat.reply("目前沒有開放用 LINE 修改設定（管理網頁「設定 → LINE 聊天室指令」可以打開）。")
+            chat.reply("目前沒有開放用 LINE 修改設定（管理網頁「設定 → 🔔 通知與 LINE 指令」可以打開）。")
             return
         if not arg:
             chat.reply(describe_options(settings))
@@ -539,7 +539,7 @@ class WebhookHandler:
     def _test_week(self, arg: str, chat: _Chat) -> None:
         if not is_admin(chat.settings, chat.user_id, chat.chat_id):
             extra = ("請管理員來打。" if chat.settings.line.admin_target_id
-                     else "（目前還沒設定管理員：請到管理網頁「設定 → 通知管理員」填好管理員的 LINE ID。）")
+                     else "（目前還沒設定管理員：請到管理網頁「設定 → 🔔 通知」填好管理員的 LINE ID。）")
             chat.reply(f"「/別周測試」只有管理員可以用 🙏{extra}\n大家都可以打「/提醒」看這一週的服事。")
             return
         if not arg:

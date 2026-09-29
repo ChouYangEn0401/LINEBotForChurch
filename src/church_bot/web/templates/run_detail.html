@@ -1,45 +1,36 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}發送結果・服事提醒機器人{% endblock %}
 {% block content %}
 {% set problems = r.issues | rejectattr("severity", "equalto", "info") | list %}
 {% set infos = r.issues | selectattr("severity", "equalto", "info") | list %}
-<section class="card">
-  <h2>發送結果</h2>
-  <p>時間：{{ r.started_at[:19] | replace("T", " ") }}
-     觸發：{{ trigger_zh.get(r.trigger, r.trigger) }}
-     {% if r.dry_run %}（預覽）{% endif %}</p>
-  <div class="actions"><a class="button secondary" href="/runs">← 回紀錄列表</a><a class="button secondary" href="/">回首頁</a></div>
-</section>
+{% call ui.page_head("發送結果", r.started_at[:19] | replace("T", " ") ~ "・" ~ trigger_zh.get(r.trigger, r.trigger) ~ ("・預覽（沒有真的送）" if r.dry_run else "")) %}
+  <a class="button ghost" href="/runs">← 回紀錄列表</a>
+{% endcall %}
 
 {% if problems %}
 <section class="card">
-  <h2>問題與提醒</h2>
-  <ul class="issues">
-    {% for i in problems %}<li class="{{ i.severity }}">{{ severity_icon[i.severity] }} {{ i.message }}{% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</li>{% endfor %}
-  </ul>
+  <div class="card-head"><h2>問題與提醒（{{ problems | length }}）</h2></div>
+  {{ ui.issues(problems, show_link=true) }}
 </section>
 {% endif %}
 
 <section class="card">
-  <h2>每個群組的結果</h2>
+  <div class="card-head"><h2>每個群組的結果</h2></div>
   {% if r.deliveries %}
   <div class="bubbles">
     {% for d in r.deliveries %}
-    <div class="bubble-card">
-      <div class="bubble-head"><strong>{{ d.target_name }}</strong><span class="tag {{ d.status }}">{{ status_zh.get(d.status, d.status) }}</span></div>
-      {% if d.detail %}<div class="muted small">{{ d.detail }}</div>{% endif %}
-      <pre class="bubble">{{ d.text }}</pre>
-    </div>
+      {{ ui.bubble(d.text, title=d.target_name, tag=status_zh.get(d.status, d.status), tag_class=d.status, detail=d.detail) }}
     {% endfor %}
   </div>
   {% else %}
-  <p class="muted">這次沒有任何要發送的訊息。</p>
+    {{ ui.empty("📭", "這次沒有任何要發送的訊息") }}
   {% endif %}
 </section>
 
 {% if infos %}
 <details class="card"><summary>參考資訊（{{ infos | length }} 項）</summary>
-  <ul class="issues">{% for i in infos %}<li class="info">ℹ️ {{ i.message }}</li>{% endfor %}</ul>
+  {{ ui.issues(infos) }}
 </details>
 {% endif %}
 {% endblock %}

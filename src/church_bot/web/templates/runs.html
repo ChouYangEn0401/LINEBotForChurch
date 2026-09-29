@@ -1,29 +1,29 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}發送紀錄・服事提醒機器人{% endblock %}
 {% block content %}
+{% call ui.page_head("📜 發送紀錄", "每一次自動發送、手動發送的結果。點「看詳細」可以看到當時送出的訊息與所有問題。") %}{% endcall %}
 <section class="card">
-  <h2>📜 發送紀錄</h2>
-  <p class="muted">每一次自動發送、手動發送的結果都在這裡。點「看詳細」可以看到當時送出的訊息與所有問題。</p>
   {% if runs %}
   <div class="table-wrap">
   <table class="table">
-    <thead><tr><th>時間</th><th>怎麼觸發</th><th>結果</th><th>送出</th><th>失敗</th><th>略過</th><th>問題</th><th></th></tr></thead>
+    <thead><tr><th>時間</th><th>怎麼觸發 {{ ui.info("Push = 會扣 LINE 額度（排程、網頁按鈕、指令）；Reply = 有人在群組打 /提醒，免費。") }}</th><th>結果</th><th>送出</th><th>失敗</th><th>略過 {{ ui.info("之前已經送過、內容也沒變的，就不會重複送。") }}</th><th>問題</th><th></th></tr></thead>
     <tbody>
     {% for r in runs %}
       <tr class="{{ 'bad' if r.status == 'error' }}">
         <td class="nowrap">{{ r.started_at[:16] | replace("T", " ") }}</td>
         <td>{{ r.trigger_zh }}</td>
         <td><span class="tag {{ r.status }}">{{ r.status_zh }}</span></td>
-        <td>{{ r.sent }}</td><td>{{ r.failed }}</td><td>{{ r.skipped }}</td>
-        <td>{% if r.errors %}❌ {{ r.errors }} {% endif %}{% if r.warnings %}⚠️ {{ r.warnings }}{% endif %}</td>
-        <td><a href="/runs/{{ r.id }}">看詳細</a></td>
+        <td>{{ r.sent }}</td><td>{{ r.failed or "—" }}</td><td>{{ r.skipped or "—" }}</td>
+        <td>{% if r.errors %}❌ {{ r.errors }} {% endif %}{% if r.warnings %}⚠️ {{ r.warnings }}{% endif %}{% if not r.errors and not r.warnings %}<span class="muted">—</span>{% endif %}</td>
+        <td><a class="button secondary small" href="/runs/{{ r.id }}">看詳細</a></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
   {% else %}
-  <p>還沒有任何發送紀錄。</p>
+    {{ ui.empty("📭", "還沒有任何發送紀錄", "第一次發送之後就會出現在這裡。") }}
   {% endif %}
 </section>
 {% endblock %}

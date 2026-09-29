@@ -332,3 +332,43 @@ class RosterParser:
 
 def parse_roster(sheet: RawSheet, cfg: SourceSettings, today: dt.date) -> Roster:
     return RosterParser(cfg, today).parse(sheet)
+
+
+# --------------------------------------------------------------------------- 給「服事表」頁的格子檢視
+
+
+@dataclass(frozen=True, slots=True)
+class SheetInfo:
+    """一張原始表格「程式是怎麼看它的」：表頭在哪一列、哪些格子是日期。
+
+    「服事表」頁把 Google Sheet 原封不動畫成表格時，用這個把表頭、日期、這次會發的那幾列標出來，
+    不熟電腦的人也看得出「程式讀到哪裡、為什麼某一列沒被讀到」。
+    """
+
+    layout: str  # wide / long / matrix
+    header_row: int  # 0 起算
+    date_axis: str  # "row"：每一列一個日期（wide、long）；"col"：每一欄一個日期（matrix）
+    dates: dict[int, dt.date]  # 列（或欄）索引 → 那一列（欄）的日期
+    cols: dict[str, int]  # 欄位角色 → 欄索引（例如 {"date": 0, "note": 8}）
+
+
+def inspect_sheet(sheet: RawSheet, cfg: SourceSettings, today: dt.date) -> SheetInfo | None:
+    """看不出表頭（連 parse_roster 都會失敗的表）就回 None，畫面照樣把格子印出來、只是不上色。"""
+    parser = RosterParser(cfg, today)
+    rows = [[(c if isinstance(c, str) else str(c or "")) for c in row] for row in sheet.rows]
+    try:
+        layout = parser._detect(rows)  # noqa: SLF001 - 同一個模組，只是不想把偵測邏輯複製一份
+    except SourceError:
+        return None
+    dates: dict[int, dt.date] = {}
+    if layout.kind == "matrix":
+        header = rows[layout.header_row]
+        for j in range(1, len(header)):
+            if date := parse_date(_cell(header, j), today):
+                dates[j] = date
+        return SheetInfo("matrix", layout.header_row, "col", dates, dict(layout.cols))
+    date_col = layout.cols["date"]
+    for i in range(layout.header_row + 1, len(rows)):
+        if date := parse_date(_cell(rows[i], date_col), today):
+            dates[i] = date
+    return SheetInfo(layout.kind, layout.header_row, "row", dates, dict(layout.cols))

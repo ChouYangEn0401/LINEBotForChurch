@@ -21,7 +21,7 @@ from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
 from church_bot.core.dispatcher import Dispatcher
 from church_bot.core.history import History
-from church_bot.core.parser import parse_roster
+from church_bot.core.parser import SheetInfo, inspect_sheet, parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
@@ -29,8 +29,8 @@ from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
 from church_bot.messengers.base import Quota
 from church_bot.models import (
-    TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, Roster, RunReport, Severity, Target, Team,
-    tagged,
+    TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, RawSheet, Roster, RunReport, Severity,
+    Target, Team, tagged,
 )
 from church_bot.sources import build_source
 from church_bot.tables import LINE_ID_RE, MemberTable, TargetTable, TeamTable
@@ -119,7 +119,7 @@ class BotService:
                 Severity.WARNING, "lookahead_too_short",
                 f"設定成每 {settings.schedule.every_n_weeks} 週發送一次，但「往後看幾天」只有"
                 f"{settings.behavior.lookahead_days} 天，下一次發送前那幾週的服事可能不會出現在提醒裡",
-                f"到「設定 → ⑥ 進階」把「往後看幾天」改成至少 {span} 天。",
+                f"到「設定 → 🧰 進階」把「往後看幾天」改成至少 {span} 天。",
             ))
         return Context(settings, targets, members, teams, issues)
 
@@ -238,7 +238,7 @@ class BotService:
         admin = settings.line.admin_target_id
         if not admin:
             report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但沒有設定「管理員」，所以沒辦法用 LINE 通知你",
-                                       "到「設定」頁填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
+                                       "到「設定 → 🔔 通知」填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
             return
         own: Messenger | None = None
         if messenger is None:  # 例如讀不到服事表：還沒走到建立發送方式那一步就出錯了，這種最需要通知
@@ -284,6 +284,21 @@ class BotService:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
         return find_unknown_names(roster, ctx.directory, since=today)
 
+    def clear_roster_cache(self) -> None:
+        """「服事表」頁按「重新讀取」：下一次預覽一定重新去 Google 抓，不用等 60 秒。"""
+        with self._cache_lock:
+            self._roster_cache = None
+
+    def sheet_preview(self) -> tuple[Context, list[RawSheet], list[SheetInfo | None], dt.date]:
+        """「服事表」頁用：把資料來源的原始格子原封不動抓回來，並附上「程式是怎麼看它的」。
+
+        讀不到（沒網路、沒開共用、網址錯）一律丟 ChurchBotError，畫面會把原因和解法印出來。
+        """
+        ctx = self.load()
+        today = self.now(ctx.settings).date()
+        sheets = build_source(ctx.settings.source, self.paths).fetch()
+        return ctx, sheets, [inspect_sheet(sheet, ctx.settings.source, today) for sheet in sheets], today
+
     def roster_roles(self) -> list[str]:
         """服事表上現有的服事項目（「LINE 群組」頁用來讓人用選的，不用自己猜怎麼寫）。
 
@@ -297,8 +312,8 @@ class BotService:
             return []
 
     def quota_status(self) -> Quota | None:
-        """首頁用：本月 LINE 額度。查不到（console 模式、關閉額度檢查、設定壞了、LINE 連不上）就回 None，
-        首頁那一行就不顯示，不影響其他功能。"""
+        """主控台用：本月 LINE 額度。查不到（console 模式、關閉額度檢查、設定壞了、LINE 連不上）就回 None，
+        主控台那一格就不顯示，不影響其他功能。"""
         try:
             ctx = self.load()
         except ChurchBotError:
@@ -446,7 +461,7 @@ class BotService:
         admin = s.line.admin_target_id
         items.append(CheckItem("管理員通知", bool(admin and LINE_ID_RE.match(admin)),
                                f"出問題會通知：{admin}" if admin else "還沒設定，出問題時沒辦法用 LINE 通知你",
-                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 管理員 LINE ID」。"))
+                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 🔔 通知 → 管理員 LINE ID」。"))
         items.append(CheckItem("自動排程", s.schedule.enabled or None, s.schedule.describe()))
         items.append(CheckItem("群組 ID 自動抓取", True if s.line.channel_secret else None,
                                "已設定 Channel secret" if s.line.channel_secret else "沒有設定 Channel secret（選用功能）",

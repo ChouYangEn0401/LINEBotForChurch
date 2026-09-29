@@ -1,98 +1,142 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}主控台・服事提醒機器人{% endblock %}
 {% block content %}
 {% set errors = problems | selectattr("severity.value", "equalto", "error") | list %}
-<section class="hero {{ report.status }}">
-  <div class="hero-title">
-    {% if report.status == "ok" %}✅ 一切正常
-    {% elif report.status == "warning" %}⚠️ 有 {{ problems | length }} 件事需要看一下（提醒還是會照常發送）
-    {% else %}❌ 有 {{ errors | length }} 個問題，提醒可能送不出去{% endif %}
+{% call ui.page_head("🏠 主控台", "現在正不正常、有沒有要處理的事、這週會發什麼——都在這一頁。平常什麼都不用做，只要照常更新 Google Sheet 的服事表。") %}
+  <button type="button" class="ghost small" data-undismiss="welcome-v1">ⓘ 這個網頁是做什麼的</button>
+{% endcall %}
+
+<section class="card welcome" data-dismissable="welcome-v1">
+  <div class="card-head">
+    <h2>👋 第一次來？三句話看懂</h2>
+    <button type="button" class="ghost small" data-dismiss="welcome-v1">我知道了，收起來</button>
   </div>
-  <div class="hero-sub">⏰ 自動發送：{{ schedule_status }}{% if next_run and next_run != '（沒有排程）' %}，下次是 <strong>{{ next_run }}</strong>{% endif %}</div>
-  <div class="hero-sub">📨 上次發送：
-    {% if last %}<a href="/runs/{{ last.id }}">{{ last.started_at[:16] | replace("T", " ") }}（{{ last.trigger_zh }}・{{ last.status_zh }}・送出 {{ last.sent }} 則）</a>
-    {% else %}還沒有發送過{% endif %}
+  <div class="grid-3">
+    <div class="how"><div class="how-icon">📄</div><strong>服事表還是在 Google Sheet 排</strong>
+      <p>跟以前一樣在 Google Sheet 排班就好，這個網頁不用再打一次。</p></div>
+    <div class="how"><div class="how-icon">🤖</div><strong>時間到，機器人自動發到 LINE</strong>
+      <p>它會讀服事表，把「這週誰服事什麼」發到設定好的 LINE 群組。</p></div>
+    <div class="how"><div class="how-icon">🚦</div><strong>有問題，這一頁會變紅、變黃</strong>
+      <p>下面「需要處理的事」會說明怎麼辦，按「去處理」就會到對的頁面。</p></div>
+  </div>
+  <p class="muted small">左邊選單每一項下面都有一行說明它是做什麼的。想看更多：<a href="/help">說明</a>。</p>
+</section>
+
+<div class="stat-grid">
+  <div class="stat {{ report.status }}">
+    <div class="stat-label">整體狀況 {{ ui.info("綜合服事表、同工名單、LINE 群組和發送設定的檢查結果。紅色 = 提醒可能送不出去；黃色 = 會照常發送，但有事要看一下。") }}</div>
+    <div class="stat-value">
+      {% if report.status == "ok" %}✅ 一切正常
+      {% elif report.status == "warning" %}⚠️ {{ problems | length }} 件事要看一下
+      {% else %}❌ {{ errors | length }} 個問題{% endif %}
+    </div>
+    <div class="stat-sub">{% if report.status == "ok" %}提醒會照常發送{% elif report.status == "warning" %}提醒還是會照常發送{% else %}提醒可能送不出去{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">下次發送 {{ ui.info("每週固定時間自動發送。顯示「由 Telegram 排程」代表這台程式內建的排程關著，時間到了由 Telegram 機器人來呼叫。") }}</div>
+    <div class="stat-value">{% if next_run and next_run != '（沒有排程）' %}{{ next_run }}{% else %}由 Telegram 排程{% endif %}</div>
+    <div class="stat-sub">{{ schedule_status }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">上次發送</div>
+    {% if last %}
+      <div class="stat-value"><a href="/runs/{{ last.id }}">{{ last.started_at[:16] | replace("T", " ") }}</a></div>
+      <div class="stat-sub"><span class="tag {{ last.status }}">{{ last.status_zh }}</span> 送出 {{ last.sent }} 則・{{ last.trigger_zh }}</div>
+    {% else %}
+      <div class="stat-value muted">還沒有發送過</div>
+      <div class="stat-sub">第一次發送後會顯示在這裡</div>
+    {% endif %}
   </div>
   {% if quota %}
-  <div class="hero-sub">{{ '⚠️' if quota_low else '📊' }} 本月 LINE 額度：{{ quota.describe() }}</div>
+  <div class="stat {{ 'warning' if quota_low }}">
+    <div class="stat-label">本月 LINE 額度 {{ ui.info("LINE 免費方案每月 200 則；送到群組是按群組人數算。快用完會在這裡變黃。") }}</div>
+    <div class="stat-value">{{ quota.used }}{% if quota.limit is not none %} / {{ quota.limit }}{% endif %} 則</div>
+    <div class="stat-sub">{{ quota.describe() }}</div>
+  </div>
   {% endif %}
-</section>
+</div>
 
 {% if steps %}
-<h2 class="section-title">運作流程 <span class="muted small">每週自動跑一次，點任一步驟去看細節</span></h2>
-<div class="workflow">
-  {% for s in steps %}
-  <a class="wf-step {{ s.status }}" href="{{ s.href }}">
-    <span class="wf-badge">{{ {"ok": "✅", "warning": "⚠️", "error": "❌", "off": "➖"}[s.status] }}</span>
-    <div class="wf-title">{{ loop.index }}. {{ s.icon }} {{ s.title }}</div>
-    <div class="wf-summary">{{ s.summary }}</div>
-    {% if s.detail %}<div class="wf-detail">{{ s.detail }}</div>{% endif %}
-  </a>
-  {% endfor %}
-</div>
-{% endif %}
-
-{% if problems %}
 <section class="card">
-  <h2>需要處理的事項</h2>
-  <ul class="issues">
-    {% for i in problems %}
-    <li class="{{ i.severity.value }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
-      {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</li>
+  <div class="card-head">
+    <h2>運作流程 {{ ui.info("每週自動跑一次的四個步驟。每一步的顏色代表它現在的狀況，點下去就到那一頁。") }}</h2>
+    <span class="muted small">點任一步驟去看細節</span>
+  </div>
+  <div class="workflow">
+    {% for s in steps %}
+    <a class="wf-step {{ s.status }}" href="{{ s.href }}">
+      <span class="wf-badge">{{ {"ok": "✅", "warning": "⚠️", "error": "❌", "off": "➖"}[s.status] }}</span>
+      <div class="wf-title"><span class="wf-num">{{ loop.index }}</span> {{ s.icon }} {{ s.title }}</div>
+      <div class="wf-summary">{{ s.summary }}</div>
+      {% if s.detail %}<div class="wf-detail">{{ s.detail }}</div>{% endif %}
+    </a>
     {% endfor %}
-  </ul>
+  </div>
 </section>
 {% endif %}
 
 <section class="card">
-  <h2>這次會發送的內容（預覽）</h2>
-  {% if plan and plan.days %}
-    <p class="muted">涵蓋 {{ plan.today.month }}/{{ plan.today.day }} ～ {{ plan.window_end.month }}/{{ plan.window_end.day }} 之間的聚會。預覽不會真的送出。</p>
+  <div class="card-head">
+    <h2>需要處理的事{% if problems %}（{{ problems | length }}）{% endif %}</h2>
+  </div>
+  {% if problems %}
+    {{ ui.issues(problems, show_link=true) }}
+  {% else %}
+    {{ ui.empty("🎉", "目前沒有需要處理的事", "服事表、名單、群組都檢查過了，一切正常。") }}
   {% endif %}
+</section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>這週會發的內容 {{ ui.info("這是預覽，不會真的送出。到了排程時間就會照這些內容發到各群組。") }}</h2>
+    {% if plan and plan.days %}<span class="muted small">涵蓋 {{ plan.today.month }}/{{ plan.today.day }} ～ {{ plan.window_end.month }}/{{ plan.window_end.day }} 的聚會</span>{% endif %}
+  </div>
 
   {% if report.deliveries %}
     <div class="bubbles">
       {% for d in report.deliveries %}
-      <div class="bubble-card">
-        <div class="bubble-head">
-          <strong>{{ d.target_name }}</strong>
-          <span class="tag {{ d.status.value }}">{{ "會發送" if d.status.value == "dry_run" else d.status.zh }}</span>
-        </div>
-        {% if d.detail %}<div class="muted small">{{ d.detail }}</div>{% endif %}
-        <pre class="bubble">{{ d.text }}</pre>
-      </div>
+        {{ ui.bubble(d.text, title=d.target_name, tag=("會發送" if d.status.value == "dry_run" else d.status.zh), tag_class=d.status.value, detail=d.detail) }}
       {% endfor %}
     </div>
-    <div class="actions">
-      <form method="post" action="/send" data-confirm="確定現在就發送嗎？（會真的送到 LINE 群組）">
-        <input type="hidden" name="force" value="0">
-        <button class="primary big" type="submit">📤 立刻發送</button>
-      </form>
-      <form method="post" action="/send" data-confirm="已經送過的群組也會再收到一次，確定嗎？">
-        <input type="hidden" name="force" value="1">
-        <button class="secondary" type="submit">🔁 重新發送（已送過的也送）</button>
-      </form>
-      <a class="button secondary" href="/">🔄 重新整理預覽</a>
-    </div>
-    <p class="muted small">不用每週手動按：到了排程時間會自動發送。這兩個按鈕是給「臨時想提早發」或「服事表改了想重發」用的。
-      這兩顆按鈕都是 Push（會計費）；如果人在 LINE 群組裡，也可以直接在群組打「/提醒」（誰都能打），
-      用免費的 Reply 送出，排程時間前 2 天內打過、內容沒變，排程就會自動略過、不會重複扣費。</p>
+    <details class="manual-send">
+      <summary>📤 不想等到排程時間？手動發送</summary>
+      <p class="muted small">不用每週手動按：到了排程時間會自動發送。這兩顆按鈕是給「臨時想提早發」或「服事表改了想重發」用的，
+        都會真的送到 LINE 群組並扣額度。人在群組裡的話，也可以直接在群組打 <span class="kbd">/提醒</span>（免費）。</p>
+      <div class="actions">
+        <form method="post" action="/send" data-confirm="確定現在就發送嗎？（會真的送到 LINE 群組）">
+          <input type="hidden" name="force" value="0">
+          <button class="primary" type="submit">📤 立刻發送</button>
+        </form>
+        <form method="post" action="/send" data-confirm="已經送過的群組也會再收到一次，確定嗎？">
+          <input type="hidden" name="force" value="1">
+          <button class="secondary" type="submit">🔁 重新發送（已送過的也送）</button>
+        </form>
+        <a class="button ghost" href="/">🔄 重新整理預覽</a>
+      </div>
+    </details>
   {% elif plan and plan.samples %}
-    <p>還沒有設定可以收到提醒的群組。先看看訊息會長這樣：</p>
+    {% call ui.notice("info", "還沒有設定可以收到提醒的群組") %}訊息會長這樣；設定好群組之後就會發到那裡。{% endcall %}
     <div class="bubbles">
-      {% for day, msg in plan.samples %}<div class="bubble-card"><pre class="bubble">{{ msg.text }}</pre></div>{% endfor %}
+      {% for day, msg in plan.samples %}{{ ui.bubble(msg.text) }}{% endfor %}
     </div>
-    <div class="actions"><a class="button primary big" href="/targets">👥 下一步：設定群組</a></div>
+    <div class="actions"><a class="button primary big" href="/targets?new=1">👥 下一步：新增 LINE 群組</a></div>
   {% else %}
-    <p class="muted">這次沒有要發送的訊息，原因請看上面的「需要處理的事項」。</p>
+    {{ ui.empty("📭", "這次沒有要發送的訊息", "原因在上面的「需要處理的事」。") }}
   {% endif %}
 </section>
 
 {% if infos %}
 <details class="card">
-  <summary>參考資訊（{{ infos | length }} 項）</summary>
-  <ul class="issues">
-    {% for i in infos %}<li class="info">{{ severity_icon["info"] }} {{ i.message }}{% if i.hint %}<div class="hint">{{ i.hint }}</div>{% endif %}</li>{% endfor %}
-  </ul>
+  <summary>參考資訊（{{ infos | length }} 項）<span class="muted small">・不用處理，只是讓你知道</span></summary>
+  {{ ui.issues(infos) }}
 </details>
 {% endif %}
+
+<section class="quick">
+  <a class="quick-link" href="/roster"><span class="quick-icon">📄</span><span><span class="quick-title">服事表</span><span class="quick-desc">看 Google Sheet 的內容、程式讀到什麼</span></span></a>
+  <a class="quick-link" href="/members"><span class="quick-icon">🙋</span><span><span class="quick-title">同工名單</span><span class="quick-desc">新同工、有人離開、名字對不到</span></span></a>
+  <a class="quick-link" href="/targets"><span class="quick-icon">👥</span><span><span class="quick-title">LINE 群組</span><span class="quick-desc">新群組、群組換了、只收部分服事</span></span></a>
+  <a class="quick-link" href="/runs"><span class="quick-icon">📜</span><span><span class="quick-title">發送紀錄</span><span class="quick-desc">以前發了什麼、有沒有失敗</span></span></a>
+</section>
 {% endblock %}

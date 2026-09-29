@@ -22,7 +22,7 @@ class CsvFileSource:
         if not self.path.exists():
             raise SourceError(
                 f"找不到服事表檔案：{self.path}",
-                "到網頁「設定」確認檔案路徑；或改用 Google Sheet。",
+                "到「服事表」頁改接 Google Sheet；或到「設定 → 服事表來源」確認檔案路徑。",
             )
         try:
             text, _ = read_csv_text(self.path)

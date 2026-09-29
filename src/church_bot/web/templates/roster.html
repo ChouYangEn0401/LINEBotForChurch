@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui %}
+{% block title %}服事表・服事提醒機器人{% endblock %}
+{% block content %}
+{% call ui.page_head("📄 服事表", "機器人每週讀的就是這一份。這裡可以看整張表、程式讀到了什麼、這次會發哪幾天。排班還是在 Google Sheet 上改。") %}
+  {% if sheet_url %}<a class="button primary" href="{{ sheet_url }}" target="_blank" rel="noopener">在 Google Sheet 打開 ↗</a>{% endif %}
+  <form method="post" action="/roster/refresh" class="inline"><button type="submit" class="secondary">🔄 重新讀取</button></form>
+{% endcall %}
+
+<section class="card">
+  <div class="card-head"><h2>目前接的是哪一份 {{ ui.info("機器人不會存一份服事表，每次發送當下才去讀，所以 Google Sheet 改了就是最新的。") }}</h2></div>
+  {% if roster_error %}
+    {% call ui.notice("error", "讀不到服事表：" ~ roster_error) %}
+      {% if roster_hint %}👉 {{ roster_hint }}{% endif %}
+      <div class="actions compact"><a class="button secondary small" href="/help#sheet">服事表怎麼排</a></div>
+    {% endcall %}
+  {% endif %}
+  {% if source %}
+  <dl class="facts">
+    <div><dt>來源</dt><dd>
+      {% if source.kind == "csv" %}電腦裡的檔案 <code class="admin-only">{{ source.csv_path }}</code>
+        <span class="tag warning">試用 / 測試用</span>
+        <div class="muted small">正式使用請接上教會的 Google Sheet（下面「換成 Google Sheet」）。</div>
+      {% elif source.kind == "google_service_account" %}Google Sheet（服務帳號，不公開）
+      {% else %}Google Sheet（公開連結）{% endif %}
+      {% if sheet_url %}<div class="small"><a href="{{ sheet_url }}" target="_blank" rel="noopener" class="id">{{ sheet_url }}</a></div>{% endif %}
+    </dd></div>
+    {% if roster %}
+    <div><dt>讀到的</dt><dd>{{ roster.source }}</dd></div>
+    <div><dt>聚會</dt><dd><strong>{{ roster.days | length }}</strong> 次{% if last_date %}，排到 <strong>{{ last_date }}</strong>{% endif %}</dd></div>
+    <div><dt>這次會發</dt><dd>{{ today.month }}/{{ today.day }} ～ {{ window_end.month }}/{{ window_end.day }} 之間的聚會（下面表格綠色的那幾列）</dd></div>
+    {% endif %}
+  </dl>
+  {% endif %}
+  {% if issues %}{{ ui.issues(issues) }}{% endif %}
+
+  <details class="connect">
+    <summary>🔗 換成別的 Google Sheet（或第一次接上）</summary>
+    <ol class="steps small">
+      <li>打開 Google Sheet → 右上角「共用」→「一般存取權」改成「知道連結的使用者」（檢視者）。</li>
+      <li>點開服事表那個「分頁」，從瀏覽器網址列複製整串網址，貼到下面。</li>
+      <li>按「接上」：會先試讀一次，讀得到才會換過去。</li>
+    </ol>
+    <form method="post" action="/roster/source" class="inline-form">
+      <input type="url" name="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0" value="{{ sheet_url }}" required style="flex:1;min-width:260px">
+      <button type="submit" class="primary" data-confirm="要把服事表換成這一份 Google Sheet 嗎？">接上</button>
+    </form>
+    <p class="muted small admin-only">不公開的 Google Sheet、電腦裡的檔案、表格排法等進階選項在 <a href="/settings#source">設定 → 服事表來源</a>。</p>
+  </details>
+</section>
+
+<section class="card" id="sheet">
+  <div class="card-head">
+    <h2>整張表（原封不動） {{ ui.info("這是 Google Sheet 現在的樣子，唯讀。藍色那一列是程式認出來的表頭，綠色是這次會發的聚會，名字底下有橘線代表同工名單找不到這個名字。") }}</h2>
+    <div class="card-tools">
+      <button type="button" class="secondary small" data-sheet-jump>⤵ 跳到這週</button>
+    </div>
+  </div>
+  <div class="sheet-legend">
+    <span><i class="lg lg-header"></i> 表頭</span>
+    <span><i class="lg lg-date"></i> 日期</span>
+    <span><i class="lg lg-current"></i> 這次會發</span>
+    <span><i class="lg lg-past"></i> 已經過去</span>
+    <span><i class="lg lg-unknown"></i> 名單找不到的名字</span>
+  </div>
+  <div class="sheet-status notice info">正在讀取 Google Sheet…</div>
+  <div class="sheet-body"></div>
+  <noscript><p class="muted">瀏覽器沒有開啟 JavaScript，看不到表格；下面「程式讀到的結果」仍然可以看。</p></noscript>
+</section>
+
+{% if parsed %}
+<section class="card">
+  <div class="card-head">
+    <h2>程式讀到的結果 {{ ui.info("把上面那張表整理成「每一次聚會、每一項服事是誰」。提醒訊息就是照這個產生的；名字有換成同工名單上的正式寫法。") }}</h2>
+    <span class="muted small">{{ parsed | length }} 次聚會</span>
+  </div>
+  <div class="table-wrap">
+    <table class="table parsed">
+      <thead><tr><th>日期</th>{% if parsed | selectattr("label") | list %}<th>聚會</th>{% endif %}{% for r in roles %}<th>{{ r }}</th>{% endfor %}<th>備註</th></tr></thead>
+      <tbody>
+      {% for row in parsed %}
+        <tr class="{{ 'current' if row.current }} {{ 'past' if row.past }}">
+          <td class="nowrap"><strong>{{ row.date }}</strong>{% if row.current %}<div><span class="tag ok">這次會發</span></div>{% endif %}</td>
+          {% if parsed | selectattr("label") | list %}<td>{{ row.label }}</td>{% endif %}
+          {% for r in roles %}
+            <td>{% for name, ok in row.cells.get(r, []) %}<span class="{{ '' if ok else 'name-unknown' }}" {% if not ok %}title="同工名單找不到這個名字"{% endif %}>{{ name }}</span>{{ "、" if not loop.last }}{% else %}<span class="muted">—</span>{% endfor %}</td>
+          {% endfor %}
+          <td class="small">{{ row.note }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if infos %}
+  <details><summary class="muted small">程式怎麼判斷這張表（{{ infos | length }} 項）</summary>{{ ui.issues(infos) }}</details>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="card">
+  <div class="card-head"><h2>服事表怎麼排比較不會出錯</h2></div>
+  <ul class="plain">
+    <li>表頭有一格叫「<strong>日期</strong>」最保險；其他每一欄都會當成一項服事，欄名就是訊息上的服事名稱。</li>
+    <li>一格多人用「、」或「,」隔開；沒有人就留空或寫「-」。</li>
+    <li>綽號、簡稱直接寫沒關係，到「<a href="/members">同工名單</a>」設成那個人的「其他寫法」，訊息就會顯示正式名字。</li>
+    <li>整個小團一起上，那一格寫團名，到「<a href="/members/teams">小團</a>」登記成員。</li>
+  </ul>
+  <div class="actions compact"><a class="button secondary small" href="/help#sheet">完整說明（三種排法、日期寫法）</a></div>
+</section>
+{% endblock %}
+{% block scripts %}<script src="/static/roster.js?v={{ version }}"></script>{% endblock %}

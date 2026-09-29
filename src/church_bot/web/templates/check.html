@@ -1,9 +1,17 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}系統檢查・服事提醒機器人{% endblock %}
 {% block content %}
+{% set bad = items | selectattr("ok", "equalto", false) | list %}
+{% call ui.page_head("🩺 系統檢查", "一次檢查設定、LINE 群組、同工名單、服事表、LINE 連線與額度。第一次設定好、或覺得怪怪的時候按這裡。") %}
+  <a class="button primary" href="/check">🔄 重新檢查</a>
+{% endcall %}
+{% if bad %}
+  {% call ui.notice("error", "有 " ~ (bad | length) ~ " 項沒過") %}紅色那幾列底下有寫怎麼處理。{% endcall %}
+{% else %}
+  {% call ui.notice("ok", "全部檢查都過了") %}可以回<a href="/">主控台</a>看這週的預覽。{% endcall %}
+{% endif %}
 <section class="card">
-  <h2>🩺 系統檢查</h2>
-  <p class="muted">一次檢查設定、LINE 群組、同工名單、服事表、LINE 連線與額度。第一次設定好、或覺得怪怪的時候按這裡。</p>
   <table class="table">
     <thead><tr><th></th><th>項目</th><th>狀態</th></tr></thead>
     <tbody>
@@ -16,7 +24,6 @@
     {% endfor %}
     </tbody>
   </table>
-  <div class="actions"><a class="button primary" href="/check">🔄 重新檢查</a><a class="button secondary" href="/">回首頁看預覽</a>
-    <a class="button secondary" href="/help">回說明</a></div>
+  <p class="muted small">➖ 代表「沒有用到、不算問題」（例如選用功能沒開）。</p>
 </section>
 {% endblock %}

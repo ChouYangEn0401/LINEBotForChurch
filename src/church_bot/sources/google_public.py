@@ -36,7 +36,7 @@ def parse_sheet_url(url: str) -> tuple[str, str, bool]:
     """回傳 (試算表 ID, gid, 是否為「發佈到網路」網址)。"""
     url = (url or "").strip()
     if not url:
-        raise ConfigError("還沒填 Google Sheet 網址", "到網頁「設定」貼上服事表的網址。")
+        raise ConfigError("還沒填 Google Sheet 網址", "到網頁「服事表」頁貼上 Google Sheet 的網址。")
     gid_match = _GID_RE.search(url)
     gid = gid_match.group(1) if gid_match else parse_qs(urlparse(url).query).get("gid", [""])[0]
     if pub := _PUB_RE.search(url):

@@ -44,14 +44,14 @@
 | `webhook.py` | LINE Webhook：「/」開頭的聊天指令（`parse_command`）、加入群組、被踢出群組、被動收集 LINE 帳號 |
 | `remote_config.py` | 「/設定」可以改的項目與一次性驗證碼（安全設計寫在檔案開頭） |
 | `org.py` | 🧪 實驗：大教會架構樹、人數與則數合計（見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)） |
-| `web/` | FastAPI：管理網頁（Jinja2）+ `/api/*` JSON API；`web/overview.py` 是首頁「運作流程」 |
+| `web/` | FastAPI：管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`static/roster.js` 把服事表畫成表格 |
 | `cli.py` | `python -m church_bot init / web / check / preview / send` |
 
 ## 錯誤處理原則：不要沉默
 
 1. 可預期的錯誤一律丟 `ChurchBotError` 子類別，帶 `message`（發生什麼）和 `hint`（下一步怎麼做）。
 2. 一次執行的所有狀況都收集成 `Issue`（ERROR／WARNING／INFO），放進 `RunReport`。
-3. `RunReport` 同時出現在：網頁首頁、執行紀錄（SQLite）、log 檔、CLI 結束代碼、管理員 LINE 通知（ERROR、WARNING）。
+3. `RunReport` 同時出現在：網頁主控台、執行紀錄（SQLite）、log 檔、CLI 結束代碼、管理員 LINE 通知（ERROR、WARNING）。
 4. `BotService.run()` 不會往外丟例外；沒預料到的例外也會變成 ERROR issue，完整 traceback 寫進 log。
 5. 一個群組失敗不影響其他群組；token 錯誤、額度用完這種「後面一定也會失敗」的錯誤，會停止繼續呼叫 LINE。
 6. 已知限制：LINE 本身壞掉時（token 失效），管理員通知也送不出去，只剩網頁與 log。
@@ -89,7 +89,7 @@
 | 伺服器端畫面（Jinja2），不用前端框架 | 沒有建置步驟、離線可用、好維護 |
 | 機密只放 `.env`，由網頁寫入 | `settings.yaml` 可以安心備份；避免 Windows 記事本把 `.env` 存成 `.env.txt` |
 | 防重複：SQLite 記錄（群組, 日期, 聚會）+ `X-Line-Retry-Key` | 排程重跑、補發、連點都不會重複；網路重試 LINE 也保證不重複 |
-| 預覽不寫紀錄 | 首頁每次打開都會預覽，寫進資料庫只會一直變大 |
+| 預覽不寫紀錄 | 主控台每次打開都會預覽，寫進資料庫只會一直變大 |
 | `requirements.txt`、`.bat` 的變數部分只用 ASCII | 中文 Windows 的 pip 會用 cp950 讀 requirements；`.bat` 顯示中文靠 `chcp 65001` |
 
 ## 測試

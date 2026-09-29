@@ -55,14 +55,14 @@ def seen(paths, user: str, display: str, real: str = "") -> None:
 def test_collect_toggle_is_saved(client, paths):
     client.post("/members/collect", data={"enabled": "1"})
     assert load_settings(paths).chat.collect_names
-    assert "開放中" in client.get("/members").text
+    assert "開放中" in client.get("/members/accounts").text
     client.post("/members/collect", data={"enabled": "0"})
     assert not load_settings(paths).chat.collect_names
 
 
 def test_add_account_with_claimed_name(client, paths):
     seen(paths, uid("7"), "小張", "張三豐")
-    assert "加入「張三豐」" in client.get("/members").text
+    assert "加入「張三豐」" in client.get("/members/accounts").text
     client.post("/members/accounts/add", data={"user_id": uid("7")})
     added = members(paths)["張三豐"]
     assert added.line_user_id == uid("7") and added.active and "小張" in added.note
@@ -89,7 +89,7 @@ def test_link_rename_and_ignore(client, paths):
     assert members(paths)["林美華"].line_user_id == uid("7")
 
     History(paths.db_file).claim_real_name(uid("7"), "林美樺")
-    assert "改名成「林美樺」" in client.get("/members").text
+    assert "改名成「林美樺」" in client.get("/members/accounts").text
     client.post("/members/accounts/rename", data={"user_id": uid("7")})
     renamed = members(paths)["林美樺"]
     assert renamed.line_user_id == uid("7") and "林美華" in renamed.aliases and "美華" in renamed.aliases
@@ -147,7 +147,7 @@ def test_registered_nickname_becomes_an_alias_of_the_linked_member(client, paths
     client.post("/members/accounts/link", data={"user_id": uid("7"), "member_name": "林美華"})
     nickname(paths, uid("7"), "美美姐")
     nickname(paths, uid("7"), "華姐")
-    page = client.get("/members").text
+    page = client.get("/members/accounts").text
     assert "暱稱 美美姐" in page and "加成其他寫法" in page
 
     client.post("/members/accounts/nickname", data={"user_id": uid("7"), "nickname": "美美姐"})
@@ -188,7 +188,7 @@ def test_team_can_be_added_edited_and_deleted_from_the_web(client, paths):
                                      "active": "on", "note": "組合式"})
     stored = teams(paths)["青年實體團"]
     assert stored.aliases == ("青年團",) and stored.members == ("張晨光", "小明")
-    assert "青年實體團" in client.get("/members").text
+    assert "青年實體團" in client.get("/members/teams").text
 
     client.post("/teams/save", data={"name": "青年小團", "members": "張晨光", "active": "on",
                                      "original_name": "青年實體團"})
@@ -199,7 +199,7 @@ def test_team_can_be_added_edited_and_deleted_from_the_web(client, paths):
 
     for name in list(teams(paths)):  # 全部刪掉（不用小團功能的教會）畫面也要正常
         client.post("/teams/delete", data={"name": name})
-    assert "還沒有任何小團" in client.get("/members").text
+    assert "還沒有任何小團" in client.get("/members/teams").text
 
 
 def test_team_name_may_not_be_a_member_name(client, paths):
@@ -210,17 +210,17 @@ def test_team_name_may_not_be_a_member_name(client, paths):
 
 def test_members_page_warns_about_team_members_who_are_not_on_the_list(client, paths):
     client.post("/teams/save", data={"name": "新團", "members": "還沒登記的人", "active": "on"})
-    assert "的成員「還沒登記的人」不在同工名單上" in client.get("/members").text
+    assert "的成員「還沒登記的人」不在同工名單上" in client.get("/members/teams").text
 
 
 # ------------------------------------------------------------------ LINE 群組頁：照服事表挑「只發這些服事」
 
 
 def test_targets_page_lists_the_roles_that_exist_on_the_roster(client):
-    page = client.get("/targets").text
-    for role in ("講員", "司琴", "招待"):  # 範例服事表的欄位；照著挑就不會打錯字
-        assert f'<option value="{role}">' in page
-    assert "把大群拆成敬拜團、招待…各自的小群" in page
+    page = client.get("/targets?new=1").text  # 新增／編輯的表單畫面才會列服事項目
+    for role in ("講員", "司琴", "招待"):  # 範例服事表的欄位；點一下就加進去，不會打錯字
+        assert f'data-pick-value="{role}"' in page
+    assert "想把大群拆成敬拜團群、招待群各收自己的" in client.get("/targets").text
 
 
 def test_targets_page_still_works_when_the_roster_cannot_be_read(client, paths, monkeypatch):

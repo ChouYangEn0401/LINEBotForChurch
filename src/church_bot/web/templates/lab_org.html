@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_macros.html" as ui %}
 {% block title %}大教會架構（實驗）・服事提醒機器人{% endblock %}
 
 {% macro node_card(node) %}
@@ -36,19 +37,17 @@
 
 {% block content %}
 {% set c = report.church %}
-<section class="card">
-  <h2>🧪 大教會架構 <span class="tag warning">實驗功能</span></h2>
-  <p>把教會畫成一棵樹：<strong>牧區 → 區 → 小組</strong>（層數自己決定），每個單位掛上它的 LINE 群組和同工。</p>
-  <p class="muted">目前只用來<strong>看清楚全貌、估算每個單位用掉多少 LINE 則數</strong>，<strong>不會改變實際發送</strong>（發送仍然只看「👥 LINE 群組」頁）。
-    資料存在 <code>config/org.csv</code>，也可以用 Excel 改。</p>
-  <nav class="subnav">
-    <a href="#tree">🌳 架構圖</a><a href="#unassigned">📦 還沒分配（{{ report.unassigned_groups | length }} 群組・{{ report.unassigned_members | length }} 同工）</a>
-    <a href="#edit">➕ 新增單位</a><a href="#ideas">💡 如果要正式支援大教會</a>
-  </nav>
-</section>
+{% call ui.page_head("🧪 大教會架構 <span class=\"tag warning\">實驗功能</span>" | safe, "把教會畫成一棵樹：牧區 → 區 → 小組（層數自己決定），每個單位掛上它的 LINE 群組和同工。只用來看清楚全貌、估算每個單位用掉多少 LINE 則數，不會改變實際發送。") %}
+  <a class="button primary" href="#edit">➕ 新增單位</a>
+{% endcall %}
+<nav class="subnav">
+  <a href="#tree">🌳 架構圖</a><a href="#unassigned">📦 還沒分配（{{ report.unassigned_groups | length }} 群組・{{ report.unassigned_members | length }} 同工）</a>
+  <a href="#ideas">💡 如果要正式支援大教會</a>
+</nav>
+<p class="muted small admin-only">資料存在 <code>config/org.csv</code>，也可以用 Excel 改。</p>
 
 <section class="card">
-  <h2>📊 全教會估算</h2>
+  <div class="card-head"><h2>📊 全教會估算</h2></div>
   <div class="stats">
     <div class="stat"><div class="stat-num">{{ units | length }}</div><div class="stat-label">個單位</div></div>
     <div class="stat"><div class="stat-num">{{ c.active_groups }}<small> / {{ c.groups }}</small></div><div class="stat-label">個群組會收到提醒</div></div>
@@ -58,7 +57,7 @@
   <p>👉 建議方案：<strong>{{ report.plan }}</strong>
     <span class="muted small">（群組人數 × 每月發送約 {{ "%.1f" | format(report.sends_per_month) }} 次；價格見 docs/LINE_PRICING.md）</span></p>
   {% if c.unknown_sizes %}
-    <div class="flash warn">⚠️ 有 {{ c.unknown_sizes }} 個會收到提醒的群組還不知道人數，上面的估算會偏低。按下面的按鈕向 LINE 查詢。</div>
+    <div class="notice warn"><div class="notice-body">⚠️ 有 {{ c.unknown_sizes }} 個會收到提醒的群組還不知道人數，上面的估算會偏低。按下面的按鈕向 LINE 查詢。</div></div>
   {% endif %}
   <form method="post" action="/lab/org/refresh-sizes" class="inline">
     <button type="submit" class="secondary">🔄 更新群組人數（向 LINE 查詢，不扣額度）</button></form>
@@ -70,7 +69,7 @@
 </section>
 
 <section class="card" id="tree">
-  <h2>🌳 架構圖</h2>
+  <div class="card-head"><h2>🌳 架構圖</h2></div>
   {% if report.roots %}
     {% for node in report.roots %}{{ node_card(node) }}{% endfor %}
   {% else %}
@@ -79,7 +78,7 @@
 </section>
 
 <section class="card" id="unassigned">
-  <h2>📦 還沒分配到任何單位</h2>
+  <div class="card-head"><h2>📦 還沒分配到任何單位</h2></div>
   <h3>LINE 群組（{{ report.unassigned_groups | length }}）</h3>
   {% if report.unassigned_groups %}
     <div class="chips">
@@ -95,7 +94,7 @@
 
 {% set u = editing %}
 <section class="card" id="edit">
-  <h2>{% if u %}✏️ 編輯「{{ u.name }}」{% else %}➕ 新增單位{% endif %}</h2>
+  <div class="card-head"><h2>{% if u %}✏️ 編輯「{{ u.name }}」{% else %}➕ 新增單位{% endif %}</h2></div>
   <form method="post" action="/lab/org/save" class="form-grid">
     <input type="hidden" name="original_name" value="{{ u.name if u else '' }}">
 
@@ -146,7 +145,7 @@
 </section>
 
 <section class="card" id="ideas">
-  <h2>💡 如果要正式支援大教會，需要先決定的事</h2>
+  <div class="card-head"><h2>💡 如果要正式支援大教會，需要先決定的事</h2></div>
   <p class="muted">這一頁先把「架構」和「成本」看清楚。要真的讓每個牧區自己管、自己發，還有下面幾件事要一起想（完整說明在 <code>docs/LAB_LARGE_CHURCH.md</code>）：</p>
   <ol class="steps">
     <li><strong>誰管什麼（權限）</strong>：每個牧區有自己的管理員，只看得到、改得到自己牧區的群組和名單；出問題時通知牧區負責人，全教會的問題才通知總管理員。</li>

@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from church_bot.config import ScheduleSettings, Settings, save_settings
+from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
 from church_bot.models import Member, OutgoingMessage
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
@@ -370,10 +370,76 @@ def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths,
 # ------------------------------------------------------------------ web
 
 
-@pytest.mark.parametrize("url", ["/", "/targets", "/members", "/settings", "/runs", "/check", "/help",
-                                 "/api/status", "/api/preview", "/healthz"])
+@pytest.mark.parametrize("url", ["/", "/roster", "/targets", "/targets?new=1", "/targets?edit=敬拜團", "/members",
+                                 "/members?new=1", "/members?edit=陳小明", "/members/accounts", "/members/teams",
+                                 "/members/teams?new=1", "/settings", "/runs", "/check", "/help", "/lab/org",
+                                 "/api/status", "/api/preview", "/api/roster/sheet", "/healthz"])
 def test_pages_render(client, url):
     assert client.get(url).status_code == 200
+
+
+def test_admin_mode_reveals_the_admin_pages_in_the_menu(client):
+    """「管理員模式」只是把進階頁面收起來（cookie），不是權限：頁面本身照樣打得開。"""
+    assert client.get("/settings").status_code == 200
+    r = client.post("/admin-mode", data={"enabled": "1", "next": "/settings#schedule"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/settings?msg=")
+    page = client.get("/").text
+    sidebar = page.split("<main")[0]
+    assert '<body class="admin">' in page
+    assert 'href="/settings"' in sidebar and 'href="/check"' in sidebar and 'href="/lab/org"' in sidebar
+
+    r = client.post("/admin-mode", data={"enabled": "0", "next": "https://evil.example/"}, follow_redirects=False)
+    assert r.headers["location"].startswith("/?")  # 外部網址不理它，回主控台
+    assert 'href="/settings"' not in client.get("/").text.split("<main")[0]
+
+
+def test_roster_page_shows_the_sheet_and_what_the_program_read(client):
+    page = client.get("/roster").text
+    assert "整張表（原封不動）" in page and "程式讀到的結果" in page and "roster.js" in page
+    data = client.get("/api/roster/sheet").json()
+    sheet = data["sheets"][0]
+    assert data["ok"] and sheet["layout"] == "wide" and sheet["header_row"] == 0 and sheet["date_axis"] == "row"
+    assert sheet["dates"]["1"].startswith("20") and len(sheet["dates"]) >= 4 and sheet["cols"]["date"] == 0  # 第 2 列起是日期
+    assert sheet["rows"][0][0] == "日期" and isinstance(data["unknown_names"], list)
+
+
+def test_roster_source_keeps_the_old_sheet_when_the_new_one_cannot_be_read(client, paths, monkeypatch):
+    from church_bot.errors import SourceError
+    from church_bot.service import BotService
+
+    before = paths.settings_file.read_text(encoding="utf-8")
+    r = client.post("/roster/source", data={"url": "not a url"}, follow_redirects=False)
+    assert r.status_code == 303 and "level=error" in r.headers["location"]
+
+    def unreadable(self, settings, today, use_cache=False):
+        raise SourceError("這份 Google Sheet 沒有開放", "去按共用")
+
+    monkeypatch.setattr(BotService, "fetch_roster", unreadable)
+    url = "https://docs.google.com/spreadsheets/d/1234567890abcdefghijklmnop/edit#gid=0"
+    r = client.post("/roster/source", data={"url": url}, follow_redirects=False)
+    assert "level=error" in r.headers["location"]
+    assert paths.settings_file.read_text(encoding="utf-8") == before  # 讀不到就不換
+
+
+def test_roster_source_switches_to_google_after_a_successful_trial_read(client, paths, monkeypatch):
+    from church_bot.models import Roster, ServiceDay
+    from church_bot.service import BotService
+
+    monkeypatch.setattr(BotService, "fetch_roster", lambda self, settings, today, use_cache=False:
+                        Roster(days=(ServiceDay(dt.date(2026, 10, 4), ()),), source="Google Sheet（公開連結）：gid=0"))
+    url = "https://docs.google.com/spreadsheets/d/1234567890abcdefghijklmnop/edit#gid=0"
+    r = client.post("/roster/source", data={"url": url}, follow_redirects=False)
+    assert "level=ok" in r.headers["location"]
+    source = load_settings(paths).source
+    assert source.kind == "google_public" and source.spreadsheet_url == url and source.worksheet == ""
+
+
+def test_member_and_group_forms_are_separate_screens(client):
+    """清單和表單分開：一次只看一件事。清單頁沒有表單、表單頁只有表單。"""
+    assert "/members/save" not in client.get("/members").text
+    form = client.get("/members?new=1").text
+    assert "/members/save" in form and "回同工名單" in form
+    assert "/targets/save" not in client.get("/targets").text and "/targets/save" in client.get("/targets?new=1").text
 
 
 def test_add_group_then_send_from_web(client, paths):

@@ -6,18 +6,18 @@
   <title>登入・服事提醒機器人</title>
   <link rel="stylesheet" href="/static/app.css?v={{ version }}">
 </head>
-<body>
-<main>
-  <section class="card" style="max-width:360px;margin:12vh auto">
-    <h2>🔒 請先登入</h2>
-    <p class="muted">這台管理網頁設定了密碼保護，請輸入密碼才能繼續。</p>
+<body class="login-body">
+<main class="login">
+  <section class="card">
+    <div class="login-brand">⛪ 服事提醒機器人</div>
+    <h1 class="page-title">請先登入</h1>
+    <p class="muted">這個管理網頁設定了密碼，請輸入密碼才能繼續。忘記的話請問設定它的人。</p>
     {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
-    <form method="post" action="/login" class="form-grid">
+    <form method="post" action="/login" class="form-stack">
       <input type="hidden" name="next" value="{{ next or '/' }}">
       <label for="password">密碼</label>
       <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
-      <div></div>
-      <div class="actions"><button type="submit" class="primary">登入</button></div>
+      <button type="submit" class="primary big">登入</button>
     </form>
   </section>
 </main>
