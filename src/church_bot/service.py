@@ -284,6 +284,18 @@ class BotService:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
         return find_unknown_names(roster, ctx.directory, since=today)
 
+    def roster_roles(self) -> list[str]:
+        """服事表上現有的服事項目（「LINE 群組」頁用來讓人用選的，不用自己猜怎麼寫）。
+
+        讀不到服事表不是問題：那一頁照樣要能用，只是選不了而已。
+        """
+        try:
+            ctx = self.load()
+            return self.fetch_roster(ctx.settings, self.now(ctx.settings).date(), use_cache=True).all_roles()
+        except ChurchBotError as exc:
+            log.debug("讀不到服事表，「LINE 群組」頁就不列出服事項目：%s", exc)
+            return []
+
     def quota_status(self) -> Quota | None:
         """首頁用：本月 LINE 額度。查不到（console 模式、關閉額度檢查、設定壞了、LINE 連不上）就回 None，
         首頁那一行就不顯示，不影響其他功能。"""

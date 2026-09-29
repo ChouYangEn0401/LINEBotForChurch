@@ -3,7 +3,22 @@
 {% block content %}
 <section class="card">
   <h2>👥 LINE 群組：提醒要送到哪裡</h2>
-  <p>每週的提醒會送到下面每個「啟用」的群組。每個群組可以只收一部分，例如敬拜團只收「敬拜、司琴、音控」。</p>
+  <p>每週的提醒會送到下面每個「啟用」的群組，<strong>可以同時發給很多群組</strong>；每個群組各自決定要收哪些服事。</p>
+  <details>
+    <summary>把大群拆成敬拜團、招待…各自的小群，要怎麼設？</summary>
+    <p>一個群組一列，「只發這些服事」填那一群負責的項目就好（留空 = 全部都發）：</p>
+    <table class="table">
+      <thead><tr><th>群組</th><th>只發這些服事</th><th>那一群會收到</th></tr></thead>
+      <tbody>
+        <tr><td>主日同工大群</td><td>（留空）</td><td>整張表</td></tr>
+        <tr><td>敬拜團群</td><td>敬拜、司琴、會前禱</td><td>只有敬拜相關的那幾行</td></tr>
+        <tr><td>招待群</td><td>招待</td><td>只有招待那一行</td></tr>
+      </tbody>
+    </table>
+    <p class="muted">同一個人同時在兩個群組，就會在兩邊各看到一次（LINE 額度也是兩邊各算，見下面的 💰）。
+      寫部分字就會對到：「敬拜」對得到「敬拜主領」「敬拜團」。那幾天剛好沒排到人的項目不會出現，
+      整個群組都沒東西可發時，發送紀錄會告訴你。</p>
+  </details>
   <p class="muted">💰 送到群組是<strong>按群組人數</strong>扣 LINE 額度（30 人的群組送一次 = 30 則），群組越少越省。
     把機器人邀進新群組，它會自動出現在這裡等你啟用。
     存在 <code>config/targets.csv</code>，也可以用 Excel 打開直接改（<a href="/download/targets.csv">下載一份</a>），改完不用重開程式。</p>
@@ -92,8 +107,13 @@
       <label for="enabled">這個群組要收到提醒</label></div>
 
     <label for="roles">只發這些服事</label>
-    <input type="text" id="roles" name="roles" value="{{ fmt_list(t.roles) if t else '' }}" placeholder="留空 = 全部都發">
-    <div class="help">例如敬拜團只想收敬拜相關的：填「敬拜、司琴、音控」。寫部分字就會對到（「敬拜」會對到「敬拜主領」）。</div>
+    <input type="text" id="roles" name="roles" value="{{ fmt_list(t.roles) if t else '' }}" placeholder="留空 = 全部都發"
+           list="roles_in_sheet">
+    {% if roles_in_sheet %}<datalist id="roles_in_sheet">{% for role in roles_in_sheet %}<option value="{{ role }}">{% endfor %}</datalist>{% endif %}
+    <div class="help">例如敬拜團只想收敬拜相關的：填「敬拜、司琴、音控」，用「、」隔開。寫部分字就會對到（「敬拜」會對到「敬拜主領」）。
+      {% if roles_in_sheet %}<br>服事表目前有這些項目，<strong>照著挑最保險</strong>（寫錯的話那個群組會收不到東西）：
+        {% for role in roles_in_sheet %}<span class="chip">{{ role }}</span>{% endfor %}
+      {% endif %}</div>
 
     <label for="labels">只發這些聚會</label>
     <input type="text" id="labels" name="labels" value="{{ fmt_list(t.labels) if t else '' }}" placeholder="留空 = 全部都發">

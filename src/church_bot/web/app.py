@@ -294,7 +294,8 @@ def create_app(paths: Paths) -> FastAPI:
         chats = [c for c in service.history.chats()
                  if c["chat_id"] not in known and c["status"] == "active" and c["kind"] in ("group", "room")]
         editing = next((t for t in result.items if t.name == edit), None)
-        return page(request, "targets.html", targets=result.items, issues=result.issues, chats=chats, editing=editing)
+        return page(request, "targets.html", targets=result.items, issues=result.issues, chats=chats, editing=editing,
+                    roles_in_sheet=service.roster_roles())
 
     @ui.post("/targets/save")
     def targets_save(name: str = Form(""), line_id: str = Form(""), enabled: str = Form(""), roles: str = Form(""),

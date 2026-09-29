@@ -211,3 +211,24 @@ def test_team_name_may_not_be_a_member_name(client, paths):
 def test_members_page_warns_about_team_members_who_are_not_on_the_list(client, paths):
     client.post("/teams/save", data={"name": "新團", "members": "還沒登記的人", "active": "on"})
     assert "的成員「還沒登記的人」不在同工名單上" in client.get("/members").text
+
+
+# ------------------------------------------------------------------ LINE 群組頁：照服事表挑「只發這些服事」
+
+
+def test_targets_page_lists_the_roles_that_exist_on_the_roster(client):
+    page = client.get("/targets").text
+    for role in ("講員", "司琴", "招待"):  # 範例服事表的欄位；照著挑就不會打錯字
+        assert f'<option value="{role}">' in page
+    assert "把大群拆成敬拜團、招待…各自的小群" in page
+
+
+def test_targets_page_still_works_when_the_roster_cannot_be_read(client, paths, monkeypatch):
+    from church_bot.errors import SourceError
+    from church_bot.service import BotService
+
+    def broken(self, settings, today, use_cache=False):
+        raise SourceError("讀不到服事表", "檢查網址")
+
+    monkeypatch.setattr(BotService, "fetch_roster", broken)
+    assert client.get("/targets").status_code == 200
