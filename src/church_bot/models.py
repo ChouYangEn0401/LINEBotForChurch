@@ -105,24 +105,47 @@ class Member:
     """一位同工。對應 config/members.csv 的一列。"""
 
     name: str  # 訊息上要顯示的名字
-    aliases: tuple[str, ...] = ()  # 服事表上可能出現的其他寫法（綽號、英文名…）
+    aliases: tuple[str, ...] = ()  # 服事表上可能出現的其他寫法（綽號、英文名、LINE 舊名稱…，可以有很多個）
     line_user_id: str = ""  # 要 @ 他時才需要
     active: bool = True
     note: str = ""
 
 
 @dataclass(frozen=True, slots=True)
+class Team:
+    """一個小團（例如「晨光實體團」）。對應 config/teams.csv 的一列。
+
+    敬拜團常常是「一個小團一起上」，而不是主領一個人單帶。服事表那一格寫小團名稱，
+    提醒就會顯示「小團名稱（成員…）」，並 @ 得到有登記 LINE 帳號的成員。
+    """
+
+    name: str  # 訊息上要顯示的團名
+    aliases: tuple[str, ...] = ()  # 服事表上可能出現的其他寫法（例如「晨光團」「晨光」）
+    members: tuple[str, ...] = ()  # 同工名單上的名字或其他寫法
+    active: bool = True
+    note: str = ""
+
+
+@dataclass(frozen=True, slots=True)
 class Person:
-    """服事表上的一個名字，對照完同工名單後的結果。"""
+    """服事表上的一個名字，對照完同工名單、小團名單後的結果。"""
 
     raw: str  # 服事表上原本的寫法
-    display: str  # 訊息上顯示的名字
+    display: str  # 訊息上顯示的名字（對到小團的話是團名）
     member: Member | None = None
     suggestions: tuple[str, ...] = ()  # 對不到時，猜他可能是誰
+    team: Team | None = None  # 這一格寫的是小團名稱時，是哪一個小團
+    team_people: tuple["Person", ...] = ()  # 小團的成員（也都對照過同工名單）
+    via_team: str = ""  # 這個人是從哪個小團展開出來的（一般名字是空字串）
 
     @property
     def matched(self) -> bool:
-        return self.member is not None
+        return self.member is not None or self.team is not None
+
+    @property
+    def individuals(self) -> tuple["Person", ...]:
+        """真正的人：小團 → 它的成員；一般名字 → 自己。要 @ 誰、誰還沒登記都看這個。"""
+        return self.team_people if self.team is not None else (self,)
 
 
 # --------------------------------------------------------------------------- run results

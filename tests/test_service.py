@@ -8,9 +8,9 @@ import pytest
 from church_bot.config import Settings, save_settings
 from church_bot.errors import ConfigError, MessengerError
 from church_bot.messengers.base import Quota
-from church_bot.models import DeliveryStatus, Member, Target
+from church_bot.models import DeliveryStatus, Member, Target, Team
 from church_bot.service import BotService
-from church_bot.tables import MemberTable, TargetTable
+from church_bot.tables import MemberTable, TargetTable, TeamTable
 from tests.conftest import FakeMessenger, gid, uid, write
 
 ADMIN = uid("f")
@@ -186,7 +186,7 @@ def test_notify_now_rejects_chat_without_a_configured_target(service):
 
 def test_health_check_lists_every_area(service):
     names = [item.name for item in service.health()]
-    assert names[:4] == ["設定檔", "LINE 群組", "同工名單", "服事表"] and "管理員通知" in names
+    assert names[:5] == ["設定檔", "LINE 群組", "同工名單", "小團", "服事表"] and "管理員通知" in names
 
 
 def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
@@ -218,3 +218,72 @@ def test_biweekly_schedule_warns_when_lookahead_too_short(paths):
     settings.behavior.lookahead_days = 14
     save_settings(paths, settings)
     assert not [i for i in BotService(paths).load().issues if i.code == "lookahead_too_short"]
+
+
+# ------------------------------------------------------------------ 小團（config/teams.csv）
+
+
+def test_team_name_on_the_roster_lists_the_whole_team(paths, fake):
+    write(paths.config_dir / "roster.csv", """日期,敬拜團,司琴
+2026/9/13,晨光實體團,小明
+""")
+    settings = Settings()
+    settings.source.csv_path = "config/roster.csv"
+    settings.schedule.enabled = False
+    save_settings(paths, settings)
+    TargetTable(paths.targets_file).save([Target("同工群", gid())])
+    MemberTable(paths.members_file).save([Member("張晨光", ("晨光",)), Member("陳小明", ("小明",)),
+                                          Member("林美華", ("美華",))])
+    TeamTable(paths.teams_file).save([Team("晨光實體團", ("晨光團",), ("晨光", "小明", "美華"))])
+
+    svc = BotService(paths)
+    svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    report, plan = svc.run("cli")
+    assert "晨光實體團（張晨光、陳小明、林美華）" in fake.texts_to(gid())[0]
+    assert not [i for i in report.issues if i.code == "unknown_name"]  # 團名不算「對不到的名字」
+    assert "晨光實體團" not in svc.unknown_names()
+
+
+def test_inactive_team_and_inactive_member_inside_it_are_both_reported(paths, fake):
+    write(paths.config_dir / "roster.csv", """日期,敬拜團
+2026/9/13,休息小團
+""")
+    settings = Settings()
+    settings.source.csv_path = "config/roster.csv"
+    settings.schedule.enabled = False
+    save_settings(paths, settings)
+    TargetTable(paths.targets_file).save([Target("同工群", gid())])
+    MemberTable(paths.members_file).save([Member("周以琳", ("以琳",), active=False), Member("陳小明", ("小明",))])
+    TeamTable(paths.teams_file).save([Team("休息小團", (), ("以琳", "小明"), active=False)])
+
+    svc = BotService(paths)
+    svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    report, _ = svc.run("cli")
+    codes = {i.code for i in report.issues}
+    assert "inactive_team" in codes and "inactive_member" in codes
+
+
+# ------------------------------------------------------------------ /別周測試（service.preview_for）
+
+
+def test_preview_for_another_week_does_not_record_anything(service, fake):
+    messages, note = service.preview_for(dt.date(2026, 9, 20), gid())
+    assert len(messages) == 1 and "9/20" in messages[0].text
+    assert messages[0].text.startswith("🧪 測試預覽")
+    assert "沒有發給任何人" in note
+    assert fake.sent == []  # 純預覽：不 Push
+    assert service.history.recent_runs(10) == []  # 也不寫紀錄，排程時間到了照常送
+
+    report, _ = service.run("schedule")
+    assert statuses(report) == [("同工群", DeliveryStatus.SENT), ("敬拜團", DeliveryStatus.SENT)]
+
+
+def test_preview_for_outside_a_reminder_group_borrows_a_group_and_does_not_tag(service):
+    messages, note = service.preview_for(dt.date(2026, 9, 13), uid("z"))
+    assert messages and not messages[0].has_mentions
+    assert "不是提醒群組" in note and "不會 @ 人" in note
+
+
+def test_preview_for_a_week_with_no_services_says_so(service):
+    messages, note = service.preview_for(dt.date(2026, 10, 4), gid())
+    assert messages == [] and "沒有可以提醒的內容" in note

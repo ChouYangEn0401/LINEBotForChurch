@@ -26,18 +26,18 @@
 | 檔案 | 職責 |
 |---|---|
 | `config.py` | `settings.yaml`（pydantic 驗證）+ `.env`（機密）；路徑 |
-| `models.py` | 純資料：Roster、ServiceDay、Target、Member、Issue、RunReport… |
+| `models.py` | 純資料：Roster、ServiceDay、Target、Member、Team、Issue、RunReport… |
 | `errors.py` | `ChurchBotError(message, hint)` 與子類別 |
-| `tables.py` | LINE 群組、同工名單的 CSV 讀寫（編碼自動判斷、逐列驗證） |
+| `tables.py` | LINE 群組、同工名單、小團的 CSV 讀寫（編碼自動判斷、逐列驗證） |
 | `sources/` | 資料來源：`csv_file`、`google_public`（免金鑰）、`google_service_account` |
 | `core/dates.py` | 日期解析（民國年、缺年份推測、Excel 序號…）與格式化 |
 | `core/parser.py` | 表格 → Roster，三種排法自動判斷 |
-| `core/directory.py` | 名字對照 |
+| `core/directory.py` | 名字對照（一人多名；服事表寫小團名稱就展開成團員） |
 | `core/renderer.py` | 訊息排版（Jinja2、textV2 mention） |
 | `core/planner.py` | 決定發給誰、發什麼；產生所有 Issue |
 | `core/dispatcher.py` | 防重複、額度檢查、發送、失敗處理 |
-| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字、群組成員關係）；舊資料庫開啟時自動補欄位 |
-| `core/accounts.py` | LINE 帳號 ↔ 同工名單的對應狀態（已對應／改名／對應／衝突／加入） |
+| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字與暱稱、群組成員關係）；舊資料庫開啟時自動補欄位 |
+| `core/accounts.py` | LINE 帳號 ↔ 同工名單的對應狀態（已對應／改名／對應／衝突／加入）、待確認的暱稱 |
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
 | `service.py` | 組裝一次完整執行、管理員通知、健康檢查 |
 | `scheduler.py` | APScheduler 每週排程 + 開機補發 |

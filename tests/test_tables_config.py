@@ -2,8 +2,8 @@ import pytest
 
 from church_bot.config import Settings, load_settings, save_settings, update_env_file
 from church_bot.errors import ConfigError, TableError
-from church_bot.models import Member, Target
-from church_bot.tables import MemberTable, TargetTable, parse_bool, upsert
+from church_bot.models import Member, Target, Team
+from church_bot.tables import MemberTable, TargetTable, TeamTable, parse_bool, upsert
 from tests.conftest import gid, uid, write
 
 
@@ -52,6 +52,25 @@ def test_member_bad_user_id_and_duplicate_alias(paths):
     codes = {i.code for i in result.issues}
     assert {"member_bad_uid", "member_dup_name"} <= codes
     assert result.items[0].line_user_id == ""
+
+
+def test_team_roundtrip_and_missing_file_is_not_a_problem(paths):
+    table = TeamTable(paths.teams_file)
+    assert table.load().items == [] and table.load().issues == []  # 沒有 teams.csv 也完全正常（選用功能）
+    team = Team("晨光實體團", ("晨光團",), ("張晨光", "陳小明"), note="組合式")
+    table.save([team])
+    assert table.load().items == [team]
+
+
+def test_team_duplicate_name_is_reported(paths):
+    write(paths.teams_file, """小團名稱,其他寫法,成員,啟用
+A團,甲團,小明
+B團,甲團,美華
+,,漏填團名
+""")
+    result = TeamTable(paths.teams_file).load()
+    assert [t.name for t in result.items] == ["A團", "B團"]
+    assert {"team_dup_name", "team_no_name"} <= {i.code for i in result.issues}
 
 
 def test_upsert_rename_and_collision():

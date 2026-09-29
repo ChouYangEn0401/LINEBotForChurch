@@ -12,28 +12,28 @@ import secrets
 import threading
 import time
 from contextlib import nullcontext
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 from zoneinfo import ZoneInfo
 
 from church_bot.config import Paths, Settings, load_settings
 from church_bot.core.dates import format_date
-from church_bot.core.directory import Directory
+from church_bot.core.directory import Directory, validate_teams
 from church_bot.core.dispatcher import Dispatcher
 from church_bot.core.history import History
 from church_bot.core.parser import parse_roster
-from church_bot.core.planner import DATE_FMT, Plan, Planner, find_unknown_names
+from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
 from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
 from church_bot.messengers.base import Quota
 from church_bot.models import (
-    TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, Roster, RunReport, Severity, Target,
+    TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, Roster, RunReport, Severity, Target, Team,
     tagged,
 )
 from church_bot.sources import build_source
-from church_bot.tables import LINE_ID_RE, MemberTable, TargetTable
+from church_bot.tables import LINE_ID_RE, MemberTable, TargetTable, TeamTable
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ REPLY_LIMIT = 4  # 一次 Reply 最多 5 則泡泡，留 1 則給確認訊息
 # 設定錯、沒有群組、LINE 拒絕（機器人被踢、額度用完）這種，重試也沒用。
 RETRYABLE_CODES = frozenset({"SourceError", "unexpected", "send_failed_temporarily"})
 REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /提醒（Reply，免費）送的，跟排程 Push 分開
+TEST_TAG = "🧪 測試預覽・沒有真的發送"  # /別周測試：管理員試看別一週的內容
+NOT_A_TARGET = "這個聊天室目前不是設定好的提醒群組，要先到管理網頁「LINE 群組」頁新增、啟用才能用這個指令。"
 
 
 @dataclass(slots=True)
@@ -53,11 +55,12 @@ class Context:
     settings: Settings
     targets: list[Target]
     members: list[Member]
+    teams: list[Team] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
 
     @property
     def directory(self) -> Directory:
-        return Directory(self.members)
+        return Directory(self.members, self.teams)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +110,8 @@ class BotService:
         issues: list[Issue] = []
         targets = self._load_table(TargetTable(self.paths.targets_file), issues)
         members = self._load_table(MemberTable(self.paths.members_file), issues)
+        teams = self._load_table(TeamTable(self.paths.teams_file), issues)
+        issues.extend(validate_teams(teams, members))
         Renderer(settings.message)  # 模板語法錯誤在這裡就丟 ConfigError
         span = settings.schedule.every_n_weeks * 7
         if settings.schedule.every_n_weeks > 1 and settings.behavior.lookahead_days < span:
@@ -116,10 +121,10 @@ class BotService:
                 f"{settings.behavior.lookahead_days} 天，下一次發送前那幾週的服事可能不會出現在提醒裡",
                 f"到「設定 → ⑥ 進階」把「往後看幾天」改成至少 {span} 天。",
             ))
-        return Context(settings, targets, members, issues)
+        return Context(settings, targets, members, teams, issues)
 
     @staticmethod
-    def _load_table(table: TargetTable | MemberTable, issues: list[Issue]) -> list:
+    def _load_table(table: TargetTable | MemberTable | TeamTable, issues: list[Issue]) -> list:
         try:
             result = table.load()
         except ChurchBotError as exc:
@@ -299,6 +304,44 @@ class BotService:
         finally:
             messenger.close()
 
+    def _plan_for(self, ctx: Context, targets: list[Target], today: dt.date) -> Plan:
+        roster = self.fetch_roster(ctx.settings, today, use_cache=True)
+        planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
+        return planner.plan(roster, targets, today)
+
+    def preview_for(self, day: dt.date, chat_id: str = "") -> tuple[list[OutgoingMessage], str]:
+        """給 LINE 指令「/別周測試 10/04」用：試印「那一天起往後幾天」的提醒。
+
+        純預覽：不寫紀錄、不通知管理員，排程時間到了照常 Push（跟 /提醒 不一樣）。
+        在提醒群組裡打，就用那個群組的設定（只發哪些服事、要不要 @ 人）；
+        在別的地方（例如私訊機器人）打，就借第一個啟用的群組的設定試排，但不會 @ 人
+        ——那些人不在這個聊天室裡，LINE 會拒絕整則訊息。
+        """
+        ctx = self.load()
+        notes: list[str] = []
+        target = next((t for t in ctx.targets if t.line_id == chat_id and t.enabled), None)
+        if target is None:
+            if borrowed := next(iter(active_targets(ctx.targets)), None):
+                target = replace(borrowed, mention=False)
+                notes.append(f"（這裡不是提醒群組，用「{borrowed.name}」的設定試排，而且不會 @ 人）")
+        plan = self._plan_for(ctx, [target] if target else [], day)
+        span = ctx.settings.behavior.lookahead_days
+        window = f"{format_date(day, DATE_FMT)} 起往後 {span} 天"
+        if target is None:
+            messages = [message for _day, message in plan.samples]
+            notes.append("（還沒設定任何提醒群組，這是不分群組的內容）")
+        else:
+            messages = [pm.message for pm in plan.messages]
+        if not messages:
+            reason = f"🧪 {window}：服事表裡沒有可以提醒的內容。"
+            return [], "\n".join([reason, *notes])
+        batch, remainder = messages[:REPLY_LIMIT], messages[REPLY_LIMIT:]
+        notes.insert(0, f"🧪 以上是「{window}」的試印結果，沒有發給任何人、也沒有計入紀錄。")
+        if remainder:
+            notes.append(f"（還有 {len(remainder)} 則沒顯示，一次最多回 5 則。）")
+        log.info("管理員用「/別周測試」試印 %s 的提醒（%d 則，沒有送出給大家）", day.isoformat(), len(batch))
+        return [tagged(message, f"{TEST_TAG}（{window}）") for message in batch], "\n".join(notes)
+
     def notify_now(self, chat_id: str, send: Callable[[list[OutgoingMessage | str]], None] | None = None,
                    ) -> tuple[list[OutgoingMessage], str]:
         """給 LINE 聊天指令「/提醒」用：立即用 Reply 免費送出這個群組這次的提醒（不計入 LINE 額度）。
@@ -311,12 +354,10 @@ class BotService:
         ctx = self.load()
         target = next((t for t in ctx.targets if t.line_id == chat_id and t.enabled), None)
         if target is None:
-            return [], "這個聊天室目前不是設定好的提醒群組，要先到管理網頁「LINE 群組」頁新增、啟用才能用這個指令。"
+            return [], NOT_A_TARGET
 
         today = self.now(ctx.settings).date()
-        roster = self.fetch_roster(ctx.settings, today, use_cache=True)
-        planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
-        plan = planner.plan(roster, [target], today)
+        plan = self._plan_for(ctx, [target], today)
         to_send = plan.messages
         if not to_send:
             return [], f"這幾天服事表沒有「{target.name}」符合的服事內容，沒有東西可以提醒。"
@@ -358,6 +399,9 @@ class BotService:
                                "；".join(i.message for i in table_errors) or ("請到「LINE 群組」頁新增群組" if not active else "")))
         items.append(CheckItem("同工名單", None if not ctx.members else True,
                                f"共 {len(ctx.members)} 位" if ctx.members else "還沒設定（名字會照服事表原樣顯示）"))
+        items.append(CheckItem("小團", None if not ctx.teams else True,
+                               f"共 {len(ctx.teams)} 團（服事表寫團名就會列出成員）" if ctx.teams else "沒有使用（選用功能）",
+                               "；".join(i.message for i in ctx.issues if i.code.startswith("team_"))))
 
         today = self.now(s).date()
         try:

@@ -9,6 +9,9 @@
   footer       結尾文字
   target_name  收訊群組名稱
   assignments  服事清單，每一項有 role（服事項目）、names（已用「、」串好的名字）、people（每個人的詳細資料）
+
+服事表那一格寫的是小團名稱時（見 core/directory.py），names 會排成「晨光實體團（王晨光、陳小明）」，
+團裡有登記 LINE 帳號的成員照樣 @ 得到。
 """
 
 from __future__ import annotations
@@ -25,7 +28,7 @@ from church_bot.config import MessageSettings
 from church_bot.core.dates import format_date, weekday_zh
 from church_bot.core.directory import Directory, normalize_name
 from church_bot.errors import ConfigError
-from church_bot.models import Assignment, Member, OutgoingMessage, Person, ServiceDay, Target
+from church_bot.models import Assignment, Member, OutgoingMessage, Person, ServiceDay, Target, Team
 
 LINE_TEXT_LIMIT = 5000
 MAX_MENTIONS = 20  # LINE 上限更高，但一則提醒 @ 太多人反而是騷擾
@@ -77,7 +80,9 @@ class _Row:
 
 def register_hint(rows: list[_Row]) -> str:
     """要 @ 人的群組：列出這次沒辦法 @ 到的人（同工名單沒有他的 LINE_userId），教他們怎麼登記。"""
-    names = [p.display for r in rows for p in r.people if not (p.member and p.member.line_user_id)]
+    # 小團看的是團裡的成員（團名本身不是人，不用登記）
+    people = [one for r in rows for p in r.people for one in p.individuals]
+    names = [p.display for p in people if not (p.member and p.member.line_user_id)]
     names = list(dict.fromkeys(names))
     if not names:
         return ""
@@ -136,15 +141,25 @@ class Renderer:
         """用假資料試排一次，模板裡打錯變數名稱會在這裡被抓到。"""
         sample = ServiceDay(
             date=dt.date(2026, 9, 13), label="主日崇拜", note="聖餐主日",
-            assignments=(Assignment("司琴", ("小明",)), Assignment("音控", ("阿德", "小華"))),
+            assignments=(Assignment("司琴", ("小明",)), Assignment("音控", ("阿德", "小華")),
+                         Assignment("敬拜團", ("示範小團",))),
         )
-        directory = Directory([Member(name="王小明", aliases=("小明",), line_user_id="U" + "0" * 32)])
+        directory = Directory([Member(name="王小明", aliases=("小明",), line_user_id="U" + "0" * 32)],
+                              [Team(name="示範小團", members=("小明", "阿德"))])
         self.render(sample, directory, Target(name="測試", line_id="", mention=True))
 
     # ------------------------------------------------------------------ internals
 
     def _render(self, day: ServiceDay, target: Target | None, rows: list[_Row], fmt) -> str:  # noqa: ANN001
         sep = self.cfg.name_separator
+
+        def show(p: Person) -> str:
+            """小團排成「團名（成員…）」；一般名字就是名字（或 @ 的佔位符）。"""
+            if p.team is None:
+                return fmt(p)
+            inside = sep.join(fmt(one) for one in p.team_people)
+            return f"{p.display}（{inside}）" if inside else p.display
+
         context = {
             "title": self.cfg.title,
             "footer": self.cfg.footer,
@@ -157,8 +172,10 @@ class Renderer:
             "assignments": [
                 {
                     "role": r.role,
-                    "names": sep.join(fmt(p) for p in r.people),
-                    "people": [{"name": fmt(p), "raw": p.raw, "matched": p.matched} for p in r.people],
+                    "names": sep.join(show(p) for p in r.people),
+                    "people": [{"name": show(p), "raw": p.raw, "matched": p.matched,
+                                "is_team": p.team is not None,
+                                "members": [fmt(one) for one in p.team_people]} for p in r.people],
                 }
                 for r in rows
             ],

@@ -9,10 +9,18 @@
 * /群組ID → 回覆這個聊天室的 ID
 * /我的ID → 回覆自己的名字＋userId（填到同工名單就能被 @；填到設定就能收管理員通知）
 * /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
+* /我的暱稱 阿明 → 多登記一個稱呼（一個人可以有好幾個，不會蓋掉真實姓名）
 * /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
 * /提醒（或 /現在提醒）→ 在設定好的提醒群組裡，誰都可以打；立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度）。
   排程時間前 2 天內打過、內容也一樣，排程就略過（見 History.skip_reason），服事表改過才會再送
-* /說明 → 列出指令
+* /別周測試 1004 → **只有管理員**：試印別一週的提醒，不記錄、不影響排程（見 service.preview_for）
+* /權限 → 誰是管理員、每個指令誰能用
+* /我的權限 → 打的人自己的狀況（對應到哪位同工、能不能被 @、是不是管理員）
+* /說明（也可以打 /help、/?）→ 列出指令
+
+「誰能用什麼」只有兩層，刻意不做複雜的權限系統：
+* 大家都能用的指令，最多只會讓機器人「回一句話」或「記一個等管理員確認的名字」，不會改到設定或發送給別人。
+* 會影響大家的（改設定、試印別週），靠「驗證碼只送給管理員」和「管理員 LINE ID」擋住。
 
 支援的事件：
 * 機器人被加進群組 → 在群組回覆群組 ID，並自動加到「LINE 群組」（先不啟用，管理員確認後再打開）
@@ -39,15 +47,17 @@ from dataclasses import dataclass
 from typing import Callable
 
 from church_bot.config import Settings, load_settings
+from church_bot.core.dates import parse_user_date
+from church_bot.core.history import MAX_NICKNAMES, nicknames_of
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers.line import LineMessenger
-from church_bot.models import OutgoingMessage, Target
+from church_bot.models import Member, OutgoingMessage, Target
 from church_bot.remote_config import (
     CODE_RE, CODE_TTL, PendingChange, Verifier, VerifyError, apply_change, describe_options, find_option,
     parse_assignment,
 )
 from church_bot.service import BotService
-from church_bot.tables import TABLE_WRITE_LOCK, TargetTable
+from church_bot.tables import TABLE_WRITE_LOCK, MemberTable, TargetTable
 
 log = logging.getLogger(__name__)
 
@@ -55,14 +65,18 @@ log = logging.getLogger(__name__)
 COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "chat_id": ("群組id", "群id", "群組代號", "groupid", "chatid", "id"),
     "my_id": ("我的id", "myid", "me", "userid"),
-    "help": ("說明", "指令", "help", "?"),
+    "help": ("說明", "指令", "幫助", "怎麼用", "help", "?"),
     "cancel": ("取消", "cancel"),
     "my_name": ("我的名字", "名字", "myname", "name"),
+    "my_nickname": ("我的暱稱", "暱稱", "我的綽號", "綽號", "mynickname", "nickname", "nick"),
     "config": ("設定", "config", "setting", "set"),
     "verify": ("驗證碼", "驗證", "verify", "code"),
     "notify_now": ("提醒", "現在提醒", "立即提醒", "發提醒", "remind", "notifynow"),
+    "permissions": ("權限顯示", "權限", "權限說明", "誰可以用", "permissions", "perms"),
+    "my_permissions": ("我的權限", "我的資料", "myperms", "whoami"),
+    "test_week": ("別周測試", "別週測試", "測試提醒", "測試", "testweek", "test"),
 }
-NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now"}
+NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -70,21 +84,89 @@ _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not i
 NAME_MAX_LENGTH = 20
 
 HELP_TEXT = (
-    "我是服事提醒小幫手 🙌 指令都是「/」開頭：\n"
-    "・/群組ID：這個聊天室的 ID\n"
-    "・/我的ID：你自己的 ID\n"
-    "・/我的名字 王小明：登記你的真實姓名，之後提醒就能 @ 到你\n"
-    "・/提醒：立刻顯示這週的服事提醒（免費）\n"
-    "・/設定：用 LINE 修改機器人設定（要驗證碼）\n"
-    "・/說明：顯示這段說明\n"
-    "不是「/」開頭的訊息我都不會回，不會吵到大家 😊"
+    "我是服事提醒小幫手 🙌\n"
+    "訊息開頭有「/」我才會回；平常聊天我一律不出聲，不會吵到大家 😊\n"
+    "\n"
+    "🟢 大家都可以打\n"
+    "・/提醒\n"
+    "　→ 馬上看這週誰服事（免費，不扣 LINE 額度）\n"
+    "・/我的名字 王小明\n"
+    "　→ 登記真實姓名，提醒才 @ 得到你\n"
+    "・/我的暱稱 阿明\n"
+    "　→ 再加一個稱呼；服事表寫暱稱也認得出是你\n"
+    "・/我的ID　→ 你自己的 LINE ID\n"
+    "・/群組ID　→ 這個聊天室的 ID\n"
+    "・/我的權限　→ 你目前的狀況（有沒有對應到同工…）\n"
+    "・/權限　→ 誰是管理員、哪個指令誰能用\n"
+    "・/說明　→ 這段說明（/help、/? 也可以）\n"
+    "\n"
+    "🔐 要驗證碼（驗證碼只給管理員）\n"
+    "・/設定　→ 改機器人設定（收集名單、自動發送、每幾週）\n"
+    "\n"
+    "👑 只有管理員\n"
+    "・/別周測試 1004　→ 試印 10/4 那一週，不會真的發出去\n"
+    "\n"
+    "打錯或不認得的指令我不會回，直接再打一次就好 🙏"
 )
+
+
+EVERYONE_COMMANDS = "/提醒、/我的名字、/我的暱稱、/我的ID、/群組ID、/說明、/權限、/我的權限"
+ADMIN_COMMANDS = "/別周測試"
+TEST_WEEK_USAGE = ("用法：/別周測試 1004\n（10/04、10-4、10月4日、2026/10/4 都可以）\n"
+                   "會在你打指令的這個聊天室試印那一天起這一週的提醒：不會發到其他群組、不會 @ 別的群組的人、"
+                   "也不影響每週的自動提醒。想測得安靜一點就私訊機器人打。")
 
 
 @dataclass(frozen=True, slots=True)
 class Command:
     name: str
     arg: str = ""
+
+
+def is_admin(settings: Settings, user_id: str, chat_id: str) -> bool:
+    """管理員 = 設定裡「管理員 LINE ID」的那個人，或在那個管理員群組裡講話。
+
+    刻意不做多層權限：真正會影響大家的事（改設定）另外靠一次性驗證碼，驗證碼也只送給管理員。
+    """
+    admin = (settings.line.admin_target_id or "").strip()
+    return bool(admin) and admin in {user_id, chat_id}
+
+
+def permissions_text(settings: Settings, admin_name: str = "") -> str:
+    """「/權限」的回覆：誰是管理員、哪個指令誰能用、機器人不會做什麼。"""
+    admin = (settings.line.admin_target_id or "").strip()
+    if admin:
+        who = f"{admin_name}（{admin[:5]}…{admin[-4:]}）" if admin_name else f"{admin[:5]}…{admin[-4:]}"
+        admin_line = f"・管理員：{who}"
+        admin_note = "　拿得到驗證碼、收得到錯誤通知、可以打 /別周測試、可以開管理網頁"
+    else:
+        admin_line = "・管理員：還沒設定 ⚠️"
+        admin_note = "　請管理員私訊機器人「/我的ID」，把 ID 填到管理網頁「設定 → 通知管理員」"
+    switches = (f"收集名單「{'開' if settings.chat.collect_names else '關'}」"
+                f"・自動發送「{'開' if settings.schedule.enabled else '關'}」"
+                f"・用 LINE 改設定「{'開' if settings.chat.remote_config else '關'}」")
+    return "\n".join([
+        "🔐 誰可以做什麼",
+        "",
+        admin_line,
+        admin_note,
+        "",
+        "・大家（這個群組裡任何人）：",
+        f"　{EVERYONE_COMMANDS}",
+        "　這些最多只是「回一句話」或「記一個等管理員確認的名字」，改不到設定、也不會發訊息給別人。",
+        "　/提醒 是免費的回覆，所以不限制誰能打。",
+        "",
+        "・要驗證碼才算數：/設定",
+        "　驗證碼只會送給管理員，等於要管理員同意才改得動。",
+        "",
+        f"・只有管理員：{ADMIN_COMMANDS}",
+        "",
+        "・我不會做的事：不回一般聊天、不刪訊息、不拿聊天內容做別的事。",
+        "　我只記「誰講過話」的名字和 ID，用來對應服事表上的名字。",
+        "",
+        f"・目前狀態：{switches}",
+        "　要改：打「/設定」，或請管理員開管理網頁。",
+    ])
 
 
 def parse_command(text: str) -> Command | None:
@@ -235,6 +317,14 @@ class WebhookHandler:
                 chat.reply(f"{who}你的 LINE ID：\n{chat.user_id}")
         elif command.name == "my_name":
             self._register_name(command.arg, chat)
+        elif command.name == "my_nickname":
+            self._register_nickname(command.arg, chat)
+        elif command.name == "permissions":
+            chat.reply(permissions_text(chat.settings, self._admin_name(chat.settings)))
+        elif command.name == "my_permissions":
+            self._my_permissions(chat)
+        elif command.name == "test_week":
+            self._test_week(command.arg, chat)
         elif command.name == "config":
             self._request_change(command.arg, chat)
         elif command.name == "verify":
@@ -266,8 +356,8 @@ class WebhookHandler:
             chat.reply(f"沒有「{key}」這個設定。\n\n{describe_options(settings)}")
             return
         if not value_text:
-            chat.reply(f"「{option.key}」目前是「{option.current(settings)}」。\n"
-                       f"要修改請打：/設定 {option.key}=新的值（{option.hint}）")
+            chat.reply(f"「{option.key}」現在是「{option.current(settings)}」。\n{option.hint}\n\n"
+                       f"要改請打：/設定 {option.key}=新的值")
             return
         try:
             value = option.parse(value_text)
@@ -364,6 +454,106 @@ class WebhookHandler:
         line_name = f"（LINE 名稱：{chat.display_name}）" if chat.display_name else ""
         chat.reply(f"收到 🙌 已登記：{real_name}{line_name}\n"
                    "管理員確認後，服事提醒就會用這個名字對到你。打錯的話再打一次就會蓋掉。")
+
+    def _register_nickname(self, arg: str, chat: _Chat) -> None:
+        """「/我的暱稱 阿明」：一個人可以有好幾個稱呼，都會對到同一位同工。
+
+        不動他登記的真實姓名（那是 /我的名字），也一樣要管理員在「同工名單」頁按一下才會生效。
+        """
+        if not chat.user_id:
+            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
+            return
+        nickname = re.sub(r"\s+", " ", arg).strip().strip("「」『』\"'").strip()
+        history = self.service.history
+        if not nickname:
+            current = nicknames_of(history.person(chat.user_id))
+            status = f"你登記過的暱稱：{'、'.join(current)}（等管理員確認）\n" if current else ""
+            chat.reply(f"{status}登記方式：打「/我的暱稱 阿明」（換成大家平常怎麼叫你）\n"
+                       "服事表寫這個稱呼時，機器人就知道是你。真實姓名請用「/我的名字」。")
+            return
+        if not chat.settings.chat.collect_names:
+            chat.reply("目前沒有開放登記名字 🙏 需要登記時，管理員會先打開這個功能。")
+            return
+        if len(nickname) > NAME_MAX_LENGTH:
+            chat.reply(f"暱稱太長了（最多 {NAME_MAX_LENGTH} 個字），請再打一次。")
+            return
+        problem = history.claim_nickname(chat.user_id, nickname)
+        if problem == "duplicate":
+            chat.reply(f"「{nickname}」你已經登記過了 👌 等管理員確認就會生效。")
+            return
+        if problem == "full":
+            chat.reply(f"一個人最多登記 {MAX_NICKNAMES} 個暱稱 🙏 想換的話，請管理員到「同工名單」頁調整。")
+            return
+        log.info("LINE 帳號登記暱稱：%s → %s（%s）", chat.display_name or "?", nickname, chat.user_id)
+        chat.reply(f"收到 🙌 已登記暱稱：{nickname}\n"
+                   "管理員確認後，服事表寫這個稱呼也會對到你。還有別的叫法就再打一次「/我的暱稱 ○○」。")
+
+    # ------------------------------------------------------------------ /權限、/我的權限
+
+    def _members(self) -> list[Member]:
+        try:
+            return MemberTable(self.service.paths.members_file).load().items
+        except ChurchBotError as exc:
+            log.error("讀同工名單失敗：%s", exc)
+            return []
+
+    def _admin_name(self, settings: Settings) -> str:
+        """管理員的名字（先看同工名單，再看 LINE 名稱）；查不到就空字串。"""
+        admin = (settings.line.admin_target_id or "").strip()
+        if not admin:
+            return ""
+        if member := next((m for m in self._members() if m.line_user_id == admin), None):
+            return member.name
+        return (self.service.history.person(admin) or {}).get("display_name", "")
+
+    def _my_permissions(self, chat: _Chat) -> None:
+        if not chat.user_id:
+            chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的權限」。")
+            return
+        person = self.service.history.person(chat.user_id) or {}
+        member = next((m for m in self._members() if m.line_user_id == chat.user_id), None)
+        admin = is_admin(chat.settings, chat.user_id, chat.chat_id)
+        lines = ["👤 你的狀況", "",
+                 f"・LINE 名稱：{chat.display_name or '（抓不到）'}",
+                 f"・你的 LINE ID：{chat.user_id}"]
+        if member is None:
+            lines += ["・同工名單：還沒對應到你 ⚠️ 提醒不會 @ 你",
+                      "　打「/我的名字 你的真實姓名」登記，管理員確認後就 @ 得到了"]
+        else:
+            aliases = f"（其他寫法：{'、'.join(member.aliases)}）" if member.aliases else ""
+            lines.append(f"・同工名單：{member.name}{aliases}")
+            lines.append("・提醒會 @ 到你 ✅")
+            if not member.active:
+                lines.append("・目前是「停用」狀態，被排到服事時機器人會提醒管理員")
+        if claimed := (person.get("real_name") or ""):
+            lines.append(f"・你登記的姓名：{claimed}（等管理員確認）")
+        if nicks := nicknames_of(person):
+            lines.append(f"・你登記的暱稱：{'、'.join(nicks)}（等管理員確認）")
+        lines += ["", f"・身分：{'管理員 👑' if admin else '一般成員'}",
+                  f"・你可以打：{EVERYONE_COMMANDS}" + (f"、{ADMIN_COMMANDS}" if admin else ""),
+                  "・每個指令誰能用：打「/權限」"]
+        chat.reply("\n".join(lines))
+
+    # ------------------------------------------------------------------ /別周測試（純預覽，見 service.preview_for）
+
+    def _test_week(self, arg: str, chat: _Chat) -> None:
+        if not is_admin(chat.settings, chat.user_id, chat.chat_id):
+            extra = ("請管理員來打。" if chat.settings.line.admin_target_id
+                     else "（目前還沒設定管理員：請到管理網頁「設定 → 通知管理員」填好管理員的 LINE ID。）")
+            chat.reply(f"「/別周測試」只有管理員可以用 🙏{extra}\n大家都可以打「/提醒」看這一週的服事。")
+            return
+        if not arg:
+            chat.reply(TEST_WEEK_USAGE)
+            return
+        day = parse_user_date(arg, self.service.now(chat.settings).date())
+        if day is None:
+            chat.reply(f"看不懂日期「{arg}」🤔\n{TEST_WEEK_USAGE}")
+            return
+        messages, note = self.service.preview_for(day, chat.chat_id)
+        if not messages:
+            chat.reply(note)
+            return
+        chat.messenger.reply_texts(chat.reply_token, [*messages, note])
 
     def _report_new_members(self, event: dict, chat_id: str, kind: str, reply_token: str,
                             messenger: LineMessenger) -> None:

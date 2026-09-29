@@ -138,6 +138,8 @@ class Planner:
                         seen.add(raw)
                         plan.people.append(person)
                     self._check_person(plan, person, when, a.role, mention_on)
+                    for one in person.team_people:  # 小團裡的每一位也要檢查（停用、沒有 userId…）
+                        self._check_person(plan, one, when, f"{a.role}・{person.display}", mention_on)
         if self.directory.is_empty and plan.people:
             plan.add(Severity.INFO, "no_members", "同工名單是空的，名字會照服事表原樣顯示",
                      "不需要 @ 人、名字也不用換的話，可以不設定同工名單。")
@@ -145,8 +147,15 @@ class Planner:
     def _check_person(self, plan: Plan, p: Person, when: str, role: str, mention_on: bool) -> None:
         if self.directory.is_empty:
             return
+        if p.team is not None:
+            if not p.team.active:
+                plan.add(Severity.WARNING, "inactive_team",
+                         f"小團「{p.team.name}」在小團名單是「停用」，但 {when} 被排了「{role}」",
+                         "確認服事表是不是要換團；這一團還在服事的話，把小團名單的「啟用」改回「是」。")
+            return  # 團裡的每一位由呼叫端逐一檢查
         if not p.matched:
-            if self.behavior.warn_unknown_names:
+            # 小團成員對不到，讀名單時（directory.validate_teams）已經整份報過一次，這裡不重複
+            if self.behavior.warn_unknown_names and not p.via_team:
                 guess = f"可能是：{'、'.join(p.suggestions)}？" if p.suggestions else ""
                 plan.add(Severity.WARNING, "unknown_name", f"服事表上的「{p.raw}」在同工名單找不到（{when} {role}）",
                          f"{guess}到「同工名單」頁把它新增，或設成某人的「其他寫法」。訊息仍會照原樣送出。")

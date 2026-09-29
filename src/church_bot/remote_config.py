@@ -102,14 +102,14 @@ class RemoteOption:
 
 OPTIONS: tuple[RemoteOption, ...] = (
     RemoteOption("收集名單", ("collect_member", "collect_members", "collect_names", "collect", "名字登記", "登記名字"),
-                 "開 = 大家可以打 /我的名字 登記真實姓名", _parse_switch, _show_switch, _set_collect_names,
-                 lambda s: s.chat.collect_names),
+                 "開 = 大家可以打「/我的名字」「/我的暱稱」登記；關 = 不開放登記",
+                 _parse_switch, _show_switch, _set_collect_names, lambda s: s.chat.collect_names),
     RemoteOption("自動發送", ("schedule", "schedule_enabled", "auto_send"),
-                 "關 = 暫停每週自動提醒（例如放假）", _parse_switch, _show_switch, _set_schedule,
-                 lambda s: s.schedule.enabled, reschedule=True),
+                 "開 = 每週自動提醒大家；關 = 暫停自動提醒（例如放假）",
+                 _parse_switch, _show_switch, _set_schedule, lambda s: s.schedule.enabled, reschedule=True),
     RemoteOption("每幾週", ("every_n_weeks", "weeks", "頻率"),
-                 "1～8，每幾週發送一次（往後看幾天會自動跟著調長）", _parse_weeks, str, _set_every_n_weeks,
-                 lambda s: s.schedule.every_n_weeks, reschedule=True),
+                 "填 1～8：隔幾週提醒一次（機器人會自動多往後看幾天，中間幾週的服事不會漏掉）",
+                 _parse_weeks, str, _set_every_n_weeks, lambda s: s.schedule.every_n_weeks, reschedule=True),
 )
 
 
@@ -128,9 +128,18 @@ def parse_assignment(arg: str) -> tuple[str, str]:
 
 
 def describe_options(settings: Settings) -> str:
-    lines = ["⚙️ 可以用 LINE 修改的設定："]
-    lines += [f"・{o.key}：目前「{o.current(settings)}」— {o.hint}" for o in OPTIONS]
-    lines += ["", f"用法：/設定 {OPTIONS[0].key}=開", "每次修改都要輸入寄給管理員的一次性驗證碼。"]
+    minutes = int(CODE_TTL.total_seconds() // 60)
+    lines = [f"⚙️ 用 LINE 可以改的設定（共 {len(OPTIONS)} 項）", ""]
+    for option in OPTIONS:
+        lines += [f"・{option.key}：現在是「{option.current(settings)}」", f"　{option.hint}"]
+    lines += [
+        "",
+        "怎麼改（兩步）：",
+        f"① 打「/設定 {OPTIONS[0].key}=開」",
+        f"② 機器人會給管理員一組 6 位數驗證碼；請管理員告訴你，再打「/驗證 123456」（{minutes} 分鐘內有效）",
+        "",
+        "不想改了就打「/取消」。想知道誰能改什麼，打「/權限」。",
+    ]
     return "\n".join(lines)
 
 

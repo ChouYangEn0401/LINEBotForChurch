@@ -1,4 +1,5 @@
-"""對照表（CSV）讀寫：``config/targets.csv``（LINE 群組）與 ``config/members.csv``（同工名單）。
+"""對照表（CSV）讀寫：``config/targets.csv``（LINE 群組）、``config/members.csv``（同工名單）與
+``config/teams.csv``（小團）。
 
 為什麼用 CSV：
 * 用 Excel / Numbers / Google Sheet / 記事本都能開，看得見、改得動。
@@ -22,7 +23,7 @@ from pathlib import Path
 from typing import Callable, Generic, Iterable, TypeVar
 
 from church_bot.errors import TableError
-from church_bot.models import Issue, Member, Severity, Target
+from church_bot.models import Issue, Member, Severity, Target, Team
 
 LINE_ID_RE = re.compile(r"^[CUR][0-9a-f]{32}$")
 # 網頁、Webhook 可能同時「讀 → 改 → 存」同一張表；同一個程式裡用這把鎖排隊
@@ -300,6 +301,53 @@ class MemberTable(CsvTable[Member]):
                         "服事表寫這個名字時只會對到第一位，請把其中一個改掉。",
                     ))
                 owner.setdefault(k, m.name)
+
+
+# --------------------------------------------------------------------------- teams.csv
+
+
+class TeamTable(CsvTable[Team]):
+    """小團名單。沒有這個檔案也完全正常（不用小團功能就不會用到）。"""
+
+    title = "小團"
+    columns = (
+        Column("name", "小團名稱", ("團名", "小團", "名稱", "name", "team"), required=True),
+        Column("aliases", "其他寫法", ("別名", "簡稱", "aliases", "alias")),
+        Column("members", "成員", ("團員", "組員", "同工", "members")),
+        Column("active", "啟用", ("active", "使用中")),
+        Column("note", "備註", ("note", "說明")),
+    )
+
+    def load(self) -> TableResult[Team]:
+        if not self.path.exists():
+            return TableResult([], [])  # 選用功能：沒建立過不算問題
+        return super().load()
+
+    def from_row(self, row: dict[str, str], line_no: int, issues: list[Issue]) -> Team | None:
+        name = row.get("name", "")
+        if not name:
+            issues.append(self._issue(Severity.WARNING, "team_no_name", f"第 {line_no} 列沒有填小團名稱，已略過"))
+            return None
+        active = parse_bool(row.get("active", ""), default=True)
+        return Team(
+            name=name, aliases=parse_list(row.get("aliases", "")), members=parse_list(row.get("members", "")),
+            active=True if active is None else active, note=row.get("note", ""),
+        )
+
+    def to_row(self, t: Team) -> list[str]:
+        return [t.name, fmt_list(t.aliases), fmt_list(t.members), fmt_bool(t.active), t.note]
+
+    def validate_all(self, items: list[Team], issues: list[Issue]) -> None:
+        owner: dict[str, str] = {}
+        for t in items:
+            for key in {t.name, *t.aliases}:
+                k = key.strip()
+                if k in owner and owner[k] != t.name:
+                    issues.append(self._issue(
+                        Severity.WARNING, "team_dup_name", f"「{k}」同時出現在「{owner[k]}」和「{t.name}」",
+                        "服事表寫這個名稱時只會對到第一個小團，請把其中一個改掉。",
+                    ))
+                owner.setdefault(k, t.name)
 
 
 def upsert(items: list[T], new: T, key: Callable[[T], str], original_key: str | None = None) -> list[T]:

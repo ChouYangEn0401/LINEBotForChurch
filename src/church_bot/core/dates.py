@@ -83,6 +83,24 @@ def parse_date(text: str, today: dt.date) -> dt.date | None:
     return None
 
 
+_YYYYMMDD = re.compile(r"^(?P<y>\d{4})(?P<m>\d{2})(?P<d>\d{2})$")
+_MMDD = re.compile(r"^(?P<m>\d{1,2})(?P<d>\d{2})$")
+
+
+def parse_user_date(text: str, today: dt.date) -> dt.date | None:
+    """人在 LINE 上打的日期：1004、10/04、10月4日、2026/10/4…
+
+    比 ``parse_date`` 多吃「純數字」的寫法（1004 = 10/04、904 = 9/04、20261004 = 2026/10/04），
+    因為在手機上打字時懶得打斜線。同樣看不懂就回傳 None。
+    """
+    s = (text or "").translate(_FULLWIDTH).strip()
+    if m := _YYYYMMDD.match(s):
+        return _safe(int(m["y"]), int(m["m"]), int(m["d"]))
+    if m := _MMDD.match(s):
+        return infer_year(int(m["m"]), int(m["d"]), today)
+    return parse_date(s, today)
+
+
 # --------------------------------------------------------------------------- formatting
 
 _TOKENS = {

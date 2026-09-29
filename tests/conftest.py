@@ -91,7 +91,7 @@ def client(paths: Paths):
     from church_bot.config import load_settings, save_settings
     from church_bot.web.app import create_app
 
-    for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv"):
+    for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv", "teams.example.csv"):
         (paths.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
     (paths.root / ".env.example").write_bytes((REPO_ROOT / ".env.example").read_bytes())
     cmd_init(paths, None)

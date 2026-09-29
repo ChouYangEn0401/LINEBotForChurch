@@ -74,7 +74,7 @@
 - **每月**：看「❓ 說明 → 🩺 系統檢查」的 LINE 本月額度。
 - **每季**：排好下一期服事表（程式會在剩 14 天時提醒）。
 - **更新程式**：拿到新版（`git pull` 或直接覆蓋檔案）後，再執行一次 `1-install`，不會覆蓋任何設定。
-- **備份**：`config/` 底下的 `settings.yaml`、`targets.csv`、`members.csv`（有用實驗功能的話加上 `org.csv`），還有 `.env`（機密，另外保管）。
+- **備份**：`config/` 底下的 `settings.yaml`、`targets.csv`、`members.csv`、`teams.csv`（有用實驗功能的話加上 `org.csv`），還有 `.env`（機密，另外保管）。
   有在收集 LINE 帳號的話也備份 `data/church_bot.db`（刪掉會忘記送過什麼、收集到但還沒對應的 LINE 帳號；已經對應到同工名單的不受影響）。
 - **出問題**：把 `data/church_bot.log` 傳給維護的人。
 

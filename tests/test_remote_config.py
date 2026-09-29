@@ -185,9 +185,9 @@ def test_listing_and_unknown_options_need_no_code(line_handler):
         body = say(text)
         line_handler.handle(body, sign(body))
     replies = [t for _, t in FakeLine.replies]
-    assert "可以用 LINE 修改的設定" in replies[0]
+    assert "用 LINE 可以改的設定" in replies[0]
     assert "沒有「密碼」這個設定" in replies[1]
-    assert "目前是「關」" in replies[2]
+    assert "現在是「關」" in replies[2]
     assert "本來就是「關」" in replies[3]
     assert line_handler.verifier.current() is None
 

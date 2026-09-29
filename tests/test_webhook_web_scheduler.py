@@ -4,10 +4,10 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from church_bot.config import ScheduleSettings, Settings, save_settings
-from church_bot.models import OutgoingMessage
+from church_bot.models import Member, OutgoingMessage
 from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
 from church_bot.service import BotService
-from church_bot.tables import TargetTable
+from church_bot.tables import MemberTable, TargetTable
 from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
 from tests.conftest import write
 from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
@@ -58,6 +58,16 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
     ("/names Amy", None),
     ("/現在提醒", Command("notify_now")),
     ("/立即提醒", Command("notify_now")),
+    ("/help", Command("help")),  # /說明、/help、/? 都是同一個指令
+    ("/?", Command("help")),
+    ("/？", Command("help")),  # 全形問號
+    ("/我的暱稱 阿明", Command("my_nickname", "阿明")),
+    ("/暱稱=阿明", Command("my_nickname", "阿明")),
+    ("/權限", Command("permissions")),
+    ("/我的權限", Command("my_permissions")),
+    ("/別周測試 1004", Command("test_week", "1004")),
+    ("/別週測試 10/04", Command("test_week", "10/04")),
+    ("/別周測試", Command("test_week", "")),
 ])
 def test_parse_command(text, expected):
     assert parse_command(text) == expected
@@ -128,6 +138,127 @@ def test_notify_now_with_nothing_to_send_only_replies_the_reason(handler, paths,
     body = say("/現在提醒", user=uid("f"))
     handler.handle(body, sign(body))
     assert FakeLine.replies[-1] == ("r", "這週已經送過了")
+
+
+# ------------------------------------------------------------------ 暱稱（一個人可以有很多個稱呼）
+
+
+def test_nicknames_add_up_instead_of_replacing_each_other(handler, paths):
+    from church_bot.core.history import MAX_NICKNAMES, nicknames_of
+
+    turn_on_name_collection(paths)
+    for text in ("/我的名字 陳小明", "/我的暱稱 阿明", "/我的暱稱 小明哥", "/我的暱稱 阿明"):
+        body = say(text)
+        handler.handle(body, sign(body))
+    person = handler.service.history.person(uid())
+    assert person["real_name"] == "陳小明"  # /我的暱稱 不會動到登記的真實姓名
+    assert nicknames_of(person) == ("阿明", "小明哥")
+    assert "已經登記過" in FakeLine.replies[-1][1]  # 同一個暱稱再打一次不會變兩筆
+
+    for i in range(MAX_NICKNAMES):
+        body = say(f"/我的暱稱 綽號{i}")
+        handler.handle(body, sign(body))
+    assert len(nicknames_of(handler.service.history.person(uid()))) == MAX_NICKNAMES
+    assert f"最多登記 {MAX_NICKNAMES} 個" in FakeLine.replies[-1][1]
+
+
+def test_nickname_needs_collection_to_be_on(handler, paths):
+    settings = Settings()
+    settings.chat.collect_names = False
+    save_settings(paths, settings)
+    body = say("/我的暱稱 阿明")
+    handler.handle(body, sign(body))
+    assert "沒有開放" in FakeLine.replies[-1][1]
+    assert handler.service.history.person(uid())["nicknames"] == ""
+
+
+def test_nickname_without_an_argument_lists_what_was_registered(handler, paths):
+    turn_on_name_collection(paths)
+    for text in ("/我的暱稱 阿明", "/我的暱稱"):
+        body = say(text)
+        handler.handle(body, sign(body))
+    assert "你登記過的暱稱：阿明" in FakeLine.replies[-1][1]
+
+
+# ------------------------------------------------------------------ /權限、/我的權限
+
+
+def test_permissions_command_names_the_admin_and_who_may_do_what(handler, paths):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    MemberTable(paths.members_file).save([Member("王大衛牧師", line_user_id=uid("f"))])
+
+    body = say("/權限", user=uid())
+    handler.handle(body, sign(body))
+    text = FakeLine.replies[-1][1]
+    assert "管理員：王大衛牧師" in text and uid("f") not in text  # 只露頭尾，不把整個 ID 貼在群組裡
+    assert "/提醒" in text and "只有管理員：/別周測試" in text and "要驗證碼才算數：/設定" in text
+
+
+def test_permissions_command_says_when_no_admin_is_set(handler):
+    body = say("/權限")
+    handler.handle(body, sign(body))
+    assert "管理員：還沒設定" in FakeLine.replies[-1][1]
+
+
+def test_my_permissions_shows_whether_the_person_can_be_tagged(handler, paths):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    MemberTable(paths.members_file).save([Member("陳小明", ("小明",), line_user_id=uid())])
+
+    body = say("/我的權限", user=uid())
+    handler.handle(body, sign(body))
+    mine = FakeLine.replies[-1][1]
+    assert "同工名單：陳小明（其他寫法：小明）" in mine and "提醒會 @ 到你" in mine
+    assert "身分：一般成員" in mine
+
+    body = say("/我的資料", user=uid("f"), token="r2")
+    handler.handle(body, sign(body))
+    admin_view = FakeLine.replies[-1][1]
+    assert "還沒對應到你" in admin_view and "管理員 👑" in admin_view and "/別周測試" in admin_view
+
+
+# ------------------------------------------------------------------ /別周測試（只有管理員）
+
+
+def test_test_week_is_admin_only(handler, paths):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    body = say("/別周測試 1004", user=uid())  # 一般成員
+    handler.handle(body, sign(body))
+    assert "只有管理員可以用" in FakeLine.replies[-1][1]
+
+
+def test_test_week_previews_the_given_week_for_the_admin(handler, paths, monkeypatch):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    seen: list = []
+
+    def fake_preview(self, day, chat_id=""):
+        seen.append((day, chat_id))
+        return [OutgoingMessage(text="10/4 那週的內容")], "🧪 試印結果"
+
+    monkeypatch.setattr(BotService, "preview_for", fake_preview)
+    body = say("/別周測試 1004", user=uid("f"))
+    handler.handle(body, sign(body))
+    (day, chat_id), = seen
+    assert (day.month, day.day, chat_id) == (10, 4, gid())  # 年份由「離今天最近」決定
+    assert FakeLine.replies[-2:] == [("r", "10/4 那週的內容"), ("r", "🧪 試印結果")]
+
+
+def test_test_week_explains_bad_and_missing_dates(handler, paths):
+    settings = Settings()
+    settings.line.admin_target_id = uid("f")
+    save_settings(paths, settings)
+    for text in ("/別周測試", "/別周測試 哪一天"):
+        body = say(text, user=uid("f"))
+        handler.handle(body, sign(body))
+    assert "用法：/別周測試 1004" in FakeLine.replies[-2][1]
+    assert "看不懂日期「哪一天」" in FakeLine.replies[-1][1]
 
 
 def test_message_from_group_is_remembered_as_a_person(handler, paths):

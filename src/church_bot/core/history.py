@@ -81,6 +81,7 @@ CREATE TABLE IF NOT EXISTS memberships (
 _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
     ("people", "real_name", "TEXT NOT NULL DEFAULT ''"),  # 本人用「/我的名字」登記的名字，等管理員確認
     ("people", "real_name_at", "TEXT NOT NULL DEFAULT ''"),
+    ("people", "nicknames", "TEXT NOT NULL DEFAULT ''"),  # 本人用「/我的暱稱」登記的稱呼（JSON 陣列），等管理員確認
     ("people", "ignored", "INTEGER NOT NULL DEFAULT 0"),  # 管理員按了「忽略」
     ("people", "profile_checked_at", "TEXT NOT NULL DEFAULT ''"),  # 上次向 LINE 查顯示名稱的時間
     ("chats", "member_count", "INTEGER"),
@@ -89,6 +90,18 @@ _MIGRATIONS: tuple[tuple[str, str, str], ...] = (
 
 
 REPLY_COVERS = dt.timedelta(days=2)  # 「/提醒」送過多久以內，排程時間到了內容沒變就不再 Push
+MAX_NICKNAMES = 5  # 一個人最多登記幾個暱稱（避免有人一直亂打）
+
+
+def nicknames_of(person: dict | None) -> tuple[str, ...]:
+    """把 people.nicknames 欄位（JSON 陣列）讀成 tuple；壞掉或空的都回傳空 tuple。"""
+    try:
+        values = json.loads((person or {}).get("nicknames") or "[]")
+    except ValueError:
+        return ()
+    if not isinstance(values, list):
+        return ()
+    return tuple(str(v).strip() for v in values if str(v).strip())
 
 
 def _now() -> str:
@@ -328,6 +341,37 @@ class History:
     def clear_real_name(self, user_id: str) -> None:
         with self._conn() as conn:
             conn.execute("UPDATE people SET real_name='', real_name_at='' WHERE user_id=?", (user_id,))
+
+    def claim_nickname(self, user_id: str, nickname: str) -> str:
+        """本人用「/我的暱稱」登記的稱呼：一個人可以有好幾個，不會蓋掉真實姓名。
+
+        回傳 ""（已加入）、"duplicate"（早就登記過了）或 "full"（超過 MAX_NICKNAMES）。
+        """
+        now = _now()
+        with self._conn() as conn:
+            row = conn.execute("SELECT nicknames FROM people WHERE user_id=?", (user_id,)).fetchone()
+            current = nicknames_of(dict(row) if row else None)
+            if any(n.casefold() == nickname.casefold() for n in current):
+                return "duplicate"
+            if len(current) >= MAX_NICKNAMES:
+                return "full"
+            payload = json.dumps([*current, nickname], ensure_ascii=False)
+            conn.execute(
+                "INSERT INTO people (user_id, first_seen, last_seen, nicknames) VALUES (?,?,?,?) "
+                "ON CONFLICT(user_id) DO UPDATE SET nicknames=excluded.nicknames, ignored=0",
+                (user_id, now, now, payload),
+            )
+        return ""
+
+    def drop_nickname(self, user_id: str, nickname: str = "") -> None:
+        """刪掉一個登記的暱稱（管理員處理過了）；``nickname`` 留空 = 全部清掉。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT nicknames FROM people WHERE user_id=?", (user_id,)).fetchone()
+            if row is None:
+                return
+            keep = [n for n in nicknames_of(dict(row)) if nickname and n != nickname]
+            conn.execute("UPDATE people SET nicknames=? WHERE user_id=?",
+                         (json.dumps(keep, ensure_ascii=False) if keep else "", user_id))
 
     def set_person_ignored(self, user_id: str, ignored: bool) -> None:
         with self._conn() as conn:

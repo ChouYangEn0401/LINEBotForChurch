@@ -1,8 +1,8 @@
 from church_bot.config import load_settings
 from church_bot.core.accounts import build_accounts
-from church_bot.core.history import History
-from church_bot.models import Member
-from church_bot.tables import MemberTable
+from church_bot.core.history import History, nicknames_of
+from church_bot.models import Member, Team
+from church_bot.tables import MemberTable, TeamTable
 from tests.conftest import gid, uid
 
 
@@ -113,3 +113,101 @@ def test_rename_refuses_to_collide_with_another_member(client, paths):
     r = client.post("/members/accounts/rename", data={"user_id": uid("7")})
     assert "已經是同工「陳小明」" in r.text
     assert "林美華" in members(paths)
+
+
+# ------------------------------------------------------------------ 其他寫法：一個一個加／刪
+
+
+def test_aliases_can_be_added_and_removed_one_at_a_time(client, paths):
+    client.post("/members/aliases/add", data={"name": "陳小明", "alias": "阿明"})
+    assert "阿明" in members(paths)["陳小明"].aliases
+    client.post("/members/aliases/remove", data={"name": "陳小明", "alias": "小明"})
+    stored = members(paths)["陳小明"]
+    assert "阿明" in stored.aliases and "小明" not in stored.aliases  # 其他的寫法留著，一人多名
+
+
+def test_alias_cannot_be_taken_from_someone_else(client, paths):
+    r = client.post("/members/aliases/add", data={"name": "陳小明", "alias": "美華"})
+    assert "已經是同工「林美華」" in r.text
+    assert "美華" not in members(paths)["陳小明"].aliases
+
+    r = client.post("/members/aliases/add", data={"name": "陳小明", "alias": "小明"})
+    assert "已經是「陳小明」的寫法" in r.text
+
+
+# ------------------------------------------------------------------ 登記的暱稱 → 其他寫法
+
+
+def nickname(paths, user: str, nick: str) -> None:
+    History(paths.db_file).claim_nickname(user, nick)
+
+
+def test_registered_nickname_becomes_an_alias_of_the_linked_member(client, paths):
+    seen(paths, uid("7"), "美美")
+    client.post("/members/accounts/link", data={"user_id": uid("7"), "member_name": "林美華"})
+    nickname(paths, uid("7"), "美美姐")
+    nickname(paths, uid("7"), "華姐")
+    page = client.get("/members").text
+    assert "暱稱 美美姐" in page and "加成其他寫法" in page
+
+    client.post("/members/accounts/nickname", data={"user_id": uid("7"), "nickname": "美美姐"})
+    assert "美美姐" in members(paths)["林美華"].aliases
+    assert nicknames_of(History(paths.db_file).person(uid("7"))) == ("華姐",)  # 處理過的就不再出現
+
+    client.post("/members/accounts/nickname/drop", data={"user_id": uid("7"), "nickname": "華姐"})
+    assert nicknames_of(History(paths.db_file).person(uid("7"))) == ()
+    assert "華姐" not in members(paths)["林美華"].aliases
+
+
+def test_nickname_needs_the_account_to_be_linked_first(client, paths):
+    seen(paths, uid("7"), "路人")
+    nickname(paths, uid("7"), "阿路")
+    r = client.post("/members/accounts/nickname", data={"user_id": uid("7"), "nickname": "阿路"})
+    assert "還沒對應到同工" in r.text
+    assert nicknames_of(History(paths.db_file).person(uid("7"))) == ("阿路",)
+
+
+def test_nickname_refuses_to_collide_with_another_member(client, paths):
+    seen(paths, uid("7"), "美美")
+    client.post("/members/accounts/link", data={"user_id": uid("7"), "member_name": "林美華"})
+    nickname(paths, uid("7"), "小明")  # 已經是陳小明的其他寫法
+    r = client.post("/members/accounts/nickname", data={"user_id": uid("7"), "nickname": "小明"})
+    assert "已經是同工「陳小明」" in r.text
+    assert "小明" not in members(paths)["林美華"].aliases
+
+
+# ------------------------------------------------------------------ 小團
+
+
+def teams(paths) -> dict[str, Team]:
+    return {t.name: t for t in TeamTable(paths.teams_file).load().items}
+
+
+def test_team_can_be_added_edited_and_deleted_from_the_web(client, paths):
+    client.post("/teams/save", data={"name": "青年實體團", "aliases": "青年團", "members": "張晨光、小明",
+                                     "active": "on", "note": "組合式"})
+    stored = teams(paths)["青年實體團"]
+    assert stored.aliases == ("青年團",) and stored.members == ("張晨光", "小明")
+    assert "青年實體團" in client.get("/members").text
+
+    client.post("/teams/save", data={"name": "青年小團", "members": "張晨光", "active": "on",
+                                     "original_name": "青年實體團"})
+    assert "青年實體團" not in teams(paths) and "青年小團" in teams(paths)
+
+    client.post("/teams/delete", data={"name": "青年小團"})
+    assert "青年小團" not in teams(paths)
+
+    for name in list(teams(paths)):  # 全部刪掉（不用小團功能的教會）畫面也要正常
+        client.post("/teams/delete", data={"name": name})
+    assert "還沒有任何小團" in client.get("/members").text
+
+
+def test_team_name_may_not_be_a_member_name(client, paths):
+    r = client.post("/teams/save", data={"name": "小明", "members": "林美華", "active": "on"})
+    assert "已經是同工「陳小明」" in r.text
+    assert "小明" not in teams(paths)
+
+
+def test_members_page_warns_about_team_members_who_are_not_on_the_list(client, paths):
+    client.post("/teams/save", data={"name": "新團", "members": "還沒登記的人", "active": "on"})
+    assert "的成員「還沒登記的人」不在同工名單上" in client.get("/members").text

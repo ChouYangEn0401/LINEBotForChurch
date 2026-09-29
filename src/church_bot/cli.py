@@ -24,7 +24,7 @@ from church_bot.core.planner import Plan
 from church_bot.errors import ChurchBotError
 from church_bot.logging_setup import setup_logging
 from church_bot.models import DeliveryStatus, RunReport, Severity
-from church_bot.tables import MemberTable, TargetTable, write_csv
+from church_bot.tables import MemberTable, TargetTable, TeamTable, write_csv
 
 DEMO_HEADER = ["日期", "聚會", "講員", "司會", "敬拜主領", "司琴", "音控", "投影", "招待", "備註"]
 DEMO_ROWS = [
@@ -74,8 +74,9 @@ def cmd_init(paths: Paths, _: argparse.Namespace) -> int:
     for table_cls, target, example in (
         (TargetTable, paths.targets_file, "targets.example.csv"),
         (MemberTable, paths.members_file, "members.example.csv"),
+        (TeamTable, paths.teams_file, "teams.example.csv"),
     ):
-        if not target.exists():
+        if not target.exists() and (paths.config_dir / example).exists():
             items = table_cls(paths.config_dir / example).load().items  # 透過讀寫轉成 Excel 看得懂的編碼
             table_cls(target).save(items)
             created.append(f"config/{target.name}")

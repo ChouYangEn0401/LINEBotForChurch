@@ -6,18 +6,20 @@
   <h2>🙋 同工名單</h2>
   <p>這一頁把三種「名字」接在一起：</p>
   <div class="flow">
-    <div class="flow-step"><strong>服事表上寫的</strong><span>小明、Ming、陳弟兄</span></div>
+    <div class="flow-step"><strong>服事表上寫的</strong><span>小明、Ming、陳弟兄、阿明…（同一個人可以有很多個寫法）</span></div>
     <div class="flow-arrow">→</div>
     <div class="flow-step"><strong>同工名單（真實姓名）</strong><span>陳小明</span></div>
     <div class="flow-arrow">↔</div>
     <div class="flow-step"><strong>LINE 帳號</strong><span>ID 永遠不變・LINE 名稱本人隨時會改</span></div>
   </div>
   <p class="muted"><strong>不設定也能發送</strong>（名字照服事表原樣顯示）。設定之後：綽號會換成正式名字、已經停用的人被排到會提醒你、訊息裡可以 @ 服事的人。
-    名單存在 <code>config/members.csv</code>，也可以用 Excel 改（<a href="/download/members.csv">下載一份</a>）。</p>
+    一個人要幾個稱呼都可以（暱稱、英文名、LINE 舊名稱…），只要不跟別人重複；服事表寫小團名稱的話看下面的
+    <a href="#teams">🎸 小團</a>。名單存在 <code>config/members.csv</code>，也可以用 Excel 改（<a href="/download/members.csv">下載一份</a>）。</p>
   <nav class="subnav">
     {% if unknown or pending %}<a href="#todo">📝 待處理（{{ unknown | length + pending | length }}）</a>{% endif %}
     <a href="#accounts">📱 LINE 帳號（{{ accounts | length }}）</a>
     <a href="#list">📋 同工名單（{{ members | length }}）</a>
+    <a href="#teams">🎸 小團（{{ teams | length }}）</a>
     <a href="#edit">➕ 新增同工</a>
   </nav>
   {% for i in issues if i.severity.value != "info" %}
@@ -85,7 +87,7 @@
   {% if accounts %}
   <div class="table-wrap">
   <table class="table">
-    <thead><tr><th>LINE 名稱 / ID</th><th>本人登記的名字</th><th>同工名單上的名字</th><th>在哪些群組</th><th>要怎麼處理</th></tr></thead>
+    <thead><tr><th>LINE 名稱 / ID</th><th>本人登記的名字 / 暱稱</th><th>同工名單上的名字</th><th>在哪些群組</th><th>要怎麼處理</th></tr></thead>
     <tbody>
     {% for a in accounts %}
       <tr class="{{ 'pending' if a.needs_review }}">
@@ -93,7 +95,19 @@
           <div class="id muted copy">{{ a.user_id }}</div>
           <div class="muted small">最後出現 {{ a.last_seen[:16] | replace("T", " ") }}</div></td>
         <td>{% if a.real_name %}<strong>{{ a.real_name }}</strong><div class="muted small">{{ a.real_name_at[:16] | replace("T", " ") }} 登記</div>
-            {% else %}<span class="muted">—</span>{% endif %}</td>
+            {% elif not a.pending_nicknames %}<span class="muted">—</span>{% endif %}
+            {% for nick in a.pending_nicknames %}
+              <div class="chip-row">
+                <span class="tag">暱稱 {{ nick }}</span>
+                <form method="post" action="/members/accounts/nickname" class="inline">
+                  <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
+                  <button type="submit" class="primary small">加成其他寫法</button></form>
+                <form method="post" action="/members/accounts/nickname/drop" class="inline">
+                  <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
+                  <button type="submit" class="secondary small">不要</button></form>
+              </div>
+            {% endfor %}
+            {% if a.pending_nicknames and not a.member %}<div class="muted small">要先「加入」或「對應」到同工，才能把暱稱加進去</div>{% endif %}</td>
         <td>{% if a.member %}{{ a.member.name }}{% elif a.match %}<span class="muted">名單上有「{{ a.match.name }}」</span>
             {% else %}<span class="muted">（不在名單上）</span>{% endif %}</td>
         <td class="small">{{ a.chat_names or "—" }}</td>
@@ -162,7 +176,20 @@
       {% for m in members %}
         <tr class="{{ '' if m.active else 'disabled' }}">
           <td><strong>{{ m.name }}</strong></td>
-          <td>{{ fmt_list(m.aliases) }}</td>
+          <td>
+            {% for alias in m.aliases %}
+              <span class="chip alias">{{ alias }}
+                <form method="post" action="/members/aliases/remove" class="inline">
+                  <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="alias" value="{{ alias }}">
+                  <button type="submit" class="link-button" title="移除「{{ alias }}」">✕</button></form>
+              </span>
+            {% endfor %}
+            <form method="post" action="/members/aliases/add" class="inline-form">
+              <input type="hidden" name="name" value="{{ m.name }}">
+              <input type="text" name="alias" size="8" placeholder="加一個稱呼" aria-label="{{ m.name }} 的其他寫法">
+              <button type="submit" class="secondary small">＋</button>
+            </form>
+          </td>
           <td>{% if m.line_user_id %}{{ line_names.get(m.line_user_id) or "（還沒看過他在群組講話）" }}
                 <div class="id muted copy">{{ m.line_user_id }}</div>
               {% else %}<span class="muted">—</span>{% endif %}</td>
@@ -182,6 +209,81 @@
   {% else %}
     <p>還沒有任何同工資料。可以用下面的表單新增，或從上面的「LINE 帳號」直接加入。</p>
   {% endif %}
+</section>
+
+<section class="card" id="teams">
+  <h2>🎸 小團（{{ teams | length }} 團）</h2>
+  <p>敬拜團常常是「一個小團一起上」，而不是主領一個人單帶。把小團的成員登記在這裡，
+    <strong>服事表那一格只要寫團名</strong>（例如「晨光實體團」），提醒就會自動列出人：</p>
+  <div class="flow">
+    <div class="flow-step"><strong>服事表寫</strong><span>晨光實體團</span></div>
+    <div class="flow-arrow">→</div>
+    <div class="flow-step"><strong>提醒顯示</strong><span>晨光實體團（張晨光、陳小明、許心怡）</span></div>
+  </div>
+  <p class="muted">成員填<strong>同工名單上的名字或其他寫法</strong>，用「、」隔開；有登記 LINE 帳號的成員照樣會被 @。
+    不用小團功能就留空著，完全不影響發送。名單存在 <code>config/teams.csv</code>（<a href="/download/teams.csv">下載一份</a>）。</p>
+  {% for i in team_issues if i.severity.value != "info" %}
+    <div class="flash {{ 'error' if i.severity.value == 'error' else 'warn' }}">{{ severity_icon[i.severity.value] }} {{ i.message }}
+      {% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</div>
+  {% endfor %}
+  {% if teams %}
+  <div class="table-wrap">
+    <table class="table">
+      <thead><tr><th>小團名稱</th><th>其他寫法</th><th>成員</th><th>狀態</th><th>備註</th><th></th></tr></thead>
+      <tbody>
+      {% for t in teams %}
+        <tr class="{{ '' if t.active else 'disabled' }}">
+          <td><strong>{{ t.name }}</strong></td>
+          <td>{{ fmt_list(t.aliases) }}</td>
+          <td>{{ fmt_list(t.members) or "（還沒填成員）" }}</td>
+          <td>{% if t.active %}<span class="tag ok">使用中</span>{% else %}<span class="tag off">停用</span>{% endif %}</td>
+          <td class="small">{{ t.note }}</td>
+          <td class="nowrap">
+            <a class="button secondary" href="/members?edit_team={{ t.name | urlencode }}#team-edit">編輯</a>
+            <form method="post" action="/teams/delete" class="inline" data-confirm="確定刪除小團「{{ t.name }}」嗎？">
+              <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="danger">刪除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    <p>還沒有任何小團。用下面的表單新增（例如「晨光實體團」、成員填「張晨光、陳小明、許心怡」）。</p>
+  {% endif %}
+</section>
+
+{% set t = editing_team %}
+<section class="card" id="team-edit">
+  <h2>{% if t %}✏️ 編輯小團「{{ t.name }}」{% else %}➕ 新增小團{% endif %}</h2>
+  <form method="post" action="/teams/save" class="form-grid">
+    <input type="hidden" name="original_name" value="{{ t.name if t else '' }}">
+
+    <label for="team_name">小團名稱</label>
+    <input type="text" id="team_name" name="name" required value="{{ t.name if t else '' }}" placeholder="服事表上怎麼寫就怎麼填，例如：晨光實體團">
+
+    <label for="team_aliases">其他寫法</label>
+    <input type="text" id="team_aliases" name="aliases" value="{{ fmt_list(t.aliases) if t else '' }}" placeholder="例如：晨光團、晨光">
+    <div class="help">服事表上可能出現的簡稱，用「、」隔開。不能跟同工的名字重複（重複的話會對到那個人）。</div>
+
+    <label for="team_members">成員</label>
+    <input type="text" id="team_members" name="members" value="{{ fmt_list(t.members) if t else '' }}" placeholder="例如：張晨光、陳小明、許心怡">
+    <div class="help">填同工名單上的名字或其他寫法，用「、」隔開。不在同工名單上的也能填，只是沒辦法 @ 他。</div>
+
+    <label>狀態</label>
+    <div class="checkbox-row"><input type="checkbox" id="team_active" name="active" {{ "checked" if (t is none or t.active) }}>
+      <label for="team_active">還在服事（取消勾選 = 停用：如果又被排到，會提醒管理員）</label></div>
+
+    <label for="team_note">備註</label>
+    <input type="text" id="team_note" name="note" value="{{ t.note if t else '' }}">
+
+    <div></div>
+    <div class="actions">
+      <button type="submit" class="primary">💾 儲存</button>
+      {% if t %}<a class="button secondary" href="/members#teams">取消編輯</a>{% endif %}
+    </div>
+  </form>
 </section>
 
 {% set m = editing %}

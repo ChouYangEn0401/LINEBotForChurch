@@ -2,7 +2,7 @@ import datetime as dt
 
 import pytest
 
-from church_bot.core.dates import format_date, infer_year, parse_date
+from church_bot.core.dates import format_date, infer_year, parse_date, parse_user_date
 from tests.conftest import TODAY
 
 SEP13 = dt.date(2026, 9, 13)
@@ -38,3 +38,21 @@ def test_format_date_tokens() -> None:
     assert format_date(SEP13, "%-m/%-d（{weekday}）") == "9/13（週日）"
     assert format_date(SEP13, "%Y/%m/%d {weekday_long}") == "2026/09/13 星期日"
     assert format_date(SEP13, "民國{roc_year}年%-m月%-d日") == "民國115年9月13日"
+
+
+# ------------------------------------------------------------------ 人打在 LINE 上的日期（/別周測試）
+
+
+@pytest.mark.parametrize("text", ["1004", "10/04", "10-4", "10月4日", "2026/10/4", "20261004", "１００４"])
+def test_parse_user_date_accepts_what_people_type(text: str) -> None:
+    assert parse_user_date(text, TODAY) == dt.date(2026, 10, 4)
+
+
+def test_parse_user_date_infers_the_nearest_year() -> None:
+    assert parse_user_date("904", TODAY) == dt.date(2026, 9, 4)  # 3 位數字 = M + DD
+    assert parse_user_date("0103", dt.date(2026, 12, 28)) == dt.date(2027, 1, 3)
+
+
+@pytest.mark.parametrize("text", ["", "亂打", "10", "1350", "2026/2/30"])
+def test_parse_user_date_rejects_garbage(text: str) -> None:
+    assert parse_user_date(text, TODAY) is None

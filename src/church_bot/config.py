@@ -229,6 +229,10 @@ class Paths:
         return self.config_dir / "members.csv"
 
     @property
+    def teams_file(self) -> Path:
+        return self.config_dir / "teams.csv"
+
+    @property
     def org_file(self) -> Path:
         return self.config_dir / "org.csv"
 

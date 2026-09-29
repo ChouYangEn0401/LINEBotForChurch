@@ -48,13 +48,23 @@
 
 <section class="card" id="commands">
   <h2>💬 在 LINE 可以打的指令</h2>
-  <p class="muted">指令都要用「/」開頭（全形「／」也可以），一般聊天機器人一律不回應，不會吵到群組。這些回覆都不計入 LINE 每月額度。</p>
+  <p class="muted">指令都要用「/」開頭（全形「／」也可以），一般聊天機器人一律不回應，不會吵到群組。這些回覆都不計入 LINE 每月額度。
+    <strong>權限只有兩層</strong>：大家都能用的指令最多只會「回一句話」或「記一個等管理員確認的名字」；會影響大家的（改設定、試印別週）
+    靠「驗證碼只給管理員」和「管理員 LINE ID」擋住。群組裡打 <span class="kbd">/權限</span> 就會把這些印出來。</p>
   <div class="table-wrap">
   <table class="table">
     <tr><td class="nowrap"><span class="kbd">/群組ID</span></td><td>回覆這個群組的 ID（填到 LINE 群組用）</td></tr>
     <tr><td class="nowrap"><span class="kbd">/我的ID</span></td><td>回覆你自己的 ID（填到設定就能收管理員通知）</td></tr>
     <tr><td class="nowrap"><span class="kbd">/我的名字 王小明</span></td><td>登記自己的真實姓名，管理員在「🙋 同工名單 → LINE 帳號」確認後就對得上服事表。
       管理員要先按「開放登記」才能用；登記錯了再打一次就會蓋掉。</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/我的暱稱 阿明</span></td><td>多登記一個稱呼（<strong>不會</strong>蓋掉真實姓名，一個人最多 5 個）。
+      管理員在「🙋 同工名單 → LINE 帳號」按「加成其他寫法」後，服事表寫這個稱呼也對得到同一個人。</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/權限</span><br><span class="kbd">/我的權限</span></td>
+      <td>誰是管理員、哪個指令誰能用、機器人不會做什麼；<span class="kbd">/我的權限</span> 是打的人自己的狀況
+        （有沒有對應到同工、@ 得不到就會告訴他怎麼登記）。</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/別周測試 1004</span></td><td>👑 <strong>只有管理員</strong>能用。試印「10/4 起這一週」的提醒
+      （<span class="kbd">10/04</span>、<span class="kbd">10月4日</span>、<span class="kbd">2026/10/4</span> 都可以）：只回在你打指令的那個聊天室，
+      不會發到其他群組、不寫紀錄、也不影響每週的自動提醒。想安靜測就私訊機器人打。</td></tr>
     <tr><td class="nowrap"><span class="kbd">/設定</span></td><td>列出可以用 LINE 修改的設定（收集名單、自動發送、每幾週）。
       例如 <span class="kbd">/設定 收集名單=開</span>：機器人會把一次性驗證碼私訊給管理員並顯示在執行程式的視窗，
       再打 <span class="kbd">/驗證 123456</span>（或直接打 6 個數字）才會生效；<span class="kbd">/取消</span> 可以取消。
@@ -62,7 +72,7 @@
     <tr><td class="nowrap"><span class="kbd">/提醒</span></td><td>🆓 誰都可以打（只在「LINE 群組」頁啟用的群組有效）。立刻用「回覆」免費送出這週的提醒——
       跟首頁的「📤 立刻發送」效果一樣，但那顆按鈕是 Push（會計費），這個指令不會。
       排程時間前 2 天內打過、內容也一樣，排程就自動略過，不會重複扣費（更早打的不算，排程照常送）；服事表改過才會再送新的。舊的「/現在提醒」也還能用。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/說明</span></td><td>列出這些指令</td></tr>
+    <tr><td class="nowrap"><span class="kbd">/說明</span></td><td>列出這些指令（<span class="kbd">/help</span>、<span class="kbd">/?</span> 也可以）</td></tr>
   </table>
   </div>
 </section>

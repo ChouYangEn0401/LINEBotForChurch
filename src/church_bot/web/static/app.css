@@ -168,3 +168,12 @@ legend { font-weight: 700; padding: 0 6px; }
 .actions.compact .button, .actions.compact button { padding: 3px 10px; font-size: 13px; }
 textarea.short { min-height: 70px; font-family: inherit; }
 details > summary { cursor: pointer; margin: 8px 0; }
+
+/* 其他寫法、登記的暱稱：一個一個加／刪 */
+button.small, .button.small { padding: 3px 10px; font-size: 13px; border-radius: 8px; }
+.chip.alias { display: inline-flex; align-items: center; gap: 4px; margin: 0 2px 4px 0; }
+.chip form { margin: 0; }
+.chip .link-button { color: var(--muted); text-decoration: none; }
+.chip .link-button:hover { color: var(--err); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0; }
+.inline-form input[type=text] { width: auto; }

@@ -9,13 +9,17 @@ LINE 顯示名稱本人隨時會改。所以對應關係存在同工名單的 LI
 * link     — 還沒對應，但登記的名字（或 LINE 名稱）就是名單上某位還沒有 LINE 帳號的同工 → 「對應」
 * conflict — 登記的名字在名單上，但那位同工已經對應到另一個 LINE 帳號 → 要人工判斷
 * add      — 名單上沒有這個人 → 「加入」成新同工
+
+本人用「/我的暱稱」登記的稱呼另外算：一個人可以有好幾個，管理員按一下就會變成他的「其他寫法」
+（``pending_nicknames`` = 還沒加進名單的那些）。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from church_bot.core.directory import Directory, normalize_name
+from church_bot.core.history import nicknames_of
 from church_bot.models import Member
 
 ACTION_ORDER = {"rename": 0, "link": 1, "conflict": 2, "add": 3, "linked": 4}
@@ -33,6 +37,15 @@ class LineAccount:
     member: Member | None = None  # 用 userId 對應到的同工
     match: Member | None = None  # 還沒對應，但名字對得上的同工
     matched_by: str = ""  # "real_name" 或 "display_name"
+    nicknames: tuple[str, ...] = field(default=())  # 本人用「/我的暱稱」登記的稱呼
+
+    @property
+    def pending_nicknames(self) -> tuple[str, ...]:
+        """還沒加進同工名單的暱稱（已經是他的名字或其他寫法的就不算）。"""
+        if self.member is None:
+            return self.nicknames
+        known = {normalize_name(k) for k in (self.member.name, *self.member.aliases)}
+        return tuple(n for n in self.nicknames if normalize_name(n) not in known)
 
     @property
     def action(self) -> str:
@@ -45,8 +58,8 @@ class LineAccount:
 
     @property
     def needs_review(self) -> bool:
-        """本人登記了名字、而且管理員還沒處理。"""
-        return bool(self.real_name) and self.action != "linked"
+        """本人登記了名字或暱稱、而且管理員還沒處理。"""
+        return bool(self.pending_nicknames) or (bool(self.real_name) and self.action != "linked")
 
     @property
     def proposed_name(self) -> str:
@@ -73,6 +86,6 @@ def build_accounts(people: list[dict], members: list[Member]) -> list[LineAccoun
             user_id=p["user_id"], display_name=p.get("display_name") or "", real_name=p.get("real_name") or "",
             real_name_at=p.get("real_name_at") or "", chat_names=p.get("chat_names") or "",
             last_seen=p.get("last_seen") or "", ignored=bool(p.get("ignored")),
-            member=member, match=match, matched_by=matched_by,
+            member=member, match=match, matched_by=matched_by, nicknames=nicknames_of(p),
         ))
     return sorted(accounts, key=lambda a: (not a.needs_review, ACTION_ORDER[a.action]))

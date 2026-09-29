@@ -31,11 +31,13 @@ from church_bot.config import (
     update_env_file, update_settings,
 )
 from church_bot.core.accounts import build_accounts
-from church_bot.core.directory import Directory, normalize_name
+from church_bot.core.directory import Directory, normalize_name, validate_teams
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
-from church_bot.models import TRIGGER_ZH, DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target
+from church_bot.models import (
+    TRIGGER_ZH, DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target, Team,
+)
 from church_bot.org import KIND_SUGGESTIONS, OrgReport, OrgTable, OrgUnit, build_org
 from church_bot.remote_config import Verifier
 from church_bot.scheduler import BotScheduler
@@ -43,7 +45,8 @@ from church_bot.service import QUOTA_LOW_THRESHOLD, BotService
 from church_bot.sources import SOURCE_KINDS_ZH
 from church_bot.sources.google_public import parse_sheet_url
 from church_bot.tables import (
-    LINE_ID_RE, TABLE_WRITE_LOCK, MemberTable, TargetTable, describe_line_id, fmt_list, parse_list, remove, upsert,
+    LINE_ID_RE, TABLE_WRITE_LOCK, MemberTable, TargetTable, TeamTable, describe_line_id, fmt_list, parse_list,
+    remove, upsert,
 )
 from church_bot.web.overview import Step, build_steps
 from church_bot.webhook import SignatureError, WebhookHandler
@@ -339,8 +342,9 @@ def create_app(paths: Paths) -> FastAPI:
     # ------------------------------------------------------------------ members
 
     @ui.get("/members", response_class=HTMLResponse)
-    def members_page(request: Request, edit: str = ""):
+    def members_page(request: Request, edit: str = "", edit_team: str = ""):
         result = MemberTable(paths.members_file).load()
+        teams = TeamTable(paths.teams_file).load()
         try:
             unknown, unknown_error = service.unknown_names(), ""
         except ChurchBotError as exc:
@@ -355,7 +359,9 @@ def create_app(paths: Paths) -> FastAPI:
                     unknown_error=unknown_error, editing=editing, collect_names=collect_names,
                     accounts=[a for a in accounts if not a.ignored],
                     ignored_accounts=[a for a in accounts if a.ignored],
-                    line_names={a.user_id: a.display_name for a in accounts})
+                    line_names={a.user_id: a.display_name for a in accounts},
+                    teams=teams.items, editing_team=next((t for t in teams.items if t.name == edit_team), None),
+                    team_issues=[*teams.issues, *validate_teams(teams.items, result.items)])
 
     @ui.post("/members/save")
     def members_save(name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
@@ -378,6 +384,53 @@ def create_app(paths: Paths) -> FastAPI:
             table = MemberTable(paths.members_file)
             table.save(remove(table.load().items, name, key=lambda m: m.name))
         return _redirect("/members", f"已刪除「{name}」")
+
+    # --- 其他寫法（一個人可以有很多個稱呼，一次加一個 / 刪一個） ---
+
+    def _change_aliases(name: str, change, fragment: str = "#list"):  # noqa: ANN001
+        """把某位同工的「其他寫法」換成 change(他, 全部同工) 算出來的結果。
+
+        ``change`` 回傳 (新的其他寫法, 不行的原因)；有原因就不存檔。
+        這裡回傳「要給瀏覽器的錯誤畫面」或 None（成功）。
+        """
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            member = next((m for m in items if m.name == name), None)
+            if member is None:
+                return _redirect(f"/members{fragment}", f"同工名單裡找不到「{name}」", "error")
+            aliases, problem = change(member, items)
+            if problem:
+                return _redirect(f"/members{fragment}", problem, "error")
+            table.save([replace(m, aliases=aliases) if m is member else m for m in items])
+        return None
+
+    @ui.post("/members/aliases/add")
+    def alias_add(name: str = Form(...), alias: str = Form(...)):
+        alias = alias.strip()
+        if not alias:
+            return _redirect("/members#list", "請填要新增的寫法", "error")
+
+        def change(member: Member, items: list[Member]):
+            if any(normalize_name(a) == normalize_name(alias) for a in (member.name, *member.aliases)):
+                return member.aliases, f"「{alias}」已經是「{member.name}」的寫法了"
+            others = [m for m in items if m is not member]
+            if (owner := Directory(others).lookup(alias)) is not None:
+                return member.aliases, f"「{alias}」已經是同工「{owner.name}」的名字或其他寫法，不能重複"
+            return (*member.aliases, alias), ""
+
+        if bad := _change_aliases(name, change):
+            return bad
+        return _redirect("/members#list", f"已把「{alias}」加成「{name}」的其他寫法")
+
+    @ui.post("/members/aliases/remove")
+    def alias_remove(name: str = Form(...), alias: str = Form(...)):
+        def change(member: Member, _items: list[Member]):
+            return tuple(a for a in member.aliases if a != alias), ""
+
+        if bad := _change_aliases(name, change):
+            return bad
+        return _redirect("/members#list", f"已把「{alias}」從「{name}」的其他寫法移除")
 
     # --- LINE 帳號 ↔ 同工名單（按鈕說明見 core/accounts.py） ---
 
@@ -444,9 +497,32 @@ def create_app(paths: Paths) -> FastAPI:
         service.history.clear_real_name(user_id)
         return _redirect("/members#accounts", f"已把「{current.name}」改名成「{new_name}」（舊名字留在「其他寫法」）")
 
+    @ui.post("/members/accounts/nickname")
+    def account_nickname(user_id: str = Form(...), nickname: str = Form(...)):
+        """本人用「/我的暱稱」登記的稱呼：加進他對應的同工的「其他寫法」。"""
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            member = next((m for m in items if m.line_user_id == user_id), None)
+            if member is None:
+                return _redirect("/members#accounts", "這個 LINE 帳號還沒對應到同工，請先按「加入」或「對應」", "warn")
+            if (owner := Directory([m for m in items if m is not member]).lookup(nickname)) is not None:
+                return _redirect("/members#accounts", f"「{nickname}」已經是同工「{owner.name}」的名字或其他寫法，"
+                                                     "請先確認是不是同一個人", "error")
+            if not any(normalize_name(a) == normalize_name(nickname) for a in (member.name, *member.aliases)):
+                table.save([replace(m, aliases=(*m.aliases, nickname)) if m is member else m for m in items])
+        service.history.drop_nickname(user_id, nickname)
+        return _redirect("/members#accounts", f"已把「{nickname}」加成「{member.name}」的其他寫法")
+
+    @ui.post("/members/accounts/nickname/drop")
+    def account_nickname_drop(user_id: str = Form(...), nickname: str = Form(...)):
+        service.history.drop_nickname(user_id, nickname)
+        return _redirect("/members#accounts", f"已忽略登記的暱稱「{nickname}」（同工名單不變）")
+
     @ui.post("/members/accounts/ignore")
     def account_ignore(user_id: str = Form(...)):
         service.history.clear_real_name(user_id)
+        service.history.drop_nickname(user_id)  # 登記的暱稱一起放掉，不然還是會一直排在待處理
         linked = any(m.line_user_id == user_id for m in MemberTable(paths.members_file).load().items)
         if linked:  # 已經是同工：只是不採用這次登記的名字，帳號本身照樣列出來
             return _redirect("/members#accounts", "已略過這次登記的名字，同工名單不變")
@@ -490,6 +566,33 @@ def create_app(paths: Paths) -> FastAPI:
                 msg = f"已把「{raw}」設成「{member_name}」的其他寫法"
             table.save(items)
         return _redirect("/members", msg)
+
+    # ------------------------------------------------------------------ 小團（config/teams.csv）
+
+    @ui.post("/teams/save")
+    def teams_save(name: str = Form(""), aliases: str = Form(""), members: str = Form(""),
+                   active: str = Form(""), note: str = Form(""), original_name: str = Form("")):
+        name = name.strip()
+        if not name:
+            return _redirect("/members#teams", "請填小團名稱", "error")
+        team = Team(name=name, aliases=parse_list(aliases), members=parse_list(members),
+                    active=active == "on", note=note.strip())
+        directory = Directory(MemberTable(paths.members_file).load().items)
+        for key in (team.name, *team.aliases):  # 團名撞到人名 → 服事表寫這個只會對到那個人
+            if (owner := directory.lookup(key)) is not None:
+                return _redirect("/members#teams", f"「{key}」已經是同工「{owner.name}」的名字或其他寫法，"
+                                                   "服事表寫這個只會對到那個人，請換一個寫法", "error")
+        with TABLE_WRITE_LOCK:
+            table = TeamTable(paths.teams_file)
+            table.save(upsert(table.load().items, team, key=lambda t: t.name, original_key=original_name or None))
+        return _redirect("/members#teams", f"已儲存小團「{name}」")
+
+    @ui.post("/teams/delete")
+    def teams_delete(name: str = Form(...)):
+        with TABLE_WRITE_LOCK:
+            table = TeamTable(paths.teams_file)
+            table.save(remove(table.load().items, name, key=lambda t: t.name))
+        return _redirect("/members#teams", f"已刪除小團「{name}」")
 
     # ------------------------------------------------------------------ settings
 
@@ -655,7 +758,8 @@ def create_app(paths: Paths) -> FastAPI:
 
     @ui.get("/download/{name}")
     def download(name: str):
-        files = {"targets.csv": paths.targets_file, "members.csv": paths.members_file}
+        files = {"targets.csv": paths.targets_file, "members.csv": paths.members_file,
+                 "teams.csv": paths.teams_file}
         if name not in files or not files[name].exists():
             raise HTTPException(404, "找不到檔案")
         return FileResponse(files[name], filename=name, media_type="text/csv")
