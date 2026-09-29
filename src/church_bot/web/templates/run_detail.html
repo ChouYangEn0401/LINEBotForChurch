@@ -4,33 +4,49 @@
 {% block content %}
 {% set problems = r.issues | rejectattr("severity", "equalto", "info") | list %}
 {% set infos = r.issues | selectattr("severity", "equalto", "info") | list %}
-{% call ui.page_head("發送結果", r.started_at[:19] | replace("T", " ") ~ "・" ~ trigger_zh.get(r.trigger, r.trigger) ~ ("・預覽（沒有真的送）" if r.dry_run else "")) %}
-  <a class="button ghost" href="/runs">← 回紀錄列表</a>
+{% set sent = r.deliveries | selectattr("status", "equalto", "sent") | list %}
+{% set failed = r.deliveries | selectattr("status", "equalto", "failed") | list %}
+{% set skipped = r.deliveries | selectattr("status", "equalto", "skipped") | list %}
+{% call ui.page_head("發送紀錄", "發送結果") %}
+  <a class="btn" href="/runs">← 回紀錄</a>
 {% endcall %}
+<div class="meta">
+  <span>時間 <b>{{ r.started_at[:19] | replace("T", " ") }}</b></span>
+  <span>觸發 <b>{{ trigger_zh.get(r.trigger, r.trigger) }}</b></span>
+  <span>送出 <b>{{ sent | length }}</b></span>
+  <span class="{{ 'bad' if failed }}">失敗 <b>{{ failed | length }}</b></span>
+  <span>略過 <b>{{ skipped | length }}</b></span>
+  {% if r.dry_run %}<span class="warn">預覽，沒有真的送</span>{% endif %}
+</div>
 
 {% if problems %}
-<section class="card">
-  <div class="card-head"><h2>問題與提醒（{{ problems | length }}）</h2></div>
-  {{ ui.issues(problems, show_link=true) }}
+<section class="panel {{ 'bad' if problems | selectattr('severity', 'equalto', 'error') | list }}">
+  <div class="panel-head">當時的問題 <span class="badge warn">{{ problems | length }}</span></div>
+  {{ ui.issues(problems) }}
 </section>
 {% endif %}
 
-<section class="card">
-  <div class="card-head"><h2>每個群組的結果</h2></div>
+<section class="stack">
+  <div class="sechead"><h2>每個群組的結果</h2><span class="badge">{{ r.deliveries | length }}</span></div>
   {% if r.deliveries %}
-  <div class="bubbles">
+  <div class="pcards">
     {% for d in r.deliveries %}
-      {{ ui.bubble(d.text, title=d.target_name, tag=status_zh.get(d.status, d.status), tag_class=d.status, detail=d.detail) }}
+    <div class="pcard">
+      <div class="top"><span>{{ d.target_name }}</span><span class="badge {{ d.status }}">{{ status_zh.get(d.status, d.status) }}</span></div>
+      {% if d.detail %}<div class="note">{{ d.detail }}</div>{% endif %}
+      <pre class="msg">{{ d.text }}</pre>
+    </div>
     {% endfor %}
   </div>
   {% else %}
-    {{ ui.empty("📭", "這次沒有任何要發送的訊息") }}
+  <div class="panel"><div class="panel-body muted">這次沒有任何要發送的訊息。</div></div>
   {% endif %}
 </section>
 
 {% if infos %}
-<details class="card"><summary>參考資訊（{{ infos | length }} 項）</summary>
-  {{ ui.issues(infos) }}
+<details class="panel">
+  <summary>參考資訊 <span class="badge">{{ infos | length }}</span></summary>
+  {{ ui.issues(infos, link=false) }}
 </details>
 {% endif %}
 {% endblock %}

@@ -379,23 +379,34 @@ def test_pages_render(client, url):
 
 
 def test_admin_mode_reveals_the_admin_pages_in_the_menu(client):
-    """「管理員模式」只是把進階頁面收起來（cookie），不是權限：頁面本身照樣打得開。"""
+    """右上角「切換身分」只是把進階頁面收起來（cookie），不是權限：頁面本身照樣打得開。"""
     assert client.get("/settings").status_code == 200
     r = client.post("/admin-mode", data={"enabled": "1", "next": "/settings#schedule"}, follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/settings?msg=")
     page = client.get("/").text
-    sidebar = page.split("<main")[0]
+    sidebar = page.split('<section id="view"')[0]
     assert '<body class="admin">' in page
     assert 'href="/settings"' in sidebar and 'href="/check"' in sidebar and 'href="/lab/org"' in sidebar
 
     r = client.post("/admin-mode", data={"enabled": "0", "next": "https://evil.example/"}, follow_redirects=False)
     assert r.headers["location"].startswith("/?")  # 外部網址不理它，回主控台
-    assert 'href="/settings"' not in client.get("/").text.split("<main")[0]
+    assert 'href="/settings"' not in client.get("/").text.split('<section id="view"')[0]
+
+
+def test_sidebar_status_says_how_each_page_is_doing(client):
+    """側欄每一項底下那行小字是「現在的狀況」，有事要處理的標數字（app.js 來問這一支）。"""
+    nav = client.get("/api/nav").json()
+    assert set(nav) >= {"index", "roster", "members", "targets", "runs", "settings"}
+    assert nav["roster"]["sub"].startswith("排到 ") and nav["roster"]["tone"] == "ok"
+    assert nav["members"]["sub"].startswith("13 位")
+    assert nav["targets"] == {"sub": "0 個會收到提醒", "count": 0, "tone": "bad"}  # 範例群組都還沒啟用
+    assert nav["index"]["tone"] == "bad" and nav["index"]["count"] >= 1
+    assert nav["runs"]["sub"] == "還沒有發送過"
 
 
 def test_roster_page_shows_the_sheet_and_what_the_program_read(client):
     page = client.get("/roster").text
-    assert "整張表（原封不動）" in page and "程式讀到的結果" in page and "roster.js" in page
+    assert "整張表" in page and "程式讀到的結果" in page and "換一份服事表" in page and "roster.js" in page
     data = client.get("/api/roster/sheet").json()
     sheet = data["sheets"][0]
     assert data["ok"] and sheet["layout"] == "wide" and sheet["header_row"] == 0 and sheet["date_axis"] == "row"
@@ -434,12 +445,15 @@ def test_roster_source_switches_to_google_after_a_successful_trial_read(client, 
     assert source.kind == "google_public" and source.spreadsheet_url == url and source.worksheet == ""
 
 
-def test_member_and_group_forms_are_separate_screens(client):
-    """清單和表單分開：一次只看一件事。清單頁沒有表單、表單頁只有表單。"""
-    assert "/members/save" not in client.get("/members").text
-    form = client.get("/members?new=1").text
-    assert "/members/save" in form and "回同工名單" in form
+def test_add_and_edit_forms_open_in_a_drawer_over_the_list(client):
+    """新增／編輯開在右邊的抽屜，清單留在後面；沒有在新增或編輯時，頁面上沒有表單。"""
+    assert "/members/save" not in client.get("/members").text and "data-drawer" not in client.get("/members").text
+    editing = client.get("/members?edit=陳小明").text
+    assert "data-drawer" in editing and "/members/save" in editing and 'value="陳小明"' in editing
+    assert 'id="member-table"' in editing  # 清單還在
     assert "/targets/save" not in client.get("/targets").text and "/targets/save" in client.get("/targets?new=1").text
+    assert "/teams/save" not in client.get("/members/teams").text
+    assert "/teams/save" in client.get("/members/teams?new=1").text
 
 
 def test_add_group_then_send_from_web(client, paths):

@@ -2,149 +2,135 @@
 {% import "_macros.html" as ui %}
 {% block title %}說明・服事提醒機器人{% endblock %}
 {% block content %}
-{% call ui.page_head("❓ 說明", "這個機器人在做什麼、每一頁是做什麼的、遇到狀況怎麼辦。") %}
-  <a class="button secondary" href="/check">🩺 系統檢查</a>
+{% call ui.page_head("紀錄", "❓ 說明", "Google Sheet 的服事表 → 每週固定時間 → 發到 LINE 群組。平常只要照常更新服事表，其他都不用做。") %}
+  <a class="btn" href="/check">系統檢查</a>
 {% endcall %}
 
-<nav class="subnav" aria-label="說明的段落">
-  <a href="#what">這是什麼</a><a href="#pages">每一頁做什麼</a><a href="#daily">平常要做什麼</a>
-  <a href="#setup">第一次設定</a><a href="#commands">LINE 指令</a><a href="#sheet">服事表怎麼排</a><a href="#faq">常見狀況</a>
+<nav class="seg">
+  <a href="#pages">每一頁做什麼</a><a href="#daily">想做的事去哪裡</a><a href="#setup">第一次設定</a>
+  <a href="#commands">LINE 指令</a><a href="#sheet">服事表怎麼排</a><a href="#faq">常見狀況</a>
 </nav>
 
-<section class="card" id="what">
-  <div class="card-head"><h2>這個機器人在做什麼</h2></div>
-  <p>每週固定時間，它會照順序做這四件事（主控台的「運作流程」就是這四步現在的狀況）：</p>
+<section class="stack">
+  <div class="eyebrow">每次發送做的四件事</div>
   <div class="flow">
-    <div class="flow-step"><strong>1. 📄 讀服事表</strong><span>Google Sheet 上這週誰服事什麼</span></div>
+    <div class="flow-step"><b>01 讀服事表</b><span>Google Sheet 上這週誰服事什麼</span></div>
     <div class="flow-arrow">→</div>
-    <div class="flow-step"><strong>2. 🙋 對名字</strong><span>綽號換成真實姓名、找出停用的人</span></div>
+    <div class="flow-step"><b>02 對名字</b><span>綽號換成正式名字、找出停用的人</span></div>
     <div class="flow-arrow">→</div>
-    <div class="flow-step"><strong>3. 👥 送到群組</strong><span>每個 LINE 群組收自己需要的部分</span></div>
+    <div class="flow-step"><b>03 送到群組</b><span>每個 LINE 群組收自己要的部分</span></div>
     <div class="flow-arrow">→</div>
-    <div class="flow-step"><strong>4. 🚨 有問題就通知</strong><span>LINE 私訊管理員＋主控台變紅／黃</span></div>
+    <div class="flow-step"><b>04 有問題就通知</b><span>LINE 私訊管理員，主控台標出來</span></div>
   </div>
 </section>
 
-<section class="card" id="pages">
-  <div class="card-head"><h2>每一頁是做什麼的</h2></div>
-  <div class="table-wrap">
-  <table class="table">
-    <thead><tr><th>頁面</th><th>什麼時候來這裡</th></tr></thead>
-    <tbody>
-      <tr><td class="nowrap"><a href="/">🏠 主控台</a></td><td>看現在正不正常、有沒有要處理的事、這週會發什麼；臨時想提早發或重發。</td></tr>
-      <tr><td class="nowrap"><a href="/roster">📄 服事表</a></td><td>看 Google Sheet 的內容和程式讀到的結果、打開 Google Sheet 去改、第一次接上服事表。</td></tr>
-      <tr><td class="nowrap"><a href="/members">🙋 同工名單</a></td><td>新同工、有人離開、服事表上的名字對不到。子頁「LINE 帳號」處理大家登記的名字；「小團」登記整團一起上的成員。</td></tr>
-      <tr><td class="nowrap"><a href="/targets">👥 LINE 群組</a></td><td>提醒要送到哪些群組；新群組、群組換了、某個群組只想收部分服事。</td></tr>
-      <tr><td class="nowrap"><a href="/runs">📜 發送紀錄</a></td><td>以前每一次發了什麼、有沒有失敗。</td></tr>
-      <tr><td class="nowrap">⚙️ 設定 <span class="tag off">管理員</span></td><td>發送時間、訊息樣子、通知誰、LINE 金鑰與網頁密碼。打開左下角「管理員模式」才會出現在選單。</td></tr>
-    </tbody>
-  </table>
+<section class="panel" id="pages">
+  <div class="panel-head">每一頁做什麼<span class="hint">側欄每一項底下的小字是它現在的狀況</span></div>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td><a href="/">🎯 主控台</a></td><td>現在會不會發、發什麼、有哪些事要處理。</td></tr>
+      <tr><td><a href="/roster">📄 服事表</a></td><td>Google Sheet 現在的內容、程式讀到什麼、換一份服事表。</td></tr>
+      <tr><td><a href="/members">🙋 同工名單</a></td><td>服事表上的名字對到誰。分頁「LINE 帳號」確認大家登記的名字；「小團」登記整團一起上的成員。</td></tr>
+      <tr><td><a href="/targets">👥 LINE 群組</a></td><td>提醒送到哪些群組、每個群組收哪些服事。</td></tr>
+      <tr><td><a href="/runs">📜 發送紀錄</a></td><td>以前每一次發了什麼、有沒有失敗。</td></tr>
+      <tr><td>⚙ 設定 <span class="badge warn">管理員</span></td><td>發送時間、訊息樣子、通知誰、金鑰與密碼。按右上角「切換身分」才會出現在側欄。</td></tr>
+    </table>
   </div>
-  <p class="muted small">「管理員模式」只是把進階的東西收起來，讓平常的畫面簡單一點；它不是權限。要限制誰能打開這個網頁，請到「設定 → 金鑰與密碼」設網頁密碼。</p>
+  <div class="panel-foot">「切換身分」只是把進階的頁面收起來，不是權限。要限制誰能開這個網頁，到「設定 → 金鑰與密碼」設網頁密碼。</div>
 </section>
 
-<section class="card" id="daily">
-  <div class="card-head"><h2>平常要做什麼</h2></div>
-  <p><strong>什麼都不用做。</strong>只要照常更新 Google Sheet 上的服事表就好。到了排程時間會自動發送。</p>
-  <div class="table-wrap">
-  <table class="table">
-    <thead><tr><th>想做的事</th><th>去哪裡</th></tr></thead>
-    <tbody>
-      <tr><td>看這週會發什麼</td><td><a href="/">主控台</a> 最下面的「這週會發的內容」</td></tr>
-      <tr><td>臨時想提早發、服事表改了想重發</td><td><a href="/">主控台</a> →「手動發送」；或在 LINE 群組打 <span class="kbd">/提醒</span>（免費）</td></tr>
+<section class="panel" id="daily">
+  <div class="panel-head">想做的事去哪裡</div>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td>看這週會發什麼</td><td><a href="/#sending">主控台 → 這次會發送</a></td></tr>
+      <tr><td>臨時想提早發、想重發</td><td><a href="/#sending">主控台 → 立刻發送</a>；或在 LINE 群組打 <span class="kbd">/提醒</span>（免費）</td></tr>
       <tr><td>新同工、有人離開、名字對不到</td><td><a href="/members">同工名單</a></td></tr>
-      <tr><td>有人在 LINE 登記了名字要確認</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a></td></tr>
+      <tr><td>有人在 LINE 登記了名字</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a></td></tr>
       <tr><td>新群組、群組換了</td><td><a href="/targets">LINE 群組</a></td></tr>
-      <tr><td>服事表換了新分頁</td><td><a href="/roster">服事表</a> →「換成別的 Google Sheet」</td></tr>
+      <tr><td>服事表換了新分頁</td><td><a href="/roster#connect">服事表 → 換一份服事表</a></td></tr>
       <tr><td>覺得怪怪的</td><td><a href="/check">系統檢查</a></td></tr>
-    </tbody>
-  </table>
+    </table>
   </div>
 </section>
 
-<section class="card" id="setup">
-  <div class="card-head"><h2>第一次設定（管理員，照順序做）</h2></div>
-  <ol class="steps">
-    <li><strong>申請 LINE 機器人</strong>：照 <code>docs/SETUP_LINE.md</code> 做，拿到 Channel access token，貼到「設定 → 🔑 金鑰與密碼」。</li>
-    <li><strong>接上服事表</strong>：Google Sheet 右上「共用」→ 改成「知道連結的使用者可以檢視」，複製網址，到「<a href="/roster">服事表</a>」頁貼上、按「接上」。</li>
-    <li><strong>把機器人邀進 LINE 群組</strong>：在群組打 <span class="kbd">/群組ID</span>，到「<a href="/targets">LINE 群組</a>」新增群組、貼上 ID，按「送測試訊息」確認收得到。</li>
-    <li><strong>設定管理員</strong>：私訊機器人 <span class="kbd">/我的ID</span>，把拿到的 ID 填到「設定 → 🔔 通知」，出問題才找得到你。</li>
-    <li><strong>排每週的發送</strong>：在 Telegram 機器人加每週四 20:00 的排程呼叫 <code>cli.bat send</code>（見 README）；或到「設定 → ⏰ 發送時間」開啟內建排程並讓程式一直開著。</li>
-    <li>按「<a href="/check">系統檢查</a>」，全部 ✅ 就完成了！回主控台看這週的預覽。</li>
-  </ol>
-</section>
-
-<section class="card" id="commands">
-  <div class="card-head"><h2>在 LINE 可以打的指令</h2></div>
-  <p class="muted small">指令都用「/」開頭（全形「／」也可以），一般聊天機器人一律不回應。這些回覆都不計入 LINE 每月額度。
-    群組裡打 <span class="kbd">/權限</span> 會列出誰是管理員、哪個指令誰能用。</p>
-  <div class="table-wrap">
-  <table class="table">
-    <tbody>
-    <tr><td class="nowrap"><span class="kbd">/提醒</span></td><td>🆓 誰都可以打。立刻把這週的提醒回在這個群組（免費）。排程前 2 天內打過、內容沒變，排程就自動略過，不會重複扣費。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/群組ID</span></td><td>回覆這個群組的 ID（新增 LINE 群組時用）。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/我的ID</span></td><td>回覆你自己的 ID（設定管理員時用）。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/我的名字 王小明</span></td><td>登記自己的真實姓名，管理員在「同工名單 → LINE 帳號」確認後就對得上服事表。要管理員先「開放登記」。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/我的暱稱 阿明</span></td><td>多登記一個稱呼（不會蓋掉真實姓名，最多 5 個）。管理員按「加成其他寫法」後，服事表寫這個也對得到。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/權限</span><br><span class="kbd">/我的權限</span></td><td>誰是管理員、哪個指令誰能用；<span class="kbd">/我的權限</span> 是打的人自己的狀況（有沒有對應到同工、@ 得到嗎）。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/別周測試 1004</span></td><td>👑 只有管理員。試印「10/4 起這一週」的提醒，只回在你打指令的聊天室，不寫紀錄、不影響排程。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/設定</span></td><td>列出可以用 LINE 改的設定。例如 <span class="kbd">/設定 收集名單=開</span>，會要一次性驗證碼（私訊管理員＋顯示在電腦上），再打 <span class="kbd">/驗證 123456</span> 才生效。網頁最上面也能直接「核准／拒絕」。</td></tr>
-    <tr><td class="nowrap"><span class="kbd">/說明</span></td><td>列出這些指令（<span class="kbd">/help</span>、<span class="kbd">/?</span> 也可以）。</td></tr>
-    </tbody>
-  </table>
+<section class="panel" id="setup">
+  <div class="panel-head">第一次設定<span class="hint">管理員照順序做一次</span></div>
+  <div class="panel-body">
+    <ol class="steps">
+      <li><b>申請 LINE 機器人</b>：照 <code>docs/SETUP_LINE.md</code> 拿到 Channel access token，貼到「設定 → 金鑰與密碼」。</li>
+      <li><b>接上服事表</b>：Google Sheet 開成「知道連結的使用者可以檢視」，到 <a href="/roster#connect">服事表 → 換一份服事表</a> 貼網址。</li>
+      <li><b>加群組</b>：把機器人邀進 LINE 群組，在群組打 <span class="kbd">/群組ID</span>，到 <a href="/targets?new=1">LINE 群組</a> 新增並貼上 ID，按「送測試訊息」。</li>
+      <li><b>設定管理員</b>：私訊機器人 <span class="kbd">/我的ID</span>，把 ID 填到「設定 → 出問題通知誰」。</li>
+      <li><b>排每週的發送</b>：在 Telegram 機器人加每週四 20:00 呼叫 <code>cli.bat send</code>（見 README）。</li>
+      <li><b>系統檢查</b>：<a href="/check">全部通過</a>就完成了。</li>
+    </ol>
   </div>
 </section>
 
-<section class="card" id="sheet">
-  <div class="card-head"><h2>服事表可以怎麼排</h2></div>
-  <p>三種常見排法都認得（設定選「自動判斷」就好）。表頭有「日期」兩個字最保險。</p>
-  <div class="table-wrap">
-  <table class="table">
-    <thead><tr><th>① 日期在左（最常見）</th><th>② 一列一項服事</th><th>③ 日期在上</th></tr></thead>
-    <tbody><tr>
-      <td><pre>日期   | 講員   | 司琴 | 音控
+<section class="panel" id="commands">
+  <div class="panel-head">在 LINE 可以打的指令<span class="hint">都用「/」開頭；這些回覆不扣 LINE 額度</span></div>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td><span class="kbd">/提醒</span></td><td>誰都能打。把這週的提醒回在這個群組。排程前 2 天內打過、內容沒變，排程就略過。</td></tr>
+      <tr><td><span class="kbd">/群組ID</span></td><td>回這個群組的 ID（新增 LINE 群組時用）。</td></tr>
+      <tr><td><span class="kbd">/我的ID</span></td><td>回你自己的 ID（設定管理員時用）。</td></tr>
+      <tr><td><span class="kbd">/我的名字 王小明</span></td><td>登記真實姓名，等管理員到「LINE 帳號」確認。要先開放登記。</td></tr>
+      <tr><td><span class="kbd">/我的暱稱 阿明</span></td><td>多登記一個稱呼，最多 5 個，不會蓋掉真實姓名。</td></tr>
+      <tr><td><span class="kbd">/權限</span> <span class="kbd">/我的權限</span></td><td>誰是管理員、哪個指令誰能用；自己有沒有對應到同工。</td></tr>
+      <tr><td><span class="kbd">/別周測試 1004</span></td><td>只有管理員。試印 10/4 那一週的提醒，只回在打指令的地方，不寫紀錄。</td></tr>
+      <tr><td><span class="kbd">/設定</span></td><td>用 LINE 改少數設定。每次都要驗證碼，再打 <span class="kbd">/驗證 123456</span> 才生效。</td></tr>
+      <tr><td><span class="kbd">/說明</span></td><td>列出這些指令。</td></tr>
+    </table>
+  </div>
+</section>
+
+<section class="panel" id="sheet">
+  <div class="panel-head">服事表怎麼排<span class="hint">三種排法都認得；表頭有「日期」最保險</span></div>
+  <div class="panel-body stack">
+    <div class="grid2">
+      <div class="stack"><b>日期在左（最常見）</b><pre class="msg mono">日期   | 講員   | 司琴 | 音控
 9/13   | 王牧師 | 小明 | 阿豪
-9/20   | 李傳道 | 美華 | 阿豪</pre></td>
-      <td><pre>日期 | 服事項目 | 人員
+9/20   | 李傳道 | 美華 | 阿豪</pre></div>
+      <div class="stack"><b>一列一項服事</b><pre class="msg mono">日期 | 服事項目 | 人員
 9/13 | 講員     | 王牧師
-9/13 | 司琴     | 小明</pre></td>
-      <td><pre>服事 | 9/13   | 9/20
+9/13 | 司琴     | 小明</pre></div>
+      <div class="stack"><b>日期在上</b><pre class="msg mono">服事 | 9/13   | 9/20
 講員 | 王牧師 | 李傳道
-司琴 | 小明   | 美華</pre></td>
-    </tr></tbody>
-  </table>
+司琴 | 小明   | 美華</pre></div>
+    </div>
+    <table class="help-table">
+      <tr><td>一格多人</td><td>用 <code>、</code> <code>,</code> <code>/</code> 或換行隔開。</td></tr>
+      <tr><td>沒有人</td><td>留空，或寫 <code>-</code>、<code>無</code>、<code>休</code>。</td></tr>
+      <tr><td>日期</td><td><code>2026/9/13</code>、<code>9/13</code>、<code>9月13日</code>、<code>115/9/13</code>（民國）都可以。</td></tr>
+      <tr><td>備註</td><td>加一欄「備註」，內容會出現在提醒裡。</td></tr>
+      <tr><td>一天兩場</td><td>加一欄「聚會」，同一個日期寫兩列。</td></tr>
+    </table>
   </div>
-  <ul class="plain">
-    <li>一格多人：用 <code>、</code> <code>,</code> <code>/</code> 或換行隔開都可以。</li>
-    <li>沒有人：留空，或寫 <code>-</code>、<code>無</code>、<code>休</code>。</li>
-    <li>日期寫法：<code>2026/9/13</code>、<code>9/13</code>、<code>9月13日</code>、<code>115/9/13</code>（民國）都可以。</li>
-    <li>要寫備註：加一欄「備註」，例如「聖餐主日」，會出現在提醒裡。</li>
-    <li>一天兩場聚會：加一欄「聚會」，同一個日期寫兩列；LINE 群組可以設定「只發這些聚會」。</li>
-  </ul>
-  <p class="muted small">到「<a href="/roster">服事表</a>」頁可以直接看到程式怎麼讀你現在這張表：哪一列是表頭、哪幾列讀到日期。</p>
+  <div class="panel-foot">到 <a href="/roster">服事表</a> 可以直接看程式怎麼讀你現在這張表。</div>
 </section>
 
-<section class="card" id="faq">
-  <div class="card-head"><h2>常見狀況</h2></div>
-  <details><summary><strong>主控台說「某某在同工名單找不到」</strong></summary>
-    <p>服事表上出現了新名字或打錯字。訊息還是會照原樣送出，不影響提醒。到「<a href="/members">同工名單</a>」最上面的「名字對不到」，選「新同工」或「就是某某」按確定就好。</p></details>
-  <details><summary><strong>想一次收集大家的真實姓名和 LINE 帳號</strong></summary>
-    <p>到「<a href="/members/accounts">同工名單 → LINE 帳號</a>」按「開放登記」，請大家在群組打「/我的名字 真實姓名」。登記的人會出現在同一張表，按「對應」「加入」或「改名」確認。收集完記得按「關閉登記」。</p></details>
-  <details><summary><strong>有人改了 LINE 名稱</strong></summary>
-    <p>不用處理。對應靠的是永遠不變的 LINE ID，不是 LINE 名稱。</p></details>
-  <details><summary><strong>有人離開教會 / 不再服事</strong></summary>
-    <p>到「同工名單」把他編輯成「停用」（比刪除好）。之後如果服事表不小心又排到他，會提醒管理員。</p></details>
-  <details><summary><strong>新的群組、群組換了</strong></summary>
-    <p>把機器人邀進新群組，它會自動出現在「LINE 群組」頁，按「加入」再勾「啟用」。舊群組不用了就改成停用或刪除。同工名單和 LINE 帳號跟群組無關，換群組不用重新收集。</p></details>
-  <details><summary><strong>服事表排到下一季、開了新分頁</strong></summary>
-    <p>最簡單：直接在同一個分頁往下加。如果開了新分頁，到「<a href="/roster">服事表</a>」→「換成別的 Google Sheet」貼新分頁的網址。服事表快用完時（預設剩 14 天），會先提醒管理員。</p></details>
-  <details><summary><strong>「這個月的 LINE 訊息額度用完了」</strong></summary>
-    <p>LINE 免費方案每月 200 則，推播到群組是按群組人數算。詳見 <code>docs/LINE_PRICING.md</code>。省錢的方法：讓大家在群組打 <span class="kbd">/提醒</span>（免費），排程就會自動略過。</p></details>
-  <details><summary><strong>「LINE token 錯誤或已失效」</strong></summary>
-    <p>到 LINE Developers 重新發行 Channel access token，貼到「設定 → 🔑 金鑰與密碼」。</p></details>
-  <details><summary><strong>在群組打「/群組ID」機器人沒反應</strong></summary>
-    <p>聊天指令、自動收集 LINE 帳號都需要開著 Webhook（雙擊 <code>3-open-webhook.bat</code>，見 <code>docs/SETUP_LINE.md</code>）。每週提醒本身完全不需要 Webhook。</p></details>
-  <details><summary><strong>電腦關機 / 睡眠會怎樣</strong></summary>
-    <p>由 Telegram 排程的話，只要 Telegram 機器人那台開著就會發。用內建排程的話，關機時不會發送；錯過時間後 12 小時內打開程式會自動補發（已經送過的不會重送）。</p></details>
+<section class="panel" id="faq">
+  <div class="panel-head">常見狀況</div>
+  <div class="panel-body">
+    <details class="faq"><summary>主控台說「某某在同工名單找不到」</summary>
+      <p>服事表出現了新名字或打錯字。訊息照原樣送出，不影響提醒。到 <a href="/members">同工名單</a> 最上面選他是誰。</p></details>
+    <details class="faq"><summary>想一次收集大家的真實姓名和 LINE 帳號</summary>
+      <p>到 <a href="/members/accounts">LINE 帳號</a> 按「開放登記」，請大家在群組打「/我的名字 真實姓名」，再逐一確認。收集完按「關閉登記」。</p></details>
+    <details class="faq"><summary>有人改了 LINE 名稱</summary>
+      <p>不用處理。對應靠的是不會變的 LINE ID。</p></details>
+    <details class="faq"><summary>有人離開教會、不再服事</summary>
+      <p>到同工名單把他改成「停用」，比刪除好：之後服事表又排到他，會提醒管理員。</p></details>
+    <details class="faq"><summary>新的群組、群組換了</summary>
+      <p>把機器人邀進新群組，它會出現在 <a href="/targets">LINE 群組</a> 最上面，按「加入」再勾「要收到提醒」。</p></details>
+    <details class="faq"><summary>服事表排到下一季、開了新分頁</summary>
+      <p>直接在同一個分頁往下加最簡單。開了新分頁就到 <a href="/roster#connect">服事表 → 換一份服事表</a> 貼新分頁的網址。</p></details>
+    <details class="faq"><summary>這個月的 LINE 額度用完了</summary>
+      <p>免費方案每月 200 則，送到群組按人數算。讓大家在群組打 <span class="kbd">/提醒</span>（免費），排程就會略過。詳見 <code>docs/LINE_PRICING.md</code>。</p></details>
+    <details class="faq"><summary>在群組打指令，機器人沒反應</summary>
+      <p>聊天指令要開著免費模式（雙擊 <code>3-open-webhook.bat</code>）。每週提醒不需要它。</p></details>
+    <details class="faq"><summary>電腦關機會怎樣</summary>
+      <p>由 Telegram 排程的話，Telegram 機器人那台開著就會發。用內建排程的話，錯過時間後 12 小時內打開程式會補發。</p></details>
+  </div>
 </section>
 {% endblock %}

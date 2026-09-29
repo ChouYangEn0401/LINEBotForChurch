@@ -3,90 +3,94 @@
 {% block title %}小團・服事提醒機器人{% endblock %}
 {% block content %}
 {% set t = editing_team %}
+{% call ui.page_head("同工名單", "🎸 小團", "服事表那一格寫團名 → 提醒自動列出團員。不用這個功能就空著，不影響發送。") %}
+  <a class="btn btn-primary" href="/members/teams?new=1">＋ 新增小團</a>
+{% endcall %}
+{{ ui.members_seg("teams", members | length, 0, teams | length) }}
+
+{% set team_problems = team_issues | rejectattr("severity.value", "equalto", "info") | list %}
+{% if team_problems %}
+<div class="panel"><div class="panel-head">小團要注意的地方 <span class="badge warn">{{ team_problems | length }}</span></div>
+  {{ ui.issues(team_problems, link=false) }}</div>
+{% endif %}
+
+<div class="flow">
+  <div class="flow-step"><b>服事表寫</b><span>晨光實體團</span></div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step"><b>提醒顯示</b><span>晨光實體團（張晨光、陳小明、許心怡）</span></div>
+</div>
+
+<section class="panel">
+  <div class="panel-head">小團 <span class="badge">{{ teams | length }}</span>
+    <span class="tools"><a class="btn btn-sm btn-ghost admin-only" href="/download/teams.csv">下載 CSV</a></span></div>
+  {% if teams %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>小團名稱</th><th>其他寫法</th><th>成員</th><th>狀態</th><th></th></tr></thead>
+      <tbody>
+      {% for t in teams %}
+        <tr class="{{ '' if t.active else 'off' }}">
+          <td><b>{{ t.name }}</b>{% if t.note %}<div class="sub">{{ t.note }}</div>{% endif %}</td>
+          <td><div class="chips">{% for a in t.aliases %}<span class="chip">{{ a }}</span>{% else %}<span class="muted">—</span>{% endfor %}</div></td>
+          <td>{{ fmt_list(t.members) or "（還沒填成員）" }}</td>
+          <td>{% if t.active %}<span class="badge ok">使用中</span>{% else %}<span class="badge">停用</span>{% endif %}</td>
+          <td class="ops">
+            <a class="btn btn-sm" href="/members/teams?edit_team={{ t.name | urlencode }}">編輯</a>
+            <form method="post" action="/teams/delete" data-confirm="確定刪除小團「{{ t.name }}」嗎？">
+              <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="btn btn-sm btn-danger">刪除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    {% call ui.empty("還沒有任何小團", "例如新增「晨光實體團」，成員填「張晨光、陳小明、許心怡」。") %}
+      <a class="btn btn-primary" href="/members/teams?new=1">＋ 新增小團</a>
+    {% endcall %}
+  {% endif %}
+</section>
+
 {% if show_form %}
-  {% call ui.page_head(("✏️ 編輯小團「" ~ t.name ~ "」") if t else "➕ 新增小團", "服事表那一格只要寫團名，提醒就會自動列出成員。") %}
-    <a class="button ghost" href="/members/teams">← 回小團</a>
-  {% endcall %}
-  <section class="card">
-    <form method="post" action="/teams/save" class="form-grid">
+<aside class="drawer" data-drawer data-close="/members/teams" aria-label="{{ '編輯小團' if t else '新增小團' }}">
+  <form method="post" action="/teams/save">
+    <div class="drawer-head">
+      <h3>{{ ("編輯小團「" ~ t.name ~ "」") if t else "新增小團" }}</h3>
+      <a class="icon-btn" href="/members/teams" title="關閉（Esc）" aria-label="關閉">✕</a>
+    </div>
+    <div class="drawer-body">
       <input type="hidden" name="original_name" value="{{ t.name if t else '' }}">
-
-      <label for="team_name">小團名稱</label>
-      <input type="text" id="team_name" name="name" required value="{{ t.name if t else '' }}" placeholder="服事表上怎麼寫就怎麼填，例如：晨光實體團" autofocus>
-
-      <label for="team_aliases">其他寫法</label>
-      <input type="text" id="team_aliases" name="aliases" value="{{ fmt_list(t.aliases) if t else '' }}" placeholder="例如：晨光團、晨光">
-      <div class="help">服事表上可能出現的簡稱，用「、」隔開。不能跟同工的名字重複（重複的話會對到那個人）。</div>
-
-      <label for="team_members">成員</label>
-      <input type="text" id="team_members" name="members" value="{{ fmt_list(t.members) if t else '' }}" placeholder="例如：張晨光、陳小明、許心怡" list="member-names">
-      <datalist id="member-names">{% for m in members %}<option value="{{ m.name }}">{% endfor %}</datalist>
-      <div class="help">填同工名單上的名字或其他寫法，用「、」隔開。不在名單上的也能填，只是沒辦法 @ 他。</div>
-
-      <label>狀態</label>
-      <div class="checkbox-row"><input type="checkbox" id="team_active" name="active" {{ "checked" if (t is none or t.active) }}>
-        <label for="team_active">還在服事</label></div>
-      <div class="help">取消勾選 = 停用：如果服事表又排到這一團，會提醒管理員。</div>
-
-      <label for="team_note">備註</label>
-      <input type="text" id="team_note" name="note" value="{{ t.note if t else '' }}">
-
-      <div></div>
-      <div class="actions">
-        <button type="submit" class="primary big">💾 儲存</button>
-        <a class="button ghost" href="/members/teams">取消</a>
+      <div class="ffield">
+        <label for="team_name"><span class="req">*</span>小團名稱</label>
+        <input type="text" id="team_name" name="name" required value="{{ t.name if t else '' }}" placeholder="晨光實體團" autofocus>
+        <span class="help">服事表上怎麼寫就怎麼填。</span>
       </div>
-    </form>
-  </section>
-{% else %}
-  {% call ui.page_head("🎸 小團", "敬拜團常常是「整個小團一起上」。把成員登記在這裡，服事表那一格只要寫團名。不用這個功能就空著，不影響發送。") %}
-    <a class="button primary" href="/members/teams?new=1">➕ 新增小團</a>
-  {% endcall %}
-  {{ ui.members_subnav("teams") }}
-  {{ ui.table_issues(team_issues) }}
-
-  <section class="card">
-    <div class="card-head"><h2>怎麼運作</h2></div>
-    <div class="flow">
-      <div class="flow-step"><strong>服事表寫</strong><span>晨光實體團</span></div>
-      <div class="flow-arrow">→</div>
-      <div class="flow-step"><strong>提醒顯示</strong><span>晨光實體團（張晨光、陳小明、許心怡）</span></div>
+      <div class="ffield">
+        <label for="team_aliases">其他寫法</label>
+        <input type="text" id="team_aliases" name="aliases" value="{{ fmt_list(t.aliases) if t else '' }}" placeholder="晨光團、晨光">
+        <span class="help">用「、」隔開。跟同工的名字重複的話，服事表寫這個會對到那個人，不會對到這一團。</span>
+      </div>
+      <div class="ffield">
+        <label for="team_members">成員</label>
+        <input type="text" id="team_members" name="members" value="{{ fmt_list(t.members) if t else '' }}" placeholder="張晨光、陳小明、許心怡" list="member-names">
+        <datalist id="member-names">{% for m in members %}<option value="{{ m.name }}">{% endfor %}</datalist>
+        <span class="help">填同工名單上的名字，用「、」隔開。不在名單上的也能填，只是 @ 不到他。</span>
+      </div>
+      <div class="ffield ffield-chk">
+        <label><input type="checkbox" name="active" {{ "checked" if (t is none or t.active) }}>
+          <span><b>還在服事</b><span class="help"><br>取消勾選 = 停用。停用的團又被排到，會提醒管理員。</span></span></label>
+      </div>
+      <div class="ffield">
+        <label for="team_note">備註</label>
+        <input type="text" id="team_note" name="note" value="{{ t.note if t else '' }}">
+      </div>
     </div>
-    <p class="muted small">成員填<strong>同工名單上的名字或其他寫法</strong>；有對應 LINE 帳號的成員照樣會被 @。</p>
-  </section>
-
-  <section class="card">
-    <div class="card-head">
-      <h2>小團（{{ teams | length }} 團）</h2>
-      <a class="button ghost small admin-only" href="/download/teams.csv">⬇ 下載 CSV</a>
+    <div class="drawer-foot">
+      <button type="submit" class="btn btn-primary">儲存</button>
+      <a class="btn btn-ghost" href="/members/teams">取消</a>
     </div>
-    {% if teams %}
-    <div class="table-wrap">
-      <table class="table">
-        <thead><tr><th>小團名稱</th><th>其他寫法</th><th>成員</th><th>狀態</th><th></th></tr></thead>
-        <tbody>
-        {% for t in teams %}
-          <tr class="{{ '' if t.active else 'disabled' }}">
-            <td><strong>{{ t.name }}</strong>{% if t.note %}<div class="muted small">{{ t.note }}</div>{% endif %}</td>
-            <td>{{ fmt_list(t.aliases) or "—" }}</td>
-            <td>{{ fmt_list(t.members) or "（還沒填成員）" }}</td>
-            <td>{% if t.active %}<span class="tag ok">使用中</span>{% else %}<span class="tag off">停用</span>{% endif %}</td>
-            <td class="nowrap actions-cell">
-              <a class="button secondary small" href="/members/teams?edit_team={{ t.name | urlencode }}">編輯</a>
-              <form method="post" action="/teams/delete" class="inline" data-confirm="確定刪除小團「{{ t.name }}」嗎？">
-                <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="danger small">刪除</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-      {% call ui.empty("🎸", "還沒有任何小團", "例如新增「晨光實體團」，成員填「張晨光、陳小明、許心怡」。") %}
-        <a class="button primary" href="/members/teams?new=1">➕ 新增小團</a>
-      {% endcall %}
-    {% endif %}
-  </section>
+  </form>
+</aside>
 {% endif %}
 {% endblock %}

@@ -1,84 +1,52 @@
-{#- 各頁共用的小零件：頁首、ⓘ 提示、問題清單、提示框、LINE 泡泡、同工名單子頁籤 -#}
+{#- 各頁共用的零件。每一頁的開頭都是同一個樣子：小標 → 標題 → 一句話（這一頁吃什麼、做什麼）。 -#}
 
-{% macro page_head(title, lead="") -%}
+{% macro page_head(eyebrow, title, lede="") -%}
 <header class="page-head">
-  <div class="page-head-text">
-    <h1 class="page-title">{{ title }}</h1>
-    {% if lead %}<p class="page-lead">{{ lead }}</p>{% endif %}
+  <div class="eyebrow">{{ eyebrow }}</div>
+  <div class="row">
+    <h1>{{ title }}</h1>
+    <span class="spacer"></span>
+    {% if caller %}{{ caller() }}{% endif %}
   </div>
-  {% if caller %}<div class="page-actions">{{ caller() }}</div>{% endif %}
+  {% if lede %}<p class="lede">{{ lede }}</p>{% endif %}
 </header>
 {%- endmacro %}
 
-{#- 滑過去（或用鍵盤停在上面）會出現說明的小 i -#}
+{#- 滑過去（或鍵盤停在上面）出現一句說明的小 i -#}
 {% macro info(text) -%}
 <span class="info" tabindex="0" role="img" aria-label="{{ text }}" data-tip="{{ text }}">i</span>
 {%- endmacro %}
 
-{% macro notice(level, title="") -%}
-<div class="notice {{ level }}">
-  {% if title %}<div class="notice-title">{{ title }}</div>{% endif %}
-  {% if caller %}<div class="notice-body">{{ caller() }}</div>{% endif %}
-</div>
-{%- endmacro %}
-
-{#- 問題清單。issues 可以是 Issue 物件（severity 是 enum）或紀錄裡讀回來的 dict（severity 是字串） -#}
-{% macro issues(list, show_link=false) -%}
-<ul class="todo">
-  {% for i in list %}
-    {% set sev = i.severity.value if i.severity.value is defined else i.severity %}
-    <li class="todo-item {{ sev }}">
-      <span class="todo-icon">{{ severity_icon[sev] }}</span>
-      <div class="todo-body">
-        <div class="todo-msg">{{ i.message }}</div>
-        {% if i.hint %}<div class="todo-hint">👉 {{ i.hint }}</div>{% endif %}
-      </div>
-      {% if show_link %}
-        {% set href, label = issue_link(i.code) %}
-        {% if href %}<a class="button secondary small todo-action" href="{{ href }}">{{ label }} →</a>{% endif %}
-      {% endif %}
-    </li>
-  {% endfor %}
-</ul>
-{%- endmacro %}
-
-{#- 對照表讀出來的警告（例如某一列看不懂），一條一條顯示 -#}
-{% macro table_issues(list) -%}
-{% for i in list if (i.severity.value if i.severity.value is defined else i.severity) != "info" %}
+{#- 問題清單：一列一件事。左邊是輕重、中間是「怎麼了 + 怎麼辦」、右邊是去哪一頁處理。
+    issues 可以是 Issue 物件（severity 是 enum）或紀錄裡讀回來的 dict（severity 是字串）。 -#}
+{% macro issues(list, link=true) -%}
+{% for i in list %}
   {% set sev = i.severity.value if i.severity.value is defined else i.severity %}
-  <div class="notice {{ 'error' if sev == 'error' else 'warn' }}">
-    <div class="notice-body">{{ severity_icon[sev] }} {{ i.message }}{% if i.hint %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</div>
-  </div>
+  {% set href, label = issue_link(i.code) if link else ("", "") %}
+  <{{ 'a href="' ~ href ~ '"' if href else 'div' }} class="item">
+    <span class="badge {{ {'error': 'bad', 'warning': 'warn'}.get(sev, '') }}">{{ {"error": "要修", "warning": "注意", "info": "參考"}[sev] }}</span>
+    <span class="tt">
+      <span class="nm">{{ i.message }}</span>
+      {% if i.hint %}<span class="sub">{{ i.hint }}</span>{% endif %}
+    </span>
+    <span class="side">{% if href %}{{ label }} →{% endif %}</span>
+  </{{ 'a' if href else 'div' }}>
 {% endfor %}
 {%- endmacro %}
 
-{% macro bubble(text, title="", tag="", tag_class="", detail="") -%}
-<div class="bubble-card">
-  {% if title or tag %}
-  <div class="bubble-head">
-    <strong>{{ title }}</strong>
-    {% if tag %}<span class="tag {{ tag_class }}">{{ tag }}</span>{% endif %}
-  </div>
-  {% endif %}
-  {% if detail %}<div class="muted small">{{ detail }}</div>{% endif %}
-  <pre class="bubble">{{ text }}</pre>
-</div>
-{%- endmacro %}
-
-{#- 同工名單底下三個子頁：名單 / LINE 帳號 / 小團 -#}
-{% macro members_subnav(active, pending=0) -%}
-<nav class="subnav" aria-label="同工名單的分頁">
-  <a href="/members" class="{{ 'active' if active == 'list' }}">📋 名單</a>
-  <a href="/members/accounts" class="{{ 'active' if active == 'accounts' }}">📱 LINE 帳號{% if pending %} <span class="badge">{{ pending }}</span>{% endif %}</a>
-  <a href="/members/teams" class="{{ 'active' if active == 'teams' }}">🎸 小團</a>
+{#- 同工名單底下三個分頁 -#}
+{% macro members_seg(active, members=none, pending=0, teams=none) -%}
+<nav class="seg" aria-label="同工名單的分頁">
+  <a href="/members" class="{{ 'on' if active == 'list' }}">名單{% if members is not none %} <span class="n">{{ members }}</span>{% endif %}</a>
+  <a href="/members/accounts" class="{{ 'on' if active == 'accounts' }}">LINE 帳號{% if pending %} <span class="n warn">{{ pending }} 待確認</span>{% endif %}</a>
+  <a href="/members/teams" class="{{ 'on' if active == 'teams' }}">小團{% if teams is not none %} <span class="n">{{ teams }}</span>{% endif %}</a>
 </nav>
 {%- endmacro %}
 
-{% macro empty(icon, title, text="") -%}
+{% macro empty(title, text="") -%}
 <div class="empty">
-  <div class="empty-icon">{{ icon }}</div>
-  <div class="empty-title">{{ title }}</div>
-  {% if text %}<div class="muted">{{ text }}</div>{% endif %}
-  {% if caller %}<div class="actions center">{{ caller() }}</div>{% endif %}
+  <b>{{ title }}</b>
+  {% if text %}<span>{{ text }}</span>{% endif %}
+  {% if caller %}<div class="row">{{ caller() }}</div>{% endif %}
 </div>
 {%- endmacro %}

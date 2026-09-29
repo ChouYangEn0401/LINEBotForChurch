@@ -3,27 +3,22 @@
 {% block title %}系統檢查・服事提醒機器人{% endblock %}
 {% block content %}
 {% set bad = items | selectattr("ok", "equalto", false) | list %}
-{% call ui.page_head("🩺 系統檢查", "一次檢查設定、LINE 群組、同工名單、服事表、LINE 連線與額度。第一次設定好、或覺得怪怪的時候按這裡。") %}
-  <a class="button primary" href="/check">🔄 重新檢查</a>
+{% call ui.page_head("管理員", "🩺 系統檢查", "設定、群組、名單、服事表、LINE 連線與額度一次檢查。" ~ ("有 " ~ (bad | length) ~ " 項沒過。" if bad else "全部通過。")) %}
+  <a class="btn btn-primary" href="/check">重新檢查</a>
 {% endcall %}
-{% if bad %}
-  {% call ui.notice("error", "有 " ~ (bad | length) ~ " 項沒過") %}紅色那幾列底下有寫怎麼處理。{% endcall %}
-{% else %}
-  {% call ui.notice("ok", "全部檢查都過了") %}可以回<a href="/">主控台</a>看這週的預覽。{% endcall %}
-{% endif %}
-<section class="card">
-  <table class="table">
-    <thead><tr><th></th><th>項目</th><th>狀態</th></tr></thead>
+<div class="table-wrap">
+  <table class="data">
+    <thead><tr><th>項目</th><th>結果</th><th>說明</th></tr></thead>
     <tbody>
     {% for i in items %}
       <tr class="{{ 'bad' if i.ok is false }}">
-        <td class="icon">{{ i.icon }}</td>
-        <td class="nowrap"><strong>{{ i.name }}</strong></td>
-        <td>{{ i.detail }}{% if i.hint and i.ok is not true %}<div class="hint">👉 {{ i.hint }}</div>{% endif %}</td>
+        <td class="nowrap"><b>{{ i.name }}</b></td>
+        <td class="nowrap">{% if i.ok is true %}<span class="badge ok">通過</span>{% elif i.ok is false %}<span class="badge bad">沒過</span>{% else %}<span class="badge">沒用到</span>{% endif %}</td>
+        <td>{{ i.detail }}{% if i.hint and i.ok is not true %}<div class="sub">{{ i.hint }}</div>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted small">➖ 代表「沒有用到、不算問題」（例如選用功能沒開）。</p>
-</section>
+</div>
+<p class="note">「沒用到」不算問題，例如選用的功能沒有開。</p>
 {% endblock %}

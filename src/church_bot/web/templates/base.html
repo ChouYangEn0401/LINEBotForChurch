@@ -5,90 +5,91 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}服事提醒機器人{% endblock %}</title>
   <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+  <script>
+    // 第一次畫面出來之前就決定深色／淺色，才不會閃一下。預設跟著作業系統。
+    try {
+      const saved = localStorage.getItem("bot.theme");
+      const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    } catch (_) { document.documentElement.dataset.theme = "light"; }
+  </script>
 </head>
 <body class="{{ 'admin' if admin_mode }}">
-{#- 左邊選單：每一項下面都有一行「這一頁是做什麼的」。管理員才需要的頁面只在「管理員模式」開著時出現 -#}
-{% set main_nav = [
-  ("/", "🏠", "主控台", "現在的狀況、要處理的事", ["index"]),
-  ("/roster", "📄", "服事表", "Google Sheet 的內容與連結", ["roster"]),
-  ("/members", "🙋", "同工名單", "誰在服事、名字怎麼寫", ["members", "members_accounts", "members_teams"]),
-  ("/targets", "👥", "LINE 群組", "提醒要送到哪些群組", ["targets"]),
-  ("/runs", "📜", "發送紀錄", "以前發了什麼、有沒有失敗", ["runs", "run_detail"]),
-  ("/help", "❓", "說明", "怎麼用、常見狀況", ["help"]),
+{#- 側欄每一項的小字一開始是「這一頁做什麼」，載入後換成「現在的狀況」（/api/nav，見 app.js）。
+    管理員才需要的頁面只在切到管理員身分時出現。 -#}
+{% set nav_groups = [
+  ("", [
+    ("/", "🎯", "主控台", "現在的狀況、要處理的事", "index", ["index"]),
+  ]),
+  ("每週提醒", [
+    ("/roster", "📄", "服事表", "Google Sheet 的內容", "roster", ["roster"]),
+    ("/members", "🙋", "同工名單", "名字、LINE 帳號、小團", "members", ["members", "members_accounts", "members_teams"]),
+    ("/targets", "👥", "LINE 群組", "提醒送到哪些群組", "targets", ["targets"]),
+  ]),
+  ("紀錄", [
+    ("/runs", "📜", "發送紀錄", "以前發了什麼", "runs", ["runs", "run_detail"]),
+    ("/help", "❓", "說明", "怎麼用、常見狀況", "help", ["help"]),
+  ]),
 ] %}
-{% set admin_nav = [
-  ("/settings", "⚙️", "設定", "發送時間、訊息樣子、金鑰", ["settings"]),
-  ("/check", "🩺", "系統檢查", "一次檢查全部設定", ["check"]),
-  ("/lab/org", "🧪", "大教會（實驗）", "牧區 → 小組 的架構與估算", ["lab_org"]),
-] %}
-<div class="app">
-  <header class="topbar-mobile">
-    <button type="button" class="menu-toggle" aria-label="打開選單" aria-controls="sidebar" aria-expanded="false">☰ 選單</button>
-    <a class="brand" href="/">⛪ 服事提醒機器人</a>
-  </header>
-  <div class="backdrop" hidden></div>
-
-  <aside class="sidebar" id="sidebar">
-    <a class="brand" href="/">⛪ 服事提醒機器人</a>
-    <nav class="nav" aria-label="主選單">
-      {% for href, icon, label, desc, keys in main_nav %}
-        <a href="{{ href }}" class="nav-item {{ 'active' if nav in keys }}" {% if nav in keys %}aria-current="page"{% endif %}>
-          <span class="nav-icon" aria-hidden="true">{{ icon }}</span>
-          <span class="nav-text"><span class="nav-label">{{ label }}</span><span class="nav-desc">{{ desc }}</span></span>
-        </a>
-      {% endfor %}
-      {% if admin_mode %}
-        <div class="nav-group-title">管理員</div>
-        {% for href, icon, label, desc, keys in admin_nav %}
-          <a href="{{ href }}" class="nav-item {{ 'active' if nav in keys }}" {% if nav in keys %}aria-current="page"{% endif %}>
-            <span class="nav-icon" aria-hidden="true">{{ icon }}</span>
-            <span class="nav-text"><span class="nav-label">{{ label }}</span><span class="nav-desc">{{ desc }}</span></span>
+{% set admin_group = ("管理員", [
+    ("/settings", "⚙", "設定", "發送時間、訊息、金鑰", "settings", ["settings"]),
+    ("/check", "🩺", "系統檢查", "一次檢查全部設定", "check", ["check"]),
+    ("/lab/org", "🧪", "大教會（實驗）", "牧區 → 小組的估算", "lab_org", ["lab_org"]),
+]) %}
+<header class="topbar">
+  <button type="button" class="icon-btn menu-toggle" aria-label="選單" aria-controls="sidebar">☰</button>
+  <a class="brand" href="/" title="服事提醒機器人">⛪ <span>服事提醒機器人</span></a>
+  <span class="top-status" title="每週提醒什麼時候發">{{ schedule_text }}{% if next_run and next_run != '（沒有排程）' %} · 下次 {{ next_run }}{% endif %}</span>
+  <div class="top-actions">
+    <span class="role-badge {{ 'admin' if admin_mode }}">{{ "管理員" if admin_mode else "一般" }}</span>
+    <form method="post" action="/admin-mode">
+      <input type="hidden" name="next" value="{{ current_path }}">
+      <input type="hidden" name="enabled" value="{{ '0' if admin_mode else '1' }}">
+      <button type="submit" class="btn btn-sm"
+              title="{{ '回到一般畫面：選單只留平常會用到的頁面' if admin_mode else '切到管理員：選單多出設定、系統檢查，畫面多出 LINE ID 這類細節。這不是權限，要限制誰能開網頁請設密碼' }}">切換身分</button>
+    </form>
+    <button type="button" class="icon-btn" id="btn-theme" title="切換深色 / 淺色">◐</button>
+    {% if has_password %}
+      <form method="post" action="/logout"><button type="submit" class="btn btn-sm btn-ghost">登出</button></form>
+    {% endif %}
+  </div>
+</header>
+<main class="layout">
+  <aside id="sidebar" class="sidebar">
+    <nav class="side" aria-label="主選單">
+      {% for title, items in nav_groups + ([admin_group] if admin_mode else []) %}
+        {% if title %}<div class="group-title">{{ title }}</div>{% endif %}
+        {% for href, icon, label, hint, key, pages in items %}
+          <a href="{{ href }}" class="side-item {{ 'active' if nav in pages }}" data-nav="{{ key }}"
+             {% if nav in pages %}aria-current="page"{% endif %}>
+            <span class="top"><span class="ic" aria-hidden="true">{{ icon }}</span><span class="nm">{{ label }}</span><span class="count" data-count></span></span>
+            <span class="sub" data-sub>{{ hint }}</span>
           </a>
         {% endfor %}
-      {% endif %}
+      {% endfor %}
+      <div class="side-foot">v{{ version }}{% if admin_mode %} · <a href="/docs" target="_blank" rel="noopener">API</a>{% endif %}</div>
     </nav>
-
-    <div class="sidebar-foot">
-      <form method="post" action="/admin-mode" class="admin-switch">
-        <input type="hidden" name="next" value="{{ current_path }}">
-        <input type="hidden" name="enabled" value="{{ '0' if admin_mode else '1' }}">
-        <button type="submit" class="switch {{ 'on' if admin_mode }}" role="switch" aria-checked="{{ 'true' if admin_mode else 'false' }}"
-                title="{{ '關掉後選單只剩平常會用到的頁面' if admin_mode else '打開後選單會多出「設定」「系統檢查」等進階項目，畫面上也會多出 ID、檔案位置這類細節' }}">
-          <span class="switch-track"><span class="switch-knob"></span></span>
-          <span class="switch-label">管理員模式{{ '：開' if admin_mode else '' }}</span>
-        </button>
-      </form>
-      <div class="muted small">{% if admin_mode %}進階項目已顯示。這只是把畫面收起來，不是權限；要限制誰能開網頁請設密碼。{% else %}平常關著就好；要改設定時再打開。{% endif %}</div>
-      {% if has_password %}
-        <form method="post" action="/logout" class="inline"><button type="submit" class="ghost small">🔒 登出</button></form>
-      {% endif %}
-      <div class="muted small version">v{{ version }}{% if admin_mode %}・<a href="/docs" target="_blank" rel="noopener">API 文件</a>{% endif %}</div>
-    </div>
   </aside>
-
-  <div class="content">
-    <main class="page">
-      {% if flash %}<div class="flash {{ flash_level }}" role="status">{{ flash }}</div>{% endif %}
-      {% if pending_change %}
-      <section class="card pending-change">
-        <div class="card-head"><h2>🔐 有人在 LINE 要修改設定，正在等驗證碼</h2></div>
-        <p>{{ pending_change.requester or "（沒有名稱）" }}（{{ pending_change.chat_label }}）要把「{{ pending_change.option.key }}」
-          改成「{{ pending_change.value_text }}」・還有 {{ pending_minutes }} 分鐘</p>
-        <div class="actions">
-          <form method="post" action="/remote-config/approve" data-confirm="確定核准：{{ pending_change.option.key }} → {{ pending_change.value_text }}？">
-            <button type="submit" class="primary">✅ 核准</button></form>
-          <form method="post" action="/remote-config/reject"><button type="submit" class="danger">❌ 拒絕</button></form>
-        </div>
-        <div class="muted small">驗證碼只顯示在執行機器人的視窗和管理員的 LINE。在這裡按「核准」等於輸入了正確的驗證碼；不認得這個請求就按「拒絕」。</div>
-      </section>
-      {% endif %}
+  <section id="view" class="view">
+    {% if flash %}
+      <div class="banner {{ flash_level }}" role="status"><b>{{ {"ok": "✓", "warn": "!", "error": "✕"}.get(flash_level, "✓") }}</b><span>{{ flash }}</span>
+        <button type="button" class="icon-btn x" data-dismiss-banner aria-label="關掉">✕</button></div>
+    {% endif %}
+    {% if pending_change %}
+      <div class="banner warn">
+        <b>等驗證</b>
+        <span>{{ pending_change.requester or "（沒有名稱）" }}（{{ pending_change.chat_label }}）要把「{{ pending_change.option.key }}」改成「{{ pending_change.value_text }}」・還有 {{ pending_minutes }} 分鐘</span>
+        <span class="spacer"></span>
+        <form method="post" action="/remote-config/approve" data-confirm="確定核准：{{ pending_change.option.key }} → {{ pending_change.value_text }}？">
+          <button type="submit" class="btn btn-sm btn-primary">核准</button></form>
+        <form method="post" action="/remote-config/reject"><button type="submit" class="btn btn-sm btn-danger">拒絕</button></form>
+      </div>
+    {% endif %}
+    <div class="page {% block page_class %}{% endblock %}">
       {% block content %}{% endblock %}
-    </main>
-    <footer class="foot">
-      自動發送：{{ schedule_status }}{% if next_run and next_run != '（沒有排程）' %}・下次 {{ next_run }}{% endif %}
-    </footer>
-  </div>
-</div>
+    </div>
+  </section>
+</main>
 <script src="/static/app.js?v={{ version }}"></script>
 {% block scripts %}{% endblock %}
 </body>

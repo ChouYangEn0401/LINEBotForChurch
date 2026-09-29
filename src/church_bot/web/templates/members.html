@@ -3,145 +3,147 @@
 {% block title %}同工名單・服事提醒機器人{% endblock %}
 {% block content %}
 {% set m = editing %}
-{% if show_form %}
-  {% call ui.page_head(("✏️ 編輯「" ~ m.name ~ "」") if m else "➕ 新增同工", "訊息上會顯示「名字」；服事表上其他的寫法（綽號、英文名）填在「其他寫法」，程式就知道是同一個人。") %}
-    <a class="button ghost" href="/members">← 回同工名單</a>
-  {% endcall %}
-  <section class="card">
-    <form method="post" action="/members/save" class="form-grid">
-      <input type="hidden" name="original_name" value="{{ m.name if m else '' }}">
+{% call ui.page_head("每週提醒", "🙋 同工名單", "服事表上寫的名字 → 對到哪一位同工。不設定也能發送，名字會照服事表原樣顯示。") %}
+  <a class="btn btn-primary" href="/members?new=1">＋ 新增同工</a>
+{% endcall %}
+{{ ui.members_seg("list", members | length, pending_accounts) }}
 
-      <label for="name">名字</label>
-      <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}" placeholder="真實姓名，例如：陳小明" autofocus>
-      <div class="help">提醒訊息上會顯示這個。</div>
+{% set table_problems = issues | rejectattr("severity.value", "equalto", "info") | list %}
+{% if table_problems %}
+<div class="panel"><div class="panel-head">名單要注意的地方 <span class="badge warn">{{ table_problems | length }}</span></div>
+  {{ ui.issues(table_problems, link=false) }}</div>
+{% endif %}
+{% if unknown_error %}
+<div class="panel"><div class="item"><span class="badge warn">注意</span>
+  <span class="tt"><span class="nm">讀不到服事表，所以沒辦法檢查名字對不對得到</span><span class="sub">{{ unknown_error }}</span></span>
+  <span class="side"><a href="/roster">看服事表 →</a></span></div></div>
+{% endif %}
 
-      <label for="aliases">其他寫法</label>
-      <input type="text" id="aliases" name="aliases" value="{{ fmt_list(m.aliases) if m else '' }}" placeholder="例如：小明、Ming、陳弟兄">
-      <div class="help">服事表上可能出現的其他寫法，用「、」隔開。服事表寫這些，訊息都會顯示成上面的名字。要幾個都可以，只要不跟別人重複。</div>
+{% if unknown %}
+<section class="panel warn" id="todo">
+  <div class="panel-head">服事表上對不到的名字 <span class="badge warn">{{ unknown | length }}</span>
+    <span class="hint">選一次就會記住；不處理也照常發送</span></div>
+  <div class="table-wrap">
+  <table class="data">
+    <thead><tr><th>服事表上寫的</th><th>他是誰</th></tr></thead>
+    <tbody>
+    {% for raw, suggestions in unknown.items() %}
+      <tr>
+        <td><b>{{ raw }}</b>{% if suggestions %}<div class="sub">可能是 {{ fmt_list(suggestions) }}</div>{% endif %}</td>
+        <td>
+          <form method="post" action="/members/alias" class="inline-form">
+            <input type="hidden" name="raw" value="{{ raw }}">
+            <select name="member_name" aria-label="{{ raw }} 是誰">
+              <option value="">新同工：新增「{{ raw }}」</option>
+              {% for mm in members %}
+                <option value="{{ mm.name }}" {{ "selected" if suggestions and mm.name == suggestions[0] }}>就是「{{ mm.name }}」</option>
+              {% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm btn-primary">確定</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
 
-      <label>狀態</label>
-      <div class="checkbox-row"><input type="checkbox" id="active" name="active" {{ "checked" if (m is none or m.active) }}>
-        <label for="active">還在服事</label></div>
-      <div class="help">取消勾選 = 停用（例如離開教會）。停用的人如果又被排到服事，會提醒管理員。</div>
-
-      <label for="note">備註</label>
-      <input type="text" id="note" name="note" value="{{ m.note if m else '' }}" placeholder="例如：敬拜團、招待組長（選填）">
-
-      <label for="line_user_id">LINE 帳號 {{ ui.info("只有要在訊息裡 @ 他才需要。最簡單的做法是請他在群組打「/我的名字 真實姓名」，然後到「LINE 帳號」分頁按「對應」，不用手動貼 ID。") }}</label>
-      <div>
-        {% if m and m.line_user_id %}
-          <div><span class="tag ok">已對應</span> <span class="id copy admin-only">{{ m.line_user_id }}</span></div>
-        {% endif %}
-        <details class="{{ '' if not (m and m.line_user_id) else 'admin-only' }}">
-          <summary class="small">手動填 LINE userId（進階）</summary>
-          <input type="text" id="line_user_id" name="line_user_id" value="{{ m.line_user_id if m else '' }}" placeholder="U 開頭 + 32 碼">
-          <div class="help">請他私訊機器人打「/我的ID」，把回覆的 ID 貼過來。</div>
-        </details>
-      </div>
-
-      <div></div>
-      <div class="actions">
-        <button type="submit" class="primary big">💾 儲存</button>
-        <a class="button ghost" href="/members">取消</a>
-      </div>
-    </form>
-  </section>
-{% else %}
-  {% call ui.page_head("🙋 同工名單", "誰在服事、服事表上的名字對到誰。這一頁只管名單；LINE 帳號的對應和小團在上面的分頁。") %}
-    <a class="button primary" href="/members?new=1">➕ 新增同工</a>
-  {% endcall %}
-  {{ ui.members_subnav("list", pending_accounts) }}
-  {{ ui.table_issues(issues) }}
-
-  {% if unknown_error %}
-    {% call ui.notice("warn", "讀不到服事表，所以沒辦法檢查名字對不對得到") %}{{ unknown_error }}{% endcall %}
-  {% endif %}
-
-  {% if unknown %}
-  <section class="card attention" id="todo">
-    <div class="card-head">
-      <h2>📝 服事表上有 {{ unknown | length }} 個名字對不到 {{ ui.info("服事表出現了名單上沒有的寫法：可能是新同工、綽號，或打錯字。不處理也會照常發送（照服事表原樣顯示），處理一次以後就會記住。") }}</h2>
-    </div>
-    <div class="table-wrap">
-    <table class="table">
-      <thead><tr><th>服事表上寫的</th><th>他是誰？</th></tr></thead>
+<section class="panel">
+  <div class="panel-head">名單 <span class="badge">{{ members | length }}</span>
+    <span class="tools">
+      <input type="search" placeholder="找名字…" data-filter="#member-table" aria-label="搜尋同工">
+      <a class="btn btn-sm btn-ghost admin-only" href="/download/members.csv" title="用 Excel 打開也能改，改完不用重開程式">下載 CSV</a>
+    </span>
+  </div>
+  {% if members %}
+  <div class="table-wrap">
+    <table class="data" id="member-table">
+      <thead><tr>
+        <th>名字</th>
+        <th>其他寫法 {{ ui.info("服事表上可能出現的別的寫法：綽號、英文名。寫這些，訊息都會顯示成左邊的名字。") }}</th>
+        <th>LINE {{ ui.info("有對應 LINE 帳號，訊息裡才 @ 得到他。到「LINE 帳號」分頁對應。") }}</th>
+        <th>狀態</th><th></th></tr></thead>
       <tbody>
-      {% for raw, suggestions in unknown.items() %}
-        <tr>
-          <td><strong>{{ raw }}</strong>{% if suggestions %}<div class="muted small">可能是：{{ fmt_list(suggestions) }}</div>{% endif %}</td>
+      {% for m in members %}
+        <tr class="{{ '' if m.active else 'off' }}">
+          <td><b>{{ m.name }}</b>{% if m.note %}<div class="sub">{{ m.note }}</div>{% endif %}</td>
           <td>
-            <form method="post" action="/members/alias" class="inline-form">
-              <input type="hidden" name="raw" value="{{ raw }}">
-              <select name="member_name" aria-label="{{ raw }} 是誰">
-                <option value="">➕ 新同工，新增「{{ raw }}」</option>
-                {% for mm in members %}
-                  <option value="{{ mm.name }}" {{ "selected" if suggestions and mm.name == suggestions[0] }}>就是「{{ mm.name }}」（加成他的其他寫法）</option>
-                {% endfor %}
-              </select>
-              <button type="submit" class="primary">確定</button>
+            <div class="chips">
+            {% for alias in m.aliases %}
+              <span class="chip">{{ alias }}
+                <form method="post" action="/members/aliases/remove">
+                  <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="alias" value="{{ alias }}">
+                  <button type="submit" class="x" title="移除「{{ alias }}」" aria-label="移除 {{ alias }}">✕</button></form>
+              </span>
+            {% endfor %}
+            <form method="post" action="/members/aliases/add" class="alias-add">
+              <input type="hidden" name="name" value="{{ m.name }}">
+              <input type="text" name="alias" placeholder="＋ 加一個" aria-label="{{ m.name }} 的其他寫法">
+            </form>
+            </div>
+          </td>
+          <td>{% if m.line_user_id %}<span class="badge ok">已對應</span>{% if line_names.get(m.line_user_id) %} <span class="sub">{{ line_names.get(m.line_user_id) }}</span>{% endif %}
+              {% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{% if m.active %}<span class="badge ok">服事中</span>{% else %}<span class="badge">停用</span>{% endif %}</td>
+          <td class="ops">
+            <a class="btn btn-sm" href="/members?edit={{ m.name | urlencode }}">編輯</a>
+            <form method="post" action="/members/delete" data-confirm="確定刪除「{{ m.name }}」嗎？離開教會的話，改成「停用」比較好，之後被排到會提醒你。">
+              <input type="hidden" name="name" value="{{ m.name }}"><button type="submit" class="btn btn-sm btn-danger">刪除</button>
             </form>
           </td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
-    </div>
-  </section>
+  </div>
+  {% else %}
+    {% call ui.empty("還沒有任何同工", "新增幾位，或到「LINE 帳號」分頁從大家的 LINE 帳號直接加入。") %}
+      <a class="btn btn-primary" href="/members?new=1">＋ 新增同工</a>
+      <a class="btn" href="/members/accounts">從 LINE 帳號加入</a>
+    {% endcall %}
   {% endif %}
+</section>
 
-  <section class="card">
-    <div class="card-head">
-      <h2>名單（{{ members | length }} 位）</h2>
-      <div class="card-tools">
-        <input type="search" class="search" placeholder="🔍 找名字…" data-filter="#member-table" aria-label="搜尋同工">
-        <a class="button ghost small admin-only" href="/download/members.csv" title="用 Excel 打開也能改，改完不用重開程式">⬇ 下載 CSV</a>
+{% if show_form %}
+<aside class="drawer" data-drawer data-close="/members" aria-label="{{ '編輯同工' if m else '新增同工' }}">
+  <form method="post" action="/members/save">
+    <div class="drawer-head">
+      <h3>{{ ("編輯「" ~ m.name ~ "」") if m else "新增同工" }}</h3>
+      <a class="icon-btn" href="/members" title="關閉（Esc）" aria-label="關閉">✕</a>
+    </div>
+    <div class="drawer-body">
+      <input type="hidden" name="original_name" value="{{ m.name if m else '' }}">
+      <div class="ffield">
+        <label for="name"><span class="req">*</span>名字</label>
+        <input type="text" id="name" name="name" required value="{{ m.name if m else '' }}" placeholder="陳小明" autofocus>
+        <span class="help">提醒訊息上顯示這個。</span>
+      </div>
+      <div class="ffield">
+        <label for="aliases">其他寫法</label>
+        <input type="text" id="aliases" name="aliases" value="{{ fmt_list(m.aliases) if m else '' }}" placeholder="小明、Ming、陳弟兄">
+        <span class="help">用「、」隔開。留空 = 服事表只有寫上面那個名字才對得到。不能跟別人重複。</span>
+      </div>
+      <div class="ffield ffield-chk">
+        <label><input type="checkbox" name="active" {{ "checked" if (m is none or m.active) }}>
+          <span><b>還在服事</b><span class="help"><br>取消勾選 = 停用。停用的人又被排到服事，會提醒管理員。</span></span></label>
+      </div>
+      <div class="ffield">
+        <label for="note">備註</label>
+        <input type="text" id="note" name="note" value="{{ m.note if m else '' }}" placeholder="敬拜團、招待組長">
+      </div>
+      <div class="ffield">
+        <label for="line_user_id">LINE 帳號{% if m and m.line_user_id %} <span class="badge ok">已對應</span>{% endif %}</label>
+        <input type="text" id="line_user_id" name="line_user_id" class="mono" value="{{ m.line_user_id if m else '' }}" placeholder="U 開頭 + 32 碼">
+        <span class="help">留空 = 訊息裡不會 @ 他。不用手動填：請他在群組打「/我的名字 真實姓名」，再到「LINE 帳號」分頁按「對應」。</span>
       </div>
     </div>
-    {% if members %}
-    <div class="table-wrap">
-      <table class="table" id="member-table">
-        <thead><tr><th>名字</th><th>其他寫法 {{ ui.info("服事表上可能出現的別的寫法。按 ✕ 移除、按 ＋ 新增一個。") }}</th><th>LINE {{ ui.info("有對應 LINE 帳號的人，訊息裡才 @ 得到。對應請到「LINE 帳號」分頁。") }}</th><th>狀態</th><th></th></tr></thead>
-        <tbody>
-        {% for m in members %}
-          <tr class="{{ '' if m.active else 'disabled' }}">
-            <td><strong>{{ m.name }}</strong>{% if m.note %}<div class="muted small">{{ m.note }}</div>{% endif %}</td>
-            <td>
-              <div class="chip-row">
-              {% for alias in m.aliases %}
-                <span class="chip alias">{{ alias }}
-                  <form method="post" action="/members/aliases/remove" class="inline">
-                    <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="alias" value="{{ alias }}">
-                    <button type="submit" class="link-button" title="移除「{{ alias }}」" aria-label="移除 {{ alias }}">✕</button></form>
-                </span>
-              {% endfor %}
-              <form method="post" action="/members/aliases/add" class="inline-form alias-add">
-                <input type="hidden" name="name" value="{{ m.name }}">
-                <input type="text" name="alias" size="6" placeholder="加一個" aria-label="{{ m.name }} 的其他寫法">
-                <button type="submit" class="secondary small">＋</button>
-              </form>
-              </div>
-            </td>
-            <td>{% if m.line_user_id %}<span class="tag ok">✅ 已對應</span>{% if line_names.get(m.line_user_id) %}<div class="muted small">{{ line_names.get(m.line_user_id) }}</div>{% endif %}
-                {% else %}<span class="muted">—</span>{% endif %}</td>
-            <td>{% if m.active %}<span class="tag ok">服事中</span>{% else %}<span class="tag off">停用</span>{% endif %}</td>
-            <td class="nowrap actions-cell">
-              <a class="button secondary small" href="/members?edit={{ m.name | urlencode }}">編輯</a>
-              <form method="post" action="/members/delete" class="inline" data-confirm="確定刪除「{{ m.name }}」嗎？（離開教會的話，改成「停用」比較好，之後被排到會提醒你）">
-                <input type="hidden" name="name" value="{{ m.name }}"><button type="submit" class="danger small">刪除</button>
-              </form>
-            </td>
-          </tr>
-        {% endfor %}
-        </tbody>
-      </table>
+    <div class="drawer-foot">
+      <button type="submit" class="btn btn-primary">儲存</button>
+      <a class="btn btn-ghost" href="/members">取消</a>
     </div>
-    <p class="muted small">不設定名單也能發送（名字照服事表原樣顯示）。設定之後：綽號會換成正式名字、停用的人被排到會提醒你、訊息可以 @ 人。</p>
-    {% else %}
-      {% call ui.empty("🙋", "還沒有任何同工", "先新增幾位，或到「LINE 帳號」分頁從大家的 LINE 帳號直接加入。") %}
-        <a class="button primary" href="/members?new=1">➕ 新增同工</a>
-        <a class="button secondary" href="/members/accounts">📱 從 LINE 帳號加入</a>
-      {% endcall %}
-    {% endif %}
-  </section>
+  </form>
+</aside>
 {% endif %}
 {% endblock %}

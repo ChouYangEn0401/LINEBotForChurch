@@ -5,9 +5,11 @@
 * 服事表（Google Sheet 的連結 + 把整張表畫出來 + 程式讀到的結果）
 * 同工名單（名單本身）→ 子頁「LINE 帳號」「小團」
 * LINE 群組、發送紀錄、說明
-* 管理員才需要的：設定（分頁籤）、系統檢查、大教會（實驗）——平常收在「管理員模式」後面
+* 管理員才需要的：設定（一張卡片一個決定）、系統檢查、大教會（實驗）——按右上角「切換身分」才出現
 
-「管理員模式」只是把進階的東西收起來（cookie），不是權限；要限制誰能開網頁請設密碼（.env 的 UI_PASSWORD）。
+版面跟 Workflow Helper / pyDMS 同一套：側欄每一項底下是它「現在的狀況」（/api/nav），
+每一頁開頭是「小標 → 標題 → 一句話」，內容用帶標題列的面板，新增／編輯用右邊的抽屜。
+「切換身分」只是把進階的東西收起來（cookie），不是權限；要限制誰能開網頁請設密碼（.env 的 UI_PASSWORD）。
 JSON API：/api/*（自動產生的文件在 /docs）。LINE Webhook：/line/webhook（選用）。
 """
 
@@ -65,8 +67,7 @@ log = logging.getLogger(__name__)
 HERE = Path(__file__).parent
 LAYOUTS_ZH = {"auto": "自動判斷（推薦）", "wide": "日期在左、一列一次聚會", "long": "一列一項服事",
               "matrix": "日期在上、一欄一次聚會"}
-SEVERITY_ICON = {"error": "❌", "warning": "⚠️", "info": "ℹ️"}
-ADMIN_COOKIE = "church_bot_admin"  # 「管理員模式」開關（只是收起進階畫面，不是權限）
+ADMIN_COOKIE = "church_bot_admin"  # 右上角「切換身分」（只是收起進階畫面，不是權限）
 
 
 def _safe_next(url: str) -> str:
@@ -170,7 +171,7 @@ def create_app(paths: Paths) -> FastAPI:
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     templates.env.globals.update(
         version=__version__, weekday_zh=WEEKDAY_ZH, describe_line_id=describe_line_id, fmt_list=fmt_list,
-        severity_icon=SEVERITY_ICON, status_zh={s.value: s.zh for s in DeliveryStatus}, trigger_zh=TRIGGER_ZH,
+        status_zh={s.value: s.zh for s in DeliveryStatus}, trigger_zh=TRIGGER_ZH,
         source_kinds=SOURCE_KINDS_ZH, messenger_kinds=MESSENGER_KINDS_ZH, layouts=LAYOUTS_ZH, issue_link=issue_link,
     )
 
@@ -214,19 +215,23 @@ def create_app(paths: Paths) -> FastAPI:
         ctx.setdefault("flash", request.query_params.get("msg", ""))
         ctx.setdefault("flash_level", request.query_params.get("level", "ok"))
         pending = webhook.verifier.current()
-        base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status,
-                "next_run": scheduler.next_run_text(), "has_password": bool(current_password()),
+        today = dt.date.today()
+        next_run = scheduler.next_run_text()
+        # 內建排程關著 = 由 Telegram 來呼叫 cli.bat send；對看畫面的人來說這不是「關閉」，是「別人在排」
+        schedule_text = scheduler.status if next_run != "（沒有排程）" else "由 Telegram 排程發送"
+        base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status, "schedule_text": schedule_text,
+                "next_run": next_run, "has_password": bool(current_password()),
                 "pending_change": pending,
                 "pending_minutes": webhook.verifier.minutes_left(pending) if pending else 0,
-                "admin_mode": request.cookies.get(ADMIN_COOKIE) == "1", "current_path": request.url.path}
+                "admin_mode": request.cookies.get(ADMIN_COOKIE) == "1", "current_path": request.url.path,
+                "today_text": f"{today.isoformat()} · 週{'一二三四五六日'[today.weekday()]}"}
         return templates.TemplateResponse(request, name, {**base, **ctx})
 
     @ui.post("/admin-mode")
     def admin_mode(enabled: str = Form(""), next: str = Form("/")):
-        """「管理員模式」開關：開 = 選單多出「設定」「系統檢查」「實驗」，畫面上多出 ID、檔案位置這類細節。"""
+        """右上角「切換身分」：切到管理員 = 側欄多出設定、系統檢查、實驗，畫面上多出 ID、檔案位置這類細節。"""
         on = enabled == "1"
-        resp = _redirect(_safe_next(next), "已切換到管理員模式：選單多了「設定」等進階項目" if on
-                         else "已回到一般模式：進階項目先收起來")
+        resp = _redirect(_safe_next(next), "已切到管理員：側欄多了設定、系統檢查" if on else "已回到一般畫面")
         if on:
             resp.set_cookie(ADMIN_COOKIE, "1", samesite="lax", max_age=60 * 60 * 24 * 365)
         else:
@@ -302,6 +307,45 @@ def create_app(paths: Paths) -> FastAPI:
                            members=ctx.members, targets=ctx.targets, unknown_names=unknown,
                            pending_claims=sum(1 for a in accounts if a.needs_review and not a.ignored),
                            next_run=scheduler.next_run_text())
+
+    @api.get("/nav", summary="側欄每一項現在的狀況（那行小字和右邊的數字）")
+    def api_nav():
+        """側欄不只是選單：每一項底下寫的是「它現在怎麼樣」，有事要處理的會標數字。
+
+        頁面先畫出來、再由 app.js 來問這一支，所以讀 Google Sheet 慢的時候不會卡住整頁。
+        """
+        tone = {"ok": "ok", "warning": "warn", "error": "bad", "off": ""}
+        report, _plan = service.preview()
+        problems = [i for i in report.issues if i.severity is not Severity.INFO]
+        errors = [i for i in problems if i.is_error]
+        status: dict[str, dict[str, Any]] = {"index": {
+            "sub": f"{len(errors)} 個問題會擋住發送" if errors else
+                   f"{len(problems)} 件事要看一下" if problems else "一切正常",
+            "count": len(problems), "tone": "bad" if errors else "warn" if problems else "ok",
+        }}
+        for step in workflow_steps(report):
+            key = {"服事表": "roster", "同工名單": "members", "LINE 群組": "targets"}.get(step.title)
+            if key:
+                status[key] = {"sub": step.summary, "count": 0, "tone": tone[step.status]}
+        if "members" in status:
+            try:
+                unknown = len(service.unknown_names())
+            except ChurchBotError:
+                unknown = 0
+            members = MemberTable(paths.members_file).load().items
+            pending = sum(1 for a in build_accounts(service.history.people(), members)
+                          if a.needs_review and not a.ignored)
+            parts = [f"{len(members)} 位" if members else "還沒設定"]
+            parts += [f"{unknown} 個名字對不到"] if unknown else []
+            parts += [f"{pending} 位待確認"] if pending else []
+            status["members"].update(sub=" · ".join(parts), count=unknown + pending)
+        last = service.history.last_run()
+        status["runs"] = ({"sub": f"上次 {last.started_at[5:16].replace('-', '/').replace('T', ' ')} · {last.status_zh}",
+                           "count": 0, "tone": tone.get(last.status, "")} if last
+                          else {"sub": "還沒有發送過", "count": 0, "tone": ""})
+        status["settings"] = {"sub": scheduler.status if scheduler.next_run() else "由 Telegram 排程發送",
+                              "count": 0, "tone": ""}
+        return status
 
     @ui.post("/send")
     def send(force: int = Form(0)):

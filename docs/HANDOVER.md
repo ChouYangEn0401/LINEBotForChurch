@@ -38,7 +38,7 @@
 ## 4. 上線檢查清單
 
 - [ ] 教會那台常開的電腦安裝好（Windows：`1-install.bat`；Mac：`1-install.sh`）
-- [ ] LINE 官方帳號、Messaging API 開好，token 貼到「設定 → 🔑 金鑰與密碼」（[SETUP_LINE.md](SETUP_LINE.md)）
+- [ ] LINE 官方帳號、Messaging API 開好，token 貼到「設定 → 金鑰與密碼」（[SETUP_LINE.md](SETUP_LINE.md)）
 - [ ] 官方帳號設定：接受邀請加入群組、**關閉自動回應訊息**
 - [ ] 服事表開公開連結、網址貼到「服事表」頁（[SETUP_GOOGLE.md](SETUP_GOOGLE.md)），主控台預覽內容正確
 - [ ] 群組加好，按「測試」有收到

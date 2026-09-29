@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 API_BASE = "https://api.line.me"
 TOKEN_HINT = (
     "到 LINE Developers → 你的 Channel →「Messaging API」分頁最下面，按 Issue 重新發行 Channel access token，"
-    "再貼到網頁「設定 → 🔑 金鑰與密碼」。"
+    "再貼到網頁「設定 → 金鑰與密碼」。"
 )
 QUOTA_HINT = (
     "免費方案每月 200 則，推播到群組是「按群組人數」計算。"

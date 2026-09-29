@@ -59,7 +59,7 @@ def scheduled_skip_reason(service: BotService, now: dt.datetime | None = None) -
     """
     cfg = load_settings(service.paths).schedule
     if not cfg.enabled:
-        return "自動發送已關閉（設定 → ⏰ 發送時間）"
+        return "自動發送已關閉（設定 → 什麼時候發）"
     now = now or dt.datetime.now(ZoneInfo(cfg.timezone))
     fire = previous_fire_time(cfg, now)
     if now - fire > dt.timedelta(hours=CATCHUP_HOURS):

@@ -3,93 +3,78 @@
 {% block title %}LINE 帳號・服事提醒機器人{% endblock %}
 {% block content %}
 {% set pending = accounts | selectattr("needs_review") | list %}
-{% call ui.page_head("📱 LINE 帳號", "把大家的 LINE 帳號對到同工名單上的人。對好了，提醒訊息就能 @ 到他；沒對也照常發送。") %}{% endcall %}
-{{ ui.members_subnav("accounts", pending | length) }}
+{{ ui.page_head("同工名單", "📱 LINE 帳號", "大家的 LINE 帳號 → 對到同工名單上的人。對好了，提醒訊息才 @ 得到他；沒對也照常發送。") }}
+{{ ui.members_seg("accounts", members | length, pending | length) }}
 
-<section class="card">
-  <div class="card-head"><h2>這一頁在做什麼</h2></div>
-  <div class="flow">
-    <div class="flow-step"><strong>服事表上寫的</strong><span>小明、Ming、阿明…</span></div>
-    <div class="flow-arrow">→</div>
-    <div class="flow-step"><strong>同工名單（真實姓名）</strong><span>陳小明</span></div>
-    <div class="flow-arrow">↔</div>
-    <div class="flow-step"><strong>LINE 帳號</strong><span>ID 永遠不變・LINE 名稱本人隨時會改</span></div>
-  </div>
-  <p class="muted">機器人會自動記下「在群組講過話」「新加入群組」「加機器人好友」的人。最省事的收集方法：按下面「開放登記」，
-    請大家在群組打 <span class="kbd">/我的名字 真實姓名</span>，他們就會排在下面等你按一下確認。</p>
-</section>
-
-<section class="card">
-  <div class="toggle-box {{ 'on' if collect_names }}">
-    <div>
-      <strong>名字登記：{{ "🟢 開放中" if collect_names else "⚪ 關閉" }}</strong>
-      <div class="muted small">{% if collect_names %}大家現在可以打 <span class="kbd">/我的名字 王小明</span> 登記。<strong>收集完記得關掉</strong>，避免有人亂填。
-        {% else %}打開後，大家在有機器人的群組或私訊機器人打 <span class="kbd">/我的名字 王小明</span>，就會出現在下面等你確認。{% endif %}</div>
-    </div>
-    <form method="post" action="/members/collect" class="inline">
+<div class="panel">
+  <div class="panel-body toggle-row">
+    <span class="badge {{ 'ok' if collect_names }}">{{ "開放中" if collect_names else "關閉" }}</span>
+    <span class="tt"><b>名字登記</b>
+      <span class="sub">{% if collect_names %}大家現在可以在群組或私訊機器人打 <span class="kbd">/我的名字 王小明</span>。收集完記得關掉，避免有人亂填。
+        {% else %}打開後，大家打 <span class="kbd">/我的名字 王小明</span> 就會排在下面等你確認。{% endif %}</span></span>
+    <form method="post" action="/members/collect">
       <input type="hidden" name="enabled" value="{{ '0' if collect_names else '1' }}">
-      <button type="submit" class="{{ 'secondary' if collect_names else 'primary' }}">{{ "關閉登記" if collect_names else "開放登記" }}</button>
+      <button type="submit" class="btn {{ '' if collect_names else 'btn-primary' }}">{{ "關閉登記" if collect_names else "開放登記" }}</button>
     </form>
   </div>
-</section>
+</div>
 
-<section class="card" id="accounts">
-  <div class="card-head">
-    <h2>收集到的 LINE 帳號（{{ accounts | length }}）{% if pending %} <span class="badge">{{ pending | length }} 位等你確認</span>{% endif %}</h2>
-    <input type="search" class="search" placeholder="🔍 找名字…" data-filter="#account-table" aria-label="搜尋帳號">
+<section class="panel" id="accounts">
+  <div class="panel-head">收集到的帳號 <span class="badge">{{ accounts | length }}</span>
+    {% if pending %}<span class="badge warn">{{ pending | length }} 位等你確認</span>{% endif %}
+    <span class="tools"><input type="search" placeholder="找名字…" data-filter="#account-table" aria-label="搜尋帳號"></span>
   </div>
-  <p class="muted small">黃色的列是本人登記了名字、等你確認的。按鈕上寫的就是會做的事：「對應到」把帳號接到名單上那個人；「加入」新增成一位新同工；「改名成」把名單上的名字換成本人登記的（舊名字會留在其他寫法）。</p>
   {% if accounts %}
   <div class="table-wrap">
-  <table class="table" id="account-table">
-    <thead><tr><th>LINE 名稱</th><th>本人登記的</th><th>名單上是</th><th>在哪些群組</th><th>怎麼處理</th></tr></thead>
+  <table class="data" id="account-table">
+    <thead><tr><th>LINE 名稱</th><th>本人登記的</th><th>名單上是</th><th>在哪些群組</th>
+      <th>怎麼處理 {{ ui.info("對應到：把帳號接到名單上那個人。加入：新增成一位新同工。改名成：把名單上的名字換成本人登記的，舊名字留在其他寫法。") }}</th></tr></thead>
     <tbody>
     {% for a in accounts %}
       <tr class="{{ 'pending' if a.needs_review }}">
-        <td>{{ a.display_name or "（抓不到名稱）" }}
-          <div class="id muted copy admin-only">{{ a.user_id }}</div>
-          <div class="muted small">最後出現 {{ a.last_seen[:16] | replace("T", " ") }}</div></td>
-        <td>{% if a.real_name %}<strong>{{ a.real_name }}</strong><div class="muted small">{{ a.real_name_at[:16] | replace("T", " ") }} 登記</div>
+        <td><b>{{ a.display_name or "（抓不到名稱）" }}</b>
+          <div class="sub">最後出現 {{ a.last_seen[5:16] | replace("T", " ") | replace("-", "/") }}</div>
+          <div class="id copy admin-only">{{ a.user_id }}</div></td>
+        <td>{% if a.real_name %}<b>{{ a.real_name }}</b><div class="sub">{{ a.real_name_at[5:16] | replace("T", " ") | replace("-", "/") }} 登記</div>
             {% elif not a.pending_nicknames %}<span class="muted">—</span>{% endif %}
             {% for nick in a.pending_nicknames %}
-              <div class="chip-row">
-                <span class="tag">暱稱 {{ nick }}</span>
-                <form method="post" action="/members/accounts/nickname" class="inline">
+              <div class="chips">
+                <span class="chip">暱稱 {{ nick }}</span>
+                <form method="post" action="/members/accounts/nickname">
                   <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
-                  <button type="submit" class="primary small">加成其他寫法</button></form>
-                <form method="post" action="/members/accounts/nickname/drop" class="inline">
+                  <button type="submit" class="btn btn-sm btn-primary">加成其他寫法</button></form>
+                <form method="post" action="/members/accounts/nickname/drop">
                   <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
-                  <button type="submit" class="secondary small">不要</button></form>
+                  <button type="submit" class="btn btn-sm btn-ghost">不要</button></form>
               </div>
             {% endfor %}
-            {% if a.pending_nicknames and not a.member %}<div class="muted small">要先「加入」或「對應」到同工，才能把暱稱加進去</div>{% endif %}</td>
+            {% if a.pending_nicknames and not a.member %}<div class="sub">要先「加入」或「對應」，才能把暱稱加進去</div>{% endif %}</td>
         <td>{% if a.member %}{{ a.member.name }}{% elif a.match %}<span class="muted">名單上有「{{ a.match.name }}」</span>
-            {% else %}<span class="muted">（不在名單上）</span>{% endif %}</td>
-        <td class="small">{{ a.chat_names or "—" }}</td>
-        <td class="actions-cell">
+            {% else %}<span class="muted">不在名單上</span>{% endif %}</td>
+        <td><span class="sub">{{ a.chat_names or "—" }}</span></td>
+        <td class="ops">
           {% if a.action == "linked" %}
-            <span class="tag ok">✅ 已對應</span>
+            <span class="badge ok">已對應</span>
           {% elif a.action == "rename" %}
-            <form method="post" action="/members/accounts/rename" class="inline">
+            <form method="post" action="/members/accounts/rename">
               <input type="hidden" name="user_id" value="{{ a.user_id }}">
-              <button type="submit" class="primary small">改名成「{{ a.real_name }}」</button></form>
-            <div class="muted small">目前名單上是「{{ a.member.name }}」</div>
+              <button type="submit" class="btn btn-sm btn-primary">改名成「{{ a.real_name }}」</button></form>
           {% elif a.action == "link" %}
-            <form method="post" action="/members/accounts/link" class="inline">
+            <form method="post" action="/members/accounts/link">
               <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="member_name" value="{{ a.match.name }}">
-              <button type="submit" class="primary small">對應到「{{ a.match.name }}」</button></form>
-            {% if a.matched_by == "display_name" %}<div class="muted small">只是 LINE 名稱一樣，確認是同一個人再按</div>{% endif %}
+              <button type="submit" class="btn btn-sm btn-primary"
+                {% if a.matched_by == "display_name" %}title="只是 LINE 名稱一樣，確認是同一個人再按"{% endif %}>對應到「{{ a.match.name }}」</button></form>
           {% elif a.action == "conflict" %}
-            <span class="tag warning">要確認</span>
-            <div class="muted small">「{{ a.match.name }}」已經對應到另一個 LINE 帳號。同一個人換了帳號的話，到名單<a href="/members?edit={{ a.match.name | urlencode }}">編輯「{{ a.match.name }}」</a>換掉 ID</div>
+            <a class="btn btn-sm" href="/members?edit={{ a.match.name | urlencode }}"
+               title="「{{ a.match.name }}」已經對應到另一個 LINE 帳號。同一個人換了帳號的話，到名單把 ID 換掉">要確認</a>
           {% else %}
-            <form method="post" action="/members/accounts/add" class="inline">
+            <form method="post" action="/members/accounts/add">
               <input type="hidden" name="user_id" value="{{ a.user_id }}">
-              <button type="submit" class="{{ 'primary' if a.real_name else 'secondary' }} small">加入「{{ a.proposed_name or "新朋友" }}」</button></form>
+              <button type="submit" class="btn btn-sm {{ 'btn-primary' if a.real_name }}">加入「{{ a.proposed_name or "新朋友" }}」</button></form>
           {% endif %}
           {% if a.action != "linked" or a.real_name %}
-            <form method="post" action="/members/accounts/ignore" class="inline">
-              <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="ghost small">忽略</button></form>
+            <form method="post" action="/members/accounts/ignore">
+              <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm btn-ghost">忽略</button></form>
           {% endif %}
         </td>
       </tr>
@@ -98,26 +83,32 @@
   </table>
   </div>
   {% else %}
-    {{ ui.empty("📱", "還沒有收集到任何 LINE 帳號", "要收集，機器人必須開著 Webhook（免費模式）；大家在群組講話就會被記下來。詳見「說明」。") }}
+    {{ ui.empty("還沒有收集到任何 LINE 帳號", "要收集，機器人必須開著免費模式（3-open-webhook）；大家在群組講話就會被記下來。") }}
   {% endif %}
-  {% if ignored_accounts %}
-  <details>
-    <summary>已忽略的帳號（{{ ignored_accounts | length }}）</summary>
-    <table class="table">
-      {% for a in ignored_accounts %}
-      <tr class="disabled">
-        <td>{{ a.display_name or "（抓不到名稱）" }}<div class="id copy admin-only">{{ a.user_id }}</div></td>
-        <td class="small">{{ a.chat_names or "—" }}</td>
-        <td class="nowrap">
-          <form method="post" action="/members/accounts/unignore" class="inline">
-            <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="secondary small">取消忽略</button></form>
-          <form method="post" action="/members/accounts/forget" class="inline" data-confirm="確定刪除這個帳號的紀錄嗎？">
-            <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="danger small">刪除紀錄</button></form>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-  </details>
-  {% endif %}
+  <div class="panel-foot">機器人會記下在群組講過話、新加入群組、加機器人好友的人。LINE ID 永遠不變，LINE 名稱本人隨時會改。</div>
 </section>
+
+{% if ignored_accounts %}
+<details class="panel">
+  <summary>已忽略的帳號 <span class="badge">{{ ignored_accounts | length }}</span><span class="hint">本人重新登記名字時才會再出現</span></summary>
+  <div class="table-wrap">
+  <table class="data">
+    <tbody>
+    {% for a in ignored_accounts %}
+    <tr class="off">
+      <td>{{ a.display_name or "（抓不到名稱）" }}<div class="id copy admin-only">{{ a.user_id }}</div></td>
+      <td><span class="sub">{{ a.chat_names or "—" }}</span></td>
+      <td class="ops">
+        <form method="post" action="/members/accounts/unignore">
+          <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm">取消忽略</button></form>
+        <form method="post" action="/members/accounts/forget" data-confirm="確定刪除這個帳號的紀錄嗎？">
+          <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm btn-danger">刪除紀錄</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</details>
+{% endif %}
 {% endblock %}

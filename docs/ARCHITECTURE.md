@@ -44,7 +44,7 @@
 | `webhook.py` | LINE Webhook：「/」開頭的聊天指令（`parse_command`）、加入群組、被踢出群組、被動收集 LINE 帳號 |
 | `remote_config.py` | 「/設定」可以改的項目與一次性驗證碼（安全設計寫在檔案開頭） |
 | `org.py` | 🧪 實驗：大教會架構樹、人數與則數合計（見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)） |
-| `web/` | FastAPI：管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`static/roster.js` 把服事表畫成表格 |
+| `web/` | FastAPI：管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`/api/nav` 是側欄每一項現在的狀況；`static/roster.js` 把服事表畫成表格；樣式的顏色只從 `static/app.css` 開頭那組變數來 |
 | `cli.py` | `python -m church_bot init / web / check / preview / send` |
 
 ## 錯誤處理原則：不要沉默

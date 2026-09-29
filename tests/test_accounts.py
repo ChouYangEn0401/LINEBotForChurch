@@ -220,7 +220,7 @@ def test_targets_page_lists_the_roles_that_exist_on_the_roster(client):
     page = client.get("/targets?new=1").text  # 新增／編輯的表單畫面才會列服事項目
     for role in ("講員", "司琴", "招待"):  # 範例服事表的欄位；點一下就加進去，不會打錯字
         assert f'data-pick-value="{role}"' in page
-    assert "想把大群拆成敬拜團群、招待群各收自己的" in client.get("/targets").text
+    assert "把大群拆成敬拜團群、招待群，各收自己的" in client.get("/targets").text
 
 
 def test_targets_page_still_works_when_the_roster_cannot_be_read(client, paths, monkeypatch):

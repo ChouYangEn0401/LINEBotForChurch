@@ -2,28 +2,31 @@
 {% import "_macros.html" as ui %}
 {% block title %}發送紀錄・服事提醒機器人{% endblock %}
 {% block content %}
-{% call ui.page_head("📜 發送紀錄", "每一次自動發送、手動發送的結果。點「看詳細」可以看到當時送出的訊息與所有問題。") %}{% endcall %}
-<section class="card">
+{{ ui.page_head("紀錄", "📜 發送紀錄", "每一次發送的結果，最新的在上面。點一列看當時送出的訊息。") }}
+<section class="panel">
+  <div class="panel-head">最近 {{ runs | length }} 次<span class="hint">Push 會扣 LINE 額度；Reply（有人打 /提醒）免費</span></div>
   {% if runs %}
   <div class="table-wrap">
-  <table class="table">
-    <thead><tr><th>時間</th><th>怎麼觸發 {{ ui.info("Push = 會扣 LINE 額度（排程、網頁按鈕、指令）；Reply = 有人在群組打 /提醒，免費。") }}</th><th>結果</th><th>送出</th><th>失敗</th><th>略過 {{ ui.info("之前已經送過、內容也沒變的，就不會重複送。") }}</th><th>問題</th><th></th></tr></thead>
+  <table class="data">
+    <thead><tr><th>時間</th><th>怎麼觸發</th><th>結果</th><th>送出</th><th>失敗</th>
+      <th>略過 {{ ui.info("之前已經送過、內容也沒變，就不重複送。") }}</th><th>問題</th></tr></thead>
     <tbody>
     {% for r in runs %}
-      <tr class="{{ 'bad' if r.status == 'error' }}">
-        <td class="nowrap">{{ r.started_at[:16] | replace("T", " ") }}</td>
+      <tr class="clickable {{ 'bad' if r.status == 'error' }}" data-href="/runs/{{ r.id }}">
+        <td class="nowrap mono"><a href="/runs/{{ r.id }}">{{ r.started_at[:16] | replace("T", " ") }}</a></td>
         <td>{{ r.trigger_zh }}</td>
-        <td><span class="tag {{ r.status }}">{{ r.status_zh }}</span></td>
-        <td>{{ r.sent }}</td><td>{{ r.failed or "—" }}</td><td>{{ r.skipped or "—" }}</td>
-        <td>{% if r.errors %}❌ {{ r.errors }} {% endif %}{% if r.warnings %}⚠️ {{ r.warnings }}{% endif %}{% if not r.errors and not r.warnings %}<span class="muted">—</span>{% endif %}</td>
-        <td><a class="button secondary small" href="/runs/{{ r.id }}">看詳細</a></td>
+        <td><span class="badge {{ r.status }}">{{ r.status_zh }}</span></td>
+        <td class="mono">{{ r.sent }}</td>
+        <td class="mono">{{ r.failed or "—" }}</td>
+        <td class="mono">{{ r.skipped or "—" }}</td>
+        <td>{% if r.errors %}<span class="badge bad">要修 {{ r.errors }}</span> {% endif %}{% if r.warnings %}<span class="badge warn">注意 {{ r.warnings }}</span>{% endif %}{% if not r.errors and not r.warnings %}<span class="muted">—</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
   {% else %}
-    {{ ui.empty("📭", "還沒有任何發送紀錄", "第一次發送之後就會出現在這裡。") }}
+    {{ ui.empty("還沒有任何發送紀錄", "第一次發送之後會出現在這裡。") }}
   {% endif %}
 </section>
 {% endblock %}

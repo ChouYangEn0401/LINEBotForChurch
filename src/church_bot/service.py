@@ -119,7 +119,7 @@ class BotService:
                 Severity.WARNING, "lookahead_too_short",
                 f"設定成每 {settings.schedule.every_n_weeks} 週發送一次，但「往後看幾天」只有"
                 f"{settings.behavior.lookahead_days} 天，下一次發送前那幾週的服事可能不會出現在提醒裡",
-                f"到「設定 → 🧰 進階」把「往後看幾天」改成至少 {span} 天。",
+                f"到「設定 → 發送行為」把「往後看幾天」改成至少 {span} 天。",
             ))
         return Context(settings, targets, members, teams, issues)
 
@@ -238,7 +238,7 @@ class BotService:
         admin = settings.line.admin_target_id
         if not admin:
             report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但沒有設定「管理員」，所以沒辦法用 LINE 通知你",
-                                       "到「設定 → 🔔 通知」填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
+                                       "到「設定 → 出問題通知誰」填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
             return
         own: Messenger | None = None
         if messenger is None:  # 例如讀不到服事表：還沒走到建立發送方式那一步就出錯了，這種最需要通知
@@ -461,7 +461,7 @@ class BotService:
         admin = s.line.admin_target_id
         items.append(CheckItem("管理員通知", bool(admin and LINE_ID_RE.match(admin)),
                                f"出問題會通知：{admin}" if admin else "還沒設定，出問題時沒辦法用 LINE 通知你",
-                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 🔔 通知 → 管理員 LINE ID」。"))
+                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 出問題通知誰」。"))
         items.append(CheckItem("自動排程", s.schedule.enabled or None, s.schedule.describe()))
         items.append(CheckItem("群組 ID 自動抓取", True if s.line.channel_secret else None,
                                "已設定 Channel secret" if s.line.channel_secret else "沒有設定 Channel secret（選用功能）",

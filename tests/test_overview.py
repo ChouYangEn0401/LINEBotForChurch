@@ -50,11 +50,11 @@ def test_schedule_off_and_test_mode():
 
 def test_home_page_shows_workflow_and_new_navigation(client):
     page = client.get("/").text
-    assert "運作流程" in page and "wf-step" in page and "需要處理的事" in page
-    sidebar = page.split("<main")[0]
+    assert "運作流程" in page and 'class="stage ' in page and "要處理的事" in page and "這次會發送" in page
+    sidebar = page.split('<section id="view"')[0]
     for label in ("主控台", "服事表", "同工名單", "LINE 群組", "發送紀錄", "說明"):
-        assert f'<span class="nav-label">{label}</span>' in sidebar
-    # 管理員才需要的頁面（設定、系統檢查、實驗）平常不佔選單，開「管理員模式」才出現
+        assert f'<span class="nm">{label}</span>' in sidebar
+    # 管理員才需要的頁面（設定、系統檢查、實驗）平常不佔側欄，按「切換身分」才出現
     assert 'href="/settings"' not in sidebar and 'href="/check"' not in sidebar and 'href="/lab/org"' not in sidebar
 
 
