@@ -208,8 +208,20 @@ def test_team_name_may_not_be_a_member_name(client, paths):
     assert "小明" not in teams(paths)
 
 
+def test_team_members_must_be_on_the_roster(client, paths):
+    r = client.post("/teams/save", data={"name": "新團", "members": "張晨光、還沒登記的人", "active": "on"}, follow_redirects=False)
+    assert "level=error" in r.headers["location"] and "新團" not in teams(paths)
+    client.post("/teams/save", data={"name": "新團", "members": "張晨光、小明", "active": "on"})  # 其他寫法也算名單上的人
+    assert teams(paths)["新團"].members == ("張晨光", "小明")
+    page = client.get("/members/teams?edit_team=新團").text
+    assert "data-picklist" in page and 'value="張晨光、小明"' in page  # 清單挑選：現有成員在隱藏欄位裡
+
+
 def test_members_page_warns_about_team_members_who_are_not_on_the_list(client, paths):
-    client.post("/teams/save", data={"name": "新團", "members": "還沒登記的人", "active": "on"})
+    from church_bot.models import Team
+    from church_bot.tables import TeamTable
+
+    TeamTable(paths.teams_file).save([Team("新團", members=("還沒登記的人",))])  # 例如用 Excel 直接改檔
     assert "的成員「還沒登記的人」不在同工名單上" in client.get("/members/teams").text
 
 

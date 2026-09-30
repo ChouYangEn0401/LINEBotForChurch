@@ -71,11 +71,18 @@
         <input type="text" id="team_aliases" name="aliases" value="{{ fmt_list(t.aliases) if t else '' }}" placeholder="晨光團、晨光">
         <span class="help">用「、」隔開。跟同工的名字重複的話，服事表寫這個會對到那個人，不會對到這一團。</span>
       </div>
-      <div class="ffield">
-        <label for="team_members">成員</label>
-        <input type="text" id="team_members" name="members" value="{{ fmt_list(t.members) if t else '' }}" placeholder="張晨光、陳小明、許心怡" list="member-names">
-        <datalist id="member-names">{% for m in members %}<option value="{{ m.name }}">{% endfor %}</datalist>
-        <span class="help">填同工名單上的名字，用「、」隔開。不在名單上的也能填，只是 @ 不到他。</span>
+      <div class="ffield" data-picklist>
+        <label for="team_pick">成員 <span class="badge" data-pick-count>{{ (t.members | length) if t else 0 }}</span></label>
+        <input type="hidden" name="members" value="{{ fmt_list(t.members) if t else '' }}" data-pick-value>
+        <div class="chips" data-pick-chips></div>
+        <div class="row">
+          <select id="team_pick" data-pick-select style="flex:1">
+            <option value="">選一位同工加進來…</option>
+            {% for m in members %}<option value="{{ m.name }}">{{ m.name }}{% if m.aliases %}（{{ fmt_list(m.aliases) }}）{% endif %}</option>{% endfor %}
+          </select>
+          <button type="button" class="btn" data-pick-add>加入</button>
+        </div>
+        <span class="help">只能從同工名單挑。名單上沒有的人，先到「名單」新增。</span>
       </div>
       <div class="ffield ffield-chk">
         <label><input type="checkbox" name="active" {{ "checked" if (t is none or t.active) }}>

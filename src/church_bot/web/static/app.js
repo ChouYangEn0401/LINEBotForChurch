@@ -192,3 +192,40 @@ document.querySelectorAll(".copy").forEach((element) => {
     }
   });
 });
+
+// ---------- 清單挑選（小團成員）：只能從下拉選單加，一人一個標籤，✕ 移除；真正送出的是隱藏欄位 ----------
+document.querySelectorAll("[data-picklist]").forEach((box) => {
+  const value = box.querySelector("[data-pick-value]");
+  const chips = box.querySelector("[data-pick-chips]");
+  const select = box.querySelector("[data-pick-select]");
+  const count = box.querySelector("[data-pick-count]");
+  const split = (text) => text.split(/[、,，;；/／\n]+/).map((s) => s.trim()).filter(Boolean);
+  let names = split(value.value);
+  const render = () => {
+    value.value = names.join("、");
+    if (count) count.textContent = String(names.length);
+    chips.replaceChildren(...names.map((name) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.textContent = name + " ";
+      const x = document.createElement("button");
+      x.type = "button"; x.className = "x"; x.textContent = "✕"; x.title = "移除 " + name;
+      x.addEventListener("click", () => { names = names.filter((n) => n !== name); render(); });
+      chip.appendChild(x);
+      return chip;
+    }));
+    Array.from(select.options).forEach((option) => { option.hidden = option.value !== "" && names.includes(option.value); });
+    if (!names.length) {
+      const empty = document.createElement("span");
+      empty.className = "note"; empty.textContent = "還沒有成員";
+      chips.appendChild(empty);
+    }
+  };
+  const add = () => {
+    if (!select.value || names.includes(select.value)) return;
+    names.push(select.value); select.value = ""; render(); select.focus();
+  };
+  box.querySelector("[data-pick-add]").addEventListener("click", add);
+  select.addEventListener("change", add);
+  render();
+});

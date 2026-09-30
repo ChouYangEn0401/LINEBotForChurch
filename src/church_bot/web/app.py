@@ -785,6 +785,9 @@ def create_app(paths: Paths) -> FastAPI:
         team = Team(name=name, aliases=parse_list(aliases), members=parse_list(members),
                     active=active == "on", note=note.strip())
         directory = Directory(MemberTable(paths.members_file).load().items)
+        back = f"/members/teams?edit_team={quote(original_name)}" if original_name else "/members/teams?new=1"
+        if strangers := [m for m in team.members if directory.lookup(m) is None]:  # 成員只能是同工名單上的人
+            return _redirect(back, f"「{'、'.join(strangers)}」不在同工名單上，先到「名單」新增再加進小團", "error")
         for key in (team.name, *team.aliases):  # 團名撞到人名 → 服事表寫這個只會對到那個人
             if (owner := directory.lookup(key)) is not None:
                 return _redirect("/members/teams", f"「{key}」已經是同工「{owner.name}」的名字或其他寫法，"
