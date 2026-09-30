@@ -169,8 +169,11 @@ def create_app(paths: Paths) -> FastAPI:
     scheduler = BotScheduler(service)
     webhook = WebhookHandler(service, Verifier(), on_settings_changed=scheduler.reload)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
+    asset_hash = hashlib.sha1()
+    for static in sorted((HERE / "static").glob("*")):
+        asset_hash.update(static.read_bytes())
     templates.env.globals.update(
-        version=__version__, weekday_zh=WEEKDAY_ZH, describe_line_id=describe_line_id, fmt_list=fmt_list,
+        version=__version__, asset_v=asset_hash.hexdigest()[:10], weekday_zh=WEEKDAY_ZH, describe_line_id=describe_line_id, fmt_list=fmt_list,
         status_zh={s.value: s.zh for s in DeliveryStatus}, trigger_zh=TRIGGER_ZH,
         source_kinds=SOURCE_KINDS_ZH, messenger_kinds=MESSENGER_KINDS_ZH, layouts=LAYOUTS_ZH, issue_link=issue_link,
     )
@@ -553,18 +556,34 @@ def create_app(paths: Paths) -> FastAPI:
 
     @ui.post("/members/save")
     def members_save(name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
-                     active: str = Form(""), note: str = Form(""), original_name: str = Form("")):
+                     active: str = Form(""), note: str = Form(""), original_name: str = Form(""), admin: str = Form("")):
         name, uid = name.strip(), line_user_id.strip()
         if not name:
             return _redirect("/members", "請填名字", "error")
         if uid and not (LINE_ID_RE.match(uid) and uid.startswith("U")):
             return _redirect(f"/members?edit={quote(original_name)}",
                              f"LINE_userId 格式不對：「{uid}」。要是 U 開頭再加 32 個英數字", "error")
-        member = Member(name=name, aliases=parse_list(aliases), line_user_id=uid, active=active == "on", note=note.strip())
+        member = Member(name=name, aliases=parse_list(aliases), line_user_id=uid, active=active == "on", note=note.strip(),
+                        admin=admin == "on")
         with TABLE_WRITE_LOCK:
             table = MemberTable(paths.members_file)
             table.save(upsert(table.load().items, member, key=lambda m: m.name, original_key=original_name or None))
         return _redirect("/members", f"已儲存「{name}」")
+
+    @ui.post("/members/admin")
+    def members_admin(name: str = Form(...), enabled: str = Form(""), next_url: str = Form("/members", alias="next")):
+        """把某位同工勾成（或取消）管理員。能開管理網頁的人本來就能改所有設定，所以不用另外驗證。"""
+        on = enabled == "1"
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(paths.members_file)
+            items = table.load().items
+            member = next((m for m in items if m.name == name), None)
+            if member is None:
+                return _redirect(_safe_next(next_url), f"同工名單裡找不到「{name}」", "error")
+            table.save([replace(m, admin=on) if m is member else m for m in items])
+        if on and not member.line_user_id:
+            return _redirect(_safe_next(next_url), f"「{name}」已經是管理員，但還沒對應 LINE 帳號，所以在 LINE 上還認不出他", "warn")
+        return _redirect(_safe_next(next_url), f"「{name}」{'已經是管理員了' if on else '不再是管理員'}")
 
     @ui.post("/members/delete")
     def members_delete(name: str = Form(...)):
@@ -749,8 +768,8 @@ def create_app(paths: Paths) -> FastAPI:
                 items = upsert(items, Member(name=raw), key=lambda m: m.name)
                 msg = f"已新增同工「{raw}」"
             else:
-                items = [Member(m.name, (*m.aliases, raw) if raw not in m.aliases else m.aliases, m.line_user_id,
-                                m.active, m.note) if m.name == member_name else m for m in items]
+                items = [replace(m, aliases=(*m.aliases, raw) if raw not in m.aliases else m.aliases)
+                         if m.name == member_name else m for m in items]
                 msg = f"已把「{raw}」設成「{member_name}」的其他寫法"
             table.save(items)
         return _redirect("/members", msg)

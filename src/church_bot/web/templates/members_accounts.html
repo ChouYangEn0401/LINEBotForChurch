@@ -3,7 +3,7 @@
 {% block title %}LINE 帳號・服事提醒機器人{% endblock %}
 {% block content %}
 {% set pending = accounts | selectattr("needs_review") | list %}
-{{ ui.page_head("同工名單", "📱 LINE 帳號", "大家的 LINE 帳號 → 對到同工名單上的人。對好了，提醒訊息才 @ 得到他；沒對也照常發送。") }}
+{{ ui.page_head("同工名單", "📱 LINE 帳號", "大家的 LINE 帳號 → 對到同工名單上的人。對好了，提醒訊息才 @ 得到他；要當管理員的人也在這裡按「設為管理員」。") }}
 {{ ui.members_seg("accounts", members | length, pending | length) }}
 
 <div class="panel">
@@ -49,12 +49,18 @@
               </div>
             {% endfor %}
             {% if a.pending_nicknames and not a.member %}<div class="sub">要先「加入」或「對應」，才能把暱稱加進去</div>{% endif %}</td>
-        <td>{% if a.member %}{{ a.member.name }}{% elif a.match %}<span class="muted">名單上有「{{ a.match.name }}」</span>
+        <td>{% if a.member %}{{ a.member.name }}{% if a.member.admin %} <span class="badge warn">管理員</span>{% endif %}{% elif a.match %}<span class="muted">名單上有「{{ a.match.name }}」</span>
             {% else %}<span class="muted">不在名單上</span>{% endif %}</td>
         <td><span class="sub">{{ a.chat_names or "—" }}</span></td>
         <td class="ops">
           {% if a.action == "linked" %}
             <span class="badge ok">已對應</span>
+            <form method="post" action="/members/admin">
+              <input type="hidden" name="name" value="{{ a.member.name }}"><input type="hidden" name="next" value="/members/accounts">
+              <input type="hidden" name="enabled" value="{{ '0' if a.member.admin else '1' }}">
+              <button type="submit" class="btn btn-sm {{ 'btn-ghost' if a.member.admin }}"
+                      title="{{ '取消後就不能用只有管理員能用的 LINE 指令' if a.member.admin else '勾成管理員：可以用 /別周測試、拿得到 /設定 的驗證碼、出問題會收到通知' }}">
+                {{ "取消管理員" if a.member.admin else "設為管理員" }}</button></form>
           {% elif a.action == "rename" %}
             <form method="post" action="/members/accounts/rename">
               <input type="hidden" name="user_id" value="{{ a.user_id }}">

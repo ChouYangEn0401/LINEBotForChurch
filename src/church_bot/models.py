@@ -109,6 +109,9 @@ class Member:
     line_user_id: str = ""  # 要 @ 他時才需要
     active: bool = True
     note: str = ""
+    # 管理員：可以用只有管理員能用的 LINE 指令（/別周測試）、拿得到「/設定」的驗證碼；
+    # 設定裡沒填「出問題通知誰」時，出問題就通知每一位管理員。要有 line_user_id 才有作用。
+    admin: bool = False
 
 
 @dataclass(frozen=True, slots=True)

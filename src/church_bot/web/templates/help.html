@@ -47,6 +47,7 @@
       <tr><td>臨時想提早發、想重發</td><td><a href="/#sending">主控台 → 立刻發送</a>；或在 LINE 群組打 <span class="kbd">/提醒</span>（免費）</td></tr>
       <tr><td>新同工、有人離開、名字對不到</td><td><a href="/members">同工名單</a></td></tr>
       <tr><td>有人在 LINE 登記了名字</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a></td></tr>
+      <tr><td>讓某人可以用管理員的 LINE 指令</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a> → 那個人那一列按「設為管理員」</td></tr>
       <tr><td>新群組、群組換了</td><td><a href="/targets">LINE 群組</a></td></tr>
       <tr><td>服事表換了新分頁</td><td><a href="/roster#connect">服事表 → 換一份服事表</a></td></tr>
       <tr><td>覺得怪怪的</td><td><a href="/check">系統檢查</a></td></tr>
@@ -61,7 +62,7 @@
       <li><b>申請 LINE 機器人</b>：照 <code>docs/SETUP_LINE.md</code> 拿到 Channel access token，貼到「設定 → 金鑰與密碼」。</li>
       <li><b>接上服事表</b>：Google Sheet 開成「知道連結的使用者可以檢視」，到 <a href="/roster#connect">服事表 → 換一份服事表</a> 貼網址。</li>
       <li><b>加群組</b>：把機器人邀進 LINE 群組，在群組打 <span class="kbd">/群組ID</span>，到 <a href="/targets?new=1">LINE 群組</a> 新增並貼上 ID，按「送測試訊息」。</li>
-      <li><b>設定管理員</b>：私訊機器人 <span class="kbd">/我的ID</span>，把 ID 填到「設定 → 出問題通知誰」。</li>
+      <li><b>設定管理員</b>：在群組打 <span class="kbd">/我的名字 你的名字</span>，到 <a href="/members/accounts">LINE 帳號</a> 按「對應到」，再按「設為管理員」。出問題就會通知你，也才能用 /別周測試。</li>
       <li><b>排每週的發送</b>：在 Telegram 機器人加每週四 20:00 呼叫 <code>cli.bat send</code>（見 README）。</li>
       <li><b>系統檢查</b>：<a href="/check">全部通過</a>就完成了。</li>
     </ol>
@@ -117,6 +118,8 @@
       <p>服事表出現了新名字或打錯字。訊息照原樣送出，不影響提醒。到 <a href="/members">同工名單</a> 最上面選他是誰。</p></details>
     <details class="faq"><summary>想一次收集大家的真實姓名和 LINE 帳號</summary>
       <p>到 <a href="/members/accounts">LINE 帳號</a> 按「開放登記」，請大家在群組打「/我的名字 真實姓名」，再逐一確認。收集完按「關閉登記」。</p></details>
+    <details class="faq"><summary>誰是管理員？怎麼多加一位</summary>
+      <p>管理員 = 同工名單裡勾了「管理員」而且對應好 LINE 帳號的人。到 <a href="/members/accounts">LINE 帳號</a> 找到那個人，按「設為管理員」；或在 <a href="/members">同工名單</a> 編輯他，勾「管理員」。管理員可以用 /別周測試、會拿到 /設定 的驗證碼、出問題會收到通知。能開這個網頁的人就能勾，所以要限制的話請設網頁密碼。</p></details>
     <details class="faq"><summary>有人改了 LINE 名稱</summary>
       <p>不用處理。對應靠的是不會變的 LINE ID。</p></details>
     <details class="faq"><summary>有人離開教會、不再服事</summary>

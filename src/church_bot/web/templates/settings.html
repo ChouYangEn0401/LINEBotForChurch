@@ -95,12 +95,12 @@
   </section>
 
   <section class="fcard" id="notify" data-fcard>
-    {{ card_head("出問題通知誰", "這一段決定服事表沒更新、LINE 送不出去時，誰會收到通知。", 1) }}
+    {{ card_head("出問題通知誰", "平常不用填：出問題會通知同工名單裡勾了「管理員」的人。這裡是想改成通知別的地方時才填。", 1) }}
     <div class="fcard-body">
       <div class="ffield" style="--span:12">
-        <label for="admin_target_id">管理員的 LINE ID</label>
-        <input type="text" id="admin_target_id" name="admin_target_id" class="mono" value="{{ f.admin_target_id }}" placeholder="U 開頭 + 32 碼">
-        <span class="help">留空 = 出問題只會顯示在主控台，沒有人收到通知。加機器人好友後私訊它 <span class="kbd">/我的ID</span> 就拿得到。填群組的話每次通知按人數扣額度。</span>
+        <label for="admin_target_id">另外指定的 LINE ID</label>
+        <input type="text" id="admin_target_id" name="admin_target_id" class="mono" value="{{ f.admin_target_id }}" placeholder="U 開頭（個人）或 C 開頭（群組）+ 32 碼">
+        <span class="help">留空 = 通知同工名單裡每一位勾了「管理員」且對應好 LINE 帳號的人（每人各扣 1 則）。填了就只通知這一個，可以是群組，但群組每次按人數扣額度。這個 ID 也算管理員。</span>
       </div>
     </div>
   </section>

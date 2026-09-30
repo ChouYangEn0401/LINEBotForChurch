@@ -266,6 +266,7 @@ class MemberTable(CsvTable[Member]):
         Column("aliases", "其他寫法", ("別名", "綽號", "aliases", "alias")),
         Column("line_user_id", "LINE_userId", ("userId", "line_user_id")),
         Column("active", "啟用", ("active", "在職", "服事中")),
+        Column("admin", "管理員", ("admin", "是管理員")),
         Column("note", "備註", ("note", "說明")),
     )
 
@@ -282,13 +283,14 @@ class MemberTable(CsvTable[Member]):
             ))
             uid = ""
         active = parse_bool(row.get("active", ""), default=True)
+        admin = parse_bool(row.get("admin", ""), default=False)
         return Member(
             name=name, aliases=parse_list(row.get("aliases", "")), line_user_id=uid,
-            active=True if active is None else active, note=row.get("note", ""),
+            active=True if active is None else active, note=row.get("note", ""), admin=bool(admin),
         )
 
     def to_row(self, m: Member) -> list[str]:
-        return [m.name, fmt_list(m.aliases), m.line_user_id, fmt_bool(m.active), m.note]
+        return [m.name, fmt_list(m.aliases), m.line_user_id, fmt_bool(m.active), fmt_bool(m.admin), m.note]
 
     def validate_all(self, items: list[Member], issues: list[Issue]) -> None:
         owner: dict[str, str] = {}

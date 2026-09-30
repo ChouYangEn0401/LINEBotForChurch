@@ -232,13 +232,23 @@ class BotService:
     def preview(self) -> tuple[RunReport, Plan | None]:
         return self.run("preview", dry_run=True, use_cache=True)
 
+    def admin_targets(self, settings: Settings, members: list[Member] | None = None) -> list[str]:
+        """出問題要通知誰。設定裡填了「出問題通知誰」就只通知那一個（可以是群組）；
+        沒填就通知同工名單裡每一位勾了「管理員」而且對應好 LINE 帳號的人（每人各算 1 則）。"""
+        explicit = (settings.line.admin_target_id or "").strip()
+        if explicit:
+            return [explicit]
+        if members is None:
+            members = self._load_table(MemberTable(self.paths.members_file), [])
+        return [m.line_user_id for m in members if m.admin and m.line_user_id]
+
     def _alert_admin(self, settings: Settings, messenger: Messenger | None, report: RunReport) -> None:
         if not (report.has_errors or report.has_warnings):
             return
-        admin = settings.line.admin_target_id
-        if not admin:
-            report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但沒有設定「管理員」，所以沒辦法用 LINE 通知你",
-                                       "到「設定 → 出問題通知誰」填管理員的 LINE ID（私訊機器人「/我的ID」就能拿到）。"))
+        targets = self.admin_targets(settings)
+        if not targets:
+            report.issues.append(Issue(Severity.WARNING, "no_admin", "有問題需要處理，但還沒有管理員，所以沒辦法用 LINE 通知你",
+                                       "到「同工名單」把自己勾成管理員（要先對應好 LINE 帳號），或到「設定 → 出問題通知誰」填 LINE ID。"))
             return
         own: Messenger | None = None
         if messenger is None:  # 例如讀不到服事表：還沒走到建立發送方式那一步就出錯了，這種最需要通知
@@ -248,8 +258,9 @@ class BotService:
                 log.error("有問題需要通知管理員，但目前沒有可用的發送方式：%s", exc)
                 return
         try:
-            messenger.send(admin, OutgoingMessage(text=build_admin_alert(report)))
-            log.info("已通知管理員")
+            for target in targets:
+                messenger.send(target, OutgoingMessage(text=build_admin_alert(report)))
+            log.info("已通知管理員（%d 位）", len(targets))
         except ChurchBotError as exc:
             log.error("通知管理員失敗：%s", exc)
             report.issues.append(Issue(Severity.ERROR, "admin_alert_failed", f"通知管理員失敗：{exc.message}", exc.hint))
@@ -459,9 +470,13 @@ class BotService:
                 items.append(CheckItem("LINE 連線", False, exc.message, exc.hint))
 
         admin = s.line.admin_target_id
-        items.append(CheckItem("管理員通知", bool(admin and LINE_ID_RE.match(admin)),
-                               f"出問題會通知：{admin}" if admin else "還沒設定，出問題時沒辦法用 LINE 通知你",
-                               "" if admin else "私訊機器人「/我的ID」，把拿到的 ID 填到「設定 → 出問題通知誰」。"))
+        admins = [m.name for m in ctx.members if m.admin and m.line_user_id]
+        targets = self.admin_targets(s, ctx.members)
+        items.append(CheckItem("管理員通知", bool(targets) and all(LINE_ID_RE.match(t) for t in targets),
+                               f"出問題會通知：{admin}" if admin else
+                               f"出問題會通知管理員：{'、'.join(admins)}" if admins else
+                               "還沒有管理員，出問題時沒辦法用 LINE 通知你",
+                               "" if targets else "到「同工名單」把自己勾成管理員（要先對應好 LINE 帳號），或到「設定 → 出問題通知誰」填 LINE ID。"))
         items.append(CheckItem("自動排程", s.schedule.enabled or None, s.schedule.describe()))
         items.append(CheckItem("群組 ID 自動抓取", True if s.line.channel_secret else None,
                                "已設定 Channel secret" if s.line.channel_secret else "沒有設定 Channel secret（選用功能）",

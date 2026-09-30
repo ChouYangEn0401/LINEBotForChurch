@@ -50,8 +50,10 @@
 </section>
 {% endif %}
 
+{% set admins = members | selectattr("admin") | list %}
 <section class="panel">
   <div class="panel-head">名單 <span class="badge">{{ members | length }}</span>
+    <span class="hint">管理員 {{ admins | length }} 位{% if not admins %}，還沒有人能用只有管理員能用的 LINE 指令{% endif %}</span>
     <span class="tools">
       <input type="search" placeholder="找名字…" data-filter="#member-table" aria-label="搜尋同工">
       <a class="btn btn-sm btn-ghost admin-only" href="/download/members.csv" title="用 Excel 打開也能改，改完不用重開程式">下載 CSV</a>
@@ -64,11 +66,14 @@
         <th>名字</th>
         <th>其他寫法 {{ ui.info("服事表上可能出現的別的寫法：綽號、英文名。寫這些，訊息都會顯示成左邊的名字。") }}</th>
         <th>LINE {{ ui.info("有對應 LINE 帳號，訊息裡才 @ 得到他。到「LINE 帳號」分頁對應。") }}</th>
-        <th>狀態</th><th></th></tr></thead>
+        <th>狀態</th>
+        <th>管理員 {{ ui.info("開了就能用只有管理員能用的 LINE 指令（/別周測試）、拿得到 /設定 的驗證碼、出問題會收到通知。要先對應 LINE 帳號才有作用。") }}</th>
+        <th></th></tr></thead>
       <tbody>
       {% for m in members %}
         <tr class="{{ '' if m.active else 'off' }}">
-          <td><b>{{ m.name }}</b>{% if m.note %}<div class="sub">{{ m.note }}</div>{% endif %}</td>
+          <td><b>{{ m.name }}</b>
+            {% if m.note %}<div class="sub">{{ m.note }}</div>{% endif %}</td>
           <td>
             <div class="chips">
             {% for alias in m.aliases %}
@@ -87,6 +92,14 @@
           <td>{% if m.line_user_id %}<span class="badge ok">已對應</span>{% if line_names.get(m.line_user_id) %} <span class="sub">{{ line_names.get(m.line_user_id) }}</span>{% endif %}
               {% else %}<span class="muted">—</span>{% endif %}</td>
           <td>{% if m.active %}<span class="badge ok">服事中</span>{% else %}<span class="badge">停用</span>{% endif %}</td>
+          <td>
+            <form method="post" action="/members/admin">
+              <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="next" value="/members">
+              <input type="hidden" name="enabled" value="{{ '0' if m.admin else '1' }}">
+              <button type="submit" class="btn btn-sm {{ 'btn-primary' if m.admin else 'btn-ghost' }}"
+                      title="{{ '按一下取消' if m.admin else '按一下設為管理員' }}{{ '' if m.line_user_id else '（還沒對應 LINE 帳號，設了在 LINE 上也認不出他）' }}">{{ "開" if m.admin else "關" }}</button>
+            </form>
+          </td>
           <td class="ops">
             <a class="btn btn-sm" href="/members?edit={{ m.name | urlencode }}">編輯</a>
             <form method="post" action="/members/delete" data-confirm="確定刪除「{{ m.name }}」嗎？離開教會的話，改成「停用」比較好，之後被排到會提醒你。">
@@ -128,6 +141,10 @@
       <div class="ffield ffield-chk">
         <label><input type="checkbox" name="active" {{ "checked" if (m is none or m.active) }}>
           <span><b>還在服事</b><span class="help"><br>取消勾選 = 停用。停用的人又被排到服事，會提醒管理員。</span></span></label>
+      </div>
+      <div class="ffield ffield-chk">
+        <label><input type="checkbox" name="admin" {{ "checked" if (m and m.admin) }}>
+          <span><b>管理員</b><span class="help"><br>可以用只有管理員能用的 LINE 指令（/別周測試）、拿得到「/設定」的驗證碼；設定裡沒填「出問題通知誰」時，出問題會通知他。要先對應好 LINE 帳號才有作用。</span></span></label>
       </div>
       <div class="ffield">
         <label for="note">備註</label>

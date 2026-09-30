@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}服事提醒機器人{% endblock %}</title>
-  <link rel="stylesheet" href="/static/app.css?v={{ version }}">
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
   <script>
     // 第一次畫面出來之前就決定深色／淺色，才不會閃一下。預設跟著作業系統。
     try {
@@ -90,7 +90,7 @@
     </div>
   </section>
 </main>
-<script src="/static/app.js?v={{ version }}"></script>
+<script src="/static/app.js?v={{ asset_v }}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

@@ -512,3 +512,44 @@ def test_stale_process_gets_a_restart_hint_instead_of_a_scary_error(client, monk
     quiet = TestClient(client.app, raise_server_exceptions=False)  # 不要把例外再丟出來，看畫面就好
     body = quiet.get("/members").text
     assert "這個視窗還在跑舊的版本" in body and "2-start" in body
+
+
+# ------------------------------------------------------------------ 管理員：同工名單裡勾一下就好
+
+
+def test_member_flagged_as_admin_can_use_admin_commands(handler, paths, monkeypatch):
+    MemberTable(paths.members_file).save([Member("陳小明", line_user_id=uid(), admin=True), Member("林美華")])
+    monkeypatch.setattr(BotService, "preview_for", lambda self, day, chat_id="": ([OutgoingMessage(text="試印")], "🧪"))
+    for text in ("/別周測試 1004", "/權限", "/我的權限"):
+        body = say(text, user=uid())
+        handler.handle(body, sign(body))
+    assert FakeLine.replies[0][1] == "試印"
+    assert "管理員：陳小明" in FakeLine.replies[2][1]
+    assert "管理員 👑" in FakeLine.replies[3][1]
+
+
+def test_admin_toggle_on_the_members_page(client, paths):
+    r = client.post("/members/admin", data={"name": "陳小明", "enabled": "1", "next": "/members"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/members?")
+    assert next(m for m in MemberTable(paths.members_file).load().items if m.name == "陳小明").admin
+    assert 'value="0"' in client.get("/members").text  # 開著的那一列，按鈕變成「關」
+    client.post("/members/admin", data={"name": "陳小明", "enabled": "0"})
+    assert not next(m for m in MemberTable(paths.members_file).load().items if m.name == "陳小明").admin
+
+
+def test_alerts_go_to_admin_members_when_no_target_is_set(paths, monkeypatch):
+    from tests.conftest import FakeMessenger, write
+
+    fake = FakeMessenger()
+    monkeypatch.setattr("church_bot.service.build_messenger", lambda settings, paths: fake)
+    write(paths.config_dir / "roster.csv", "日期,講員\n2026/9/13,王牧師\n")
+    settings = Settings()
+    settings.source.kind, settings.source.csv_path, settings.schedule.enabled = "csv", "config/roster.csv", False
+    save_settings(paths, settings)
+    MemberTable(paths.members_file).save([Member("陳小明", line_user_id=uid("1"), admin=True),
+                                          Member("林美華", line_user_id=uid("2"), admin=True), Member("沒帳號", admin=True)])
+    service = BotService(paths)
+    service.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
+    assert service.admin_targets(settings) == [uid("1"), uid("2")]
+    service.run("cli")  # 沒有群組 → 有錯誤 → 通知每一位管理員
+    assert fake.texts_to(uid("1")) and fake.texts_to(uid("2"))

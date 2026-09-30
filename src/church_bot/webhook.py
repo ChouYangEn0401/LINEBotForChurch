@@ -44,7 +44,7 @@ import re
 import sys
 import unicodedata
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Iterable
 
 from church_bot.config import Settings, load_settings
 from church_bot.core.dates import parse_user_date
@@ -123,25 +123,33 @@ class Command:
     arg: str = ""
 
 
-def is_admin(settings: Settings, user_id: str, chat_id: str) -> bool:
-    """管理員 = 設定裡「管理員 LINE ID」的那個人，或在那個管理員群組裡講話。
+def is_admin(settings: Settings, user_id: str, chat_id: str, admin_ids: Iterable[str] = ()) -> bool:
+    """管理員 = 同工名單裡勾了「管理員」的人（admin_ids 是他們的 LINE ID），
+    或設定裡「出問題通知誰」的那個人，或在那個管理員群組裡講話。
 
     刻意不做多層權限：真正會影響大家的事（改設定）另外靠一次性驗證碼，驗證碼也只送給管理員。
     """
     admin = (settings.line.admin_target_id or "").strip()
-    return bool(admin) and admin in {user_id, chat_id}
+    if admin and admin in {user_id, chat_id}:
+        return True
+    return bool(user_id) and user_id in set(admin_ids)
 
 
-def permissions_text(settings: Settings, admin_name: str = "") -> str:
-    """「/權限」的回覆：誰是管理員、哪個指令誰能用、機器人不會做什麼。"""
+def permissions_text(settings: Settings, admin_name: str = "", admin_names: Iterable[str] = ()) -> str:
+    """「/權限」的回覆：誰是管理員、哪個指令誰能用、機器人不會做什麼。
+
+    ``admin_names`` 是同工名單裡勾了管理員的人；``admin_name`` 是設定裡「出問題通知誰」那個人的名字（查得到的話）。
+    """
     admin = (settings.line.admin_target_id or "").strip()
-    if admin:
-        who = f"{admin_name}（{admin[:5]}…{admin[-4:]}）" if admin_name else f"{admin[:5]}…{admin[-4:]}"
-        admin_line = f"・管理員：{who}"
+    names = list(dict.fromkeys([*admin_names, *([admin_name] if admin_name else [])]))
+    if not names and admin:
+        names = [f"{admin[:5]}…{admin[-4:]}"]  # 只露頭尾，不把整個 ID 貼在群組裡
+    if names:
+        admin_line = f"・管理員：{'、'.join(names)}"
         admin_note = "　拿得到驗證碼、收得到錯誤通知、可以打 /別周測試、可以開管理網頁"
     else:
         admin_line = "・管理員：還沒設定 ⚠️"
-        admin_note = "　請管理員私訊機器人「/我的ID」，把 ID 填到管理網頁「設定 → 出問題通知誰」"
+        admin_note = "　到管理網頁「同工名單」把自己勾成管理員（要先對應好 LINE 帳號）"
     switches = (f"收集名單「{'開' if settings.chat.collect_names else '關'}」"
                 f"・自動發送「{'開' if settings.schedule.enabled else '關'}」"
                 f"・用 LINE 改設定「{'開' if settings.chat.remote_config else '關'}」")
@@ -284,7 +292,7 @@ class WebhookHandler:
         elif etype == "leave":
             history.remember_chat(chat_id, kind, status="left")
             log.warning("機器人被移出群組：%s", chat_id)
-            self._alert_left(chat_id, messenger, settings.line.admin_target_id)
+            self._alert_left(chat_id, messenger, self.service.admin_targets(settings, self._members()))
         elif etype == "follow":
             history.remember_chat(chat_id, "user")
             name = self._touch_person(chat_id, chat_id, "user", messenger)
@@ -320,7 +328,7 @@ class WebhookHandler:
         elif command.name == "my_nickname":
             self._register_nickname(command.arg, chat)
         elif command.name == "permissions":
-            chat.reply(permissions_text(chat.settings, self._admin_name(chat.settings)))
+            chat.reply(permissions_text(chat.settings, self._admin_name(chat.settings), self._admin_names()))
         elif command.name == "my_permissions":
             self._my_permissions(chat)
         elif command.name == "test_week":
@@ -388,8 +396,8 @@ class WebhookHandler:
         log.warning("LINE 設定修改等待驗證：%s（%s）要把「%s」改成「%s」", who, pending.chat_label, pending.option.key,
                     pending.value_text)
         on_screen = "驗證碼顯示在執行機器人的電腦畫面上（管理網頁也可以直接核准）。"
-        admin = chat.settings.line.admin_target_id
-        if not (chat.settings.chat.send_code_to_admin and admin):
+        targets = self.service.admin_targets(chat.settings, self._members())
+        if not (chat.settings.chat.send_code_to_admin and targets):
             return on_screen
         if not self.verifier.allow_push():
             log.warning("今天用 LINE 私訊驗證碼的次數已達上限，這次只顯示在電腦畫面上")
@@ -398,7 +406,8 @@ class WebhookHandler:
                 f"・要改：{pending.option.key} → {pending.value_text}\n\n驗證碼：{code}\n\n"
                 "5 分鐘內有效、只能用一次。是你同意的修改才把驗證碼告訴對方；不是的話不用理它，時間到自動失效。")
         try:
-            chat.messenger.send(admin, OutgoingMessage(text=text))
+            for target in targets:
+                chat.messenger.send(target, OutgoingMessage(text=text))
         except ChurchBotError as exc:
             log.error("用 LINE 私訊驗證碼給管理員失敗：%s", exc)
             return on_screen
@@ -497,8 +506,18 @@ class WebhookHandler:
             log.error("讀同工名單失敗：%s", exc)
             return []
 
+    def _admin_ids(self) -> set[str]:
+        """同工名單裡勾了「管理員」而且對應好 LINE 帳號的人。"""
+        return {m.line_user_id for m in self._members() if m.admin and m.line_user_id}
+
+    def _admin_names(self) -> list[str]:
+        return [m.name for m in self._members() if m.admin and m.line_user_id]
+
+    def _is_admin(self, chat: _Chat) -> bool:
+        return is_admin(chat.settings, chat.user_id, chat.chat_id, self._admin_ids())
+
     def _admin_name(self, settings: Settings) -> str:
-        """管理員的名字（先看同工名單，再看 LINE 名稱）；查不到就空字串。"""
+        """設定裡「出問題通知誰」那個人的名字（先看同工名單，再看 LINE 名稱）；查不到就空字串。"""
         admin = (settings.line.admin_target_id or "").strip()
         if not admin:
             return ""
@@ -512,7 +531,7 @@ class WebhookHandler:
             return
         person = self.service.history.person(chat.user_id) or {}
         member = next((m for m in self._members() if m.line_user_id == chat.user_id), None)
-        admin = is_admin(chat.settings, chat.user_id, chat.chat_id)
+        admin = self._is_admin(chat)
         lines = ["👤 你的狀況", "",
                  f"・LINE 名稱：{chat.display_name or '（抓不到）'}",
                  f"・你的 LINE ID：{chat.user_id}"]
@@ -537,9 +556,9 @@ class WebhookHandler:
     # ------------------------------------------------------------------ /別周測試（純預覽，見 service.preview_for）
 
     def _test_week(self, arg: str, chat: _Chat) -> None:
-        if not is_admin(chat.settings, chat.user_id, chat.chat_id):
-            extra = ("請管理員來打。" if chat.settings.line.admin_target_id
-                     else "（目前還沒設定管理員：請到管理網頁「設定 → 出問題通知誰」填好管理員的 LINE ID。）")
+        if not self._is_admin(chat):
+            extra = ("請管理員來打。" if chat.settings.line.admin_target_id or self._admin_ids()
+                     else "（目前還沒有管理員：到管理網頁「同工名單」把自己勾成管理員。）")
             chat.reply(f"「/別周測試」只有管理員可以用 🙏{extra}\n大家都可以打「/提醒」看這一週的服事。")
             return
         if not arg:
@@ -597,17 +616,18 @@ class WebhookHandler:
             table.save(items)
         return True
 
-    def _alert_left(self, chat_id: str, messenger: LineMessenger, admin_id: str) -> None:
+    def _alert_left(self, chat_id: str, messenger: LineMessenger, admin_ids: list[str]) -> None:
         targets = TargetTable(self.service.paths.targets_file)
         try:
             hit = next((t for t in targets.load().items if t.line_id == chat_id and t.enabled), None)
         except ChurchBotError:
             hit = None
-        if hit is None or not admin_id:
+        if hit is None or not admin_ids:
             return
         text = (f"⚠️ 服事提醒機器人被移出「{hit.name}」群組了，這個群組以後收不到提醒。\n"
                 "如果是不小心的，請重新邀請機器人進群組；不再需要的話，到管理網頁把這個群組停用。")
         try:
-            messenger.send(admin_id, OutgoingMessage(text=text))
+            for admin_id in admin_ids:
+                messenger.send(admin_id, OutgoingMessage(text=text))
         except ChurchBotError as exc:
             log.error("通知管理員失敗：%s", exc)
