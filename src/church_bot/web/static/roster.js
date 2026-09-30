@@ -20,6 +20,10 @@
     return node;
   };
   const within = (iso, data) => iso >= data.today && iso <= data.window_end;
+  // 跟後端 split_names() 用同一組分隔符，把格子拆成一個一個名字，再逐一比對——
+  // 不能用「格子文字整段 includes(某個對不到的名字)」，不然「晨光」對不到會連帶把
+  // 完全不相干、但剛好包含這兩個字的「晨光實體團」也標成對不到（子字串誤判）。
+  const cellNames = (text) => text.split(/[、,，;；/／&＆+＋\n]+/).map((s) => s.trim()).filter(Boolean);
 
   function renderSheet(sheet, data) {
     const rows = sheet.rows || [];
@@ -70,7 +74,7 @@
             }
           }
           const isNameCell = r > sheet.header_row && c !== dateCol && !(sheet.date_axis === "col" && c === 0);
-          if (isNameCell && text && unknown.some((name) => text.includes(name))) {
+          if (isNameCell && text && cellNames(text).some((name) => unknown.includes(name))) {
             td.classList.add("is-unknown");
             td.title = text + "　←　同工名單找不到這個名字";
           }
