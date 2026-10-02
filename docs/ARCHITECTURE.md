@@ -36,8 +36,10 @@
 | `core/renderer.py` | 訊息排版（Jinja2、textV2 mention） |
 | `core/planner.py` | 決定發給誰、發什麼；產生所有 Issue |
 | `core/dispatcher.py` | 防重複、額度檢查、發送、失敗處理 |
-| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字與暱稱、群組成員關係）；舊資料庫開啟時自動補欄位 |
+| `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字與暱稱、群組成員關係）、跨程式共用的小狀態（`state` 表）；舊資料庫開啟時自動補欄位 |
 | `core/accounts.py` | LINE 帳號 ↔ 同工名單的對應狀態（已對應／改名／對應／衝突／加入）、待確認的暱稱 |
+| `core/quota.py` | 本月 LINE 用量的快照：什麼時候該再問 LINE、問不到時留住舊數字（主控台那一格、`/api/quota`、`cli.bat quota` 共用） |
+| `core/public_url.py` | 目前對外的網址（免費模式每次重開都會變）：從 Webhook 請求的 Host 認出來，供 LINE 指令「/服務網址」回覆 |
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
 | `service.py` | 組裝一次完整執行、管理員通知、健康檢查 |
 | `scheduler.py` | APScheduler 每週排程 + 開機補發 |
@@ -45,7 +47,7 @@
 | `remote_config.py` | 「/設定」可以改的項目與一次性驗證碼（安全設計寫在檔案開頭） |
 | `org.py` | 🧪 實驗：大教會架構樹、人數與則數合計（見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)） |
 | `web/` | FastAPI：管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`/api/nav` 是側欄每一項現在的狀況；`static/roster.js` 把服事表畫成表格；樣式的顏色只從 `static/app.css` 開頭那組變數來 |
-| `cli.py` | `python -m church_bot init / web / check / preview / send` |
+| `cli.py` | `python -m church_bot init / web / check / preview / send / quota / set-webhook / tunnel` |
 
 ## 錯誤處理原則：不要沉默
 
