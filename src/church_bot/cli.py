@@ -170,6 +170,25 @@ def cmd_send(paths: Paths, args: argparse.Namespace) -> int:
     return 1 if report.has_errors else 0
 
 
+def cmd_quota(paths: Paths, args: argparse.Namespace) -> int:
+    """印出本月 LINE 用量，並在該查的時候向 LINE 重新問一次。
+
+    給 Telegram 當「發完之後的回頭確認」用：排在 send 之後約 5 分鐘呼叫一次
+    （LINE 的用量統計會延遲幾分鐘，發送當下問到的數字通常還沒算進這一次），
+    管理網頁下次打開看到的就是發送後的真實用量。管理網頁開著的話它自己會更新，不用這個指令。
+    """
+    from church_bot.service import BotService
+
+    service = BotService(paths)
+    snapshot = service.refresh_quota(force=args.force)
+    if snapshot is None:
+        _print("➖ 目前不檢查 LINE 額度（測試模式，或設定裡關掉了額度檢查）")
+        return 0
+    _print(f"📊 {snapshot.describe()}")
+    _print(f"   {snapshot.status_text(dt.datetime.now().astimezone())}")
+    return 1 if snapshot.error else 0
+
+
 def _popup_text(report: RunReport, limit: int = 5) -> str:
     problems = [i for i in report.issues if i.is_error]
     lines = [f"已送出 {report.count_sent} 則、失敗 {report.count_failed} 則。", ""]
@@ -277,6 +296,8 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--retries", type=int, default=0, help="讀不到服事表、LINE 暫時連不上時，最多再試幾次（預設 0）")
     send.add_argument("--retry-wait", type=float, default=300, help="每次重試前等幾秒（預設 300 = 5 分鐘）")
     send.add_argument("--popup", action="store_true", help="最後還是失敗的話，在這台電腦跳出小視窗通知")
+    quota = sub.add_parser("quota", help="查本月 LINE 用量（發送後約 5 分鐘呼叫一次，用量就會是發送後的數字）")
+    quota.add_argument("--force", action="store_true", help="不管上次查多久以前，一定重新問 LINE")
     hook = sub.add_parser("set-webhook", help="把臨時網址登記成 LINE 的 Webhook URL，並請 LINE 測試連線")
     hook.add_argument("url", help="https:// 開頭的網址（沒加 /line/webhook 會自動補上）")
     hook.add_argument("--tries", type=int, default=12, help=argparse.SUPPRESS)
@@ -288,7 +309,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
-            "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
+            "quota": cmd_quota, "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
 
 
 def main(argv: list[str] | None = None) -> int:

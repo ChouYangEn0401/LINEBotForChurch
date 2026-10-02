@@ -7,6 +7,8 @@ rem                              failures 3 times, 5 minutes apart; pop up a win
 rem   cli.bat send               send now, once
 rem   cli.bat preview            show what would be sent (sends nothing)
 rem   cli.bat check              health check + preview
+rem   cli.bat quota              this month's LINE usage; schedule it ~5 min after send so the
+rem                              management page shows the usage *after* that send (LINE counts lag)
 setlocal
 call "%~dp0_env.bat"
 if not exist "%VENV_PY%" (

@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 
-from church_bot.cli import cmd_send, cmd_set_webhook
+from church_bot.cli import cmd_quota, cmd_send, cmd_set_webhook
 from church_bot.config import Settings, save_settings
 from church_bot.errors import MessengerError
 from church_bot.locking import process_lock
@@ -154,6 +154,47 @@ def test_line_network_failure_counts_as_temporary(service, fake):
     fake.fail.pop(gid())
     report, _ = service.run("cli", force=True)
     assert not worth_retrying(report)
+
+
+# ------------------------------------------------------------------ Telegram 呼叫的 quota：發完回頭確認用量
+
+
+def test_quota_command_prints_and_stores_this_months_usage(service, paths, fake, capsys):
+    from church_bot.messengers.base import Quota
+
+    fake.quota_value = Quota(limit=200, used=40)
+    assert cmd_quota(paths, argparse.Namespace(force=False)) == 0
+    assert "本月已用 40 / 200 則" in capsys.readouterr().out
+    assert service.quota_status().used == 40  # 存起來，管理網頁下次打開就是這個數字
+
+
+def test_quota_command_after_a_send_picks_up_the_settled_number(service, paths, fake, capsys):
+    """發送當下 LINE 的統計還沒算進這一次；Telegram 排在 5 分鐘後呼叫 quota，數字才對得上。"""
+    from church_bot.messengers.base import Quota
+
+    fake.quota_value = Quota(limit=200, used=40)
+    service.run("cli")
+    assert service.quota_status().pending  # 發完先標記「數字可能還沒算進這一次」
+
+    fake.quota_value = Quota(limit=200, used=60)
+    assert cmd_quota(paths, argparse.Namespace(force=True)) == 0
+    after = service.quota_status()
+    assert after.used == 60 and not after.pending
+    assert "本月已用 60 / 200 則" in capsys.readouterr().out
+
+
+def test_quota_command_reports_a_lookup_failure_but_keeps_the_old_number(service, paths, fake, monkeypatch, capsys):
+    from church_bot.messengers.base import Quota
+
+    fake.quota_value = Quota(limit=200, used=40)
+    cmd_quota(paths, argparse.Namespace(force=False))
+    def timeout():
+        raise MessengerError("連 LINE 逾時", "檢查網路")
+
+    monkeypatch.setattr(fake, "quota", timeout)
+    assert cmd_quota(paths, argparse.Namespace(force=True)) == 1
+    out = capsys.readouterr().out
+    assert "本月已用 40 / 200 則" in out and "連 LINE 逾時" in out
 
 
 # ------------------------------------------------------------------ 跨程式的鎖
