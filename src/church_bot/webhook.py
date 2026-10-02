@@ -249,13 +249,19 @@ class WebhookHandler:
         self.verifier = verifier or Verifier()
         self.on_settings_changed = on_settings_changed
 
-    def handle(self, body: bytes, signature: str) -> int:
-        """回傳處理了幾個事件。簽章不對丟 SignatureError；沒設定 secret 丟 ConfigError。"""
+    def handle(self, body: bytes, signature: str, public_url: str = "") -> int:
+        """回傳處理了幾個事件。簽章不對丟 SignatureError；沒設定 secret 丟 ConfigError。
+
+        ``public_url`` = LINE 剛剛打到的那個對外網址（網頁那一層從請求的 Host 推出來）。
+        一定要等簽章驗過才記：不然誰都能偽造一個 Host，把假網址餵給「/服務網址」。
+        """
         settings = load_settings(self.service.paths)
         if not settings.line.channel_secret:
             raise ConfigError("收到 LINE Webhook，但沒有設定 LINE_CHANNEL_SECRET", "到「設定 → 金鑰與密碼」填入 Channel secret。")
         if not verify_signature(settings.line.channel_secret, body, signature):
             raise SignatureError("LINE Webhook 簽章不符（Channel secret 可能填錯）", "確認「設定 → 金鑰與密碼」的 Channel secret。")
+        if public_url:
+            self.service.remember_service_url(public_url)
         events = json.loads(body.decode("utf-8") or "{}").get("events", [])
         if not events:
             return 0  # LINE 後台按「Verify」時會送空的事件

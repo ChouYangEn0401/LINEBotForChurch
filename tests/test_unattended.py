@@ -287,6 +287,16 @@ def test_set_webhook_adds_path_and_retries_until_line_can_connect(paths, monkeyp
     assert "LINE 連得到機器人了" in capsys.readouterr().out
 
 
+def test_set_webhook_remembers_the_url_for_the_line_command(paths, monkeypatch):
+    """登記的同時記下對外網址：管理員在 LINE 打「/服務網址」就拿得到，不用一個一個貼。"""
+    save_settings(paths, Settings())
+    monkeypatch.setattr("church_bot.messengers.line.LineMessenger", FakeWebhookLine)
+    FakeWebhookLine.calls, FakeWebhookLine.active = [], True
+    cmd_set_webhook(paths, argparse.Namespace(url="https://abc.trycloudflare.com/", tries=3, wait=0))
+    current = BotService(paths).service_url()
+    assert current.url == "https://abc.trycloudflare.com" and current.source == "register"
+
+
 def test_set_webhook_warns_when_use_webhook_is_off(paths, monkeypatch, capsys):
     save_settings(paths, Settings())
     monkeypatch.setattr("church_bot.messengers.line.LineMessenger", FakeWebhookLine)

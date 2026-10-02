@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
+from church_bot.core.public_url import public_base
 from church_bot.models import Member, OutgoingMessage
 from church_bot.scheduler import (
     QUOTA_EVERY_MINUTES, QUOTA_JOB_ID, BotScheduler, is_active_week, next_fire_time, previous_fire_time,
@@ -336,6 +337,42 @@ def test_member_joined_reports_new_member_names_and_ids(handler):
 def test_bad_signature_is_rejected(handler):
     with pytest.raises(SignatureError):
         handler.handle(b'{"events":[]}', "wrong")
+
+
+# ------------------------------------------------------------------ 對外網址（core/public_url.py）
+
+
+def test_public_base_keeps_real_hosts_and_drops_local_ones():
+    assert public_base("abc.trycloudflare.com", "https") == "https://abc.trycloudflare.com"
+    assert public_base("abc.trycloudflare.com, proxy.internal", "https, http") == "https://abc.trycloudflare.com"
+    assert public_base("192.168.0.5:8787", "http") == "http://192.168.0.5:8787"
+    assert public_base("127.0.0.1:8787", "http") == "" and public_base("localhost", "http") == ""
+    assert public_base("", "https") == ""
+
+
+def test_the_url_line_connected_to_is_remembered_only_after_the_signature_checks_out(handler):
+    body = say("早安")
+    handler.handle(body, sign(body), "https://abc.trycloudflare.com")
+    current = handler.service.service_url()
+    assert current.url == "https://abc.trycloudflare.com" and current.source == "webhook"
+    assert current.describe().endswith("LINE 剛剛連到這個網址")
+
+    with pytest.raises(SignatureError):  # 偽造的 Host 不會被記下來（簽章先驗過才記）
+        handler.handle(body, sign(body, "other"), "https://evil.example")
+    assert handler.service.service_url().url == "https://abc.trycloudflare.com"
+
+
+def test_webhook_route_passes_the_forwarded_host_through(client, paths, monkeypatch):
+    """cloudflared 會把原本的網址放在 X-Forwarded-Host；那就是外面看到的網址。"""
+    seen: list[str] = []
+    monkeypatch.setattr("church_bot.webhook.WebhookHandler.handle",
+                        lambda self, body, signature, public_url="": seen.append(public_url) or 1)
+    client.post("/line/webhook", content=b"{}",
+                headers={"x-line-signature": "x", "x-forwarded-host": "abc.trycloudflare.com",
+                         "x-forwarded-proto": "https"})
+    # 沒有經過 cloudflared（直接連本機）：那不是別人連得到的網址，不記
+    client.post("/line/webhook", content=b"{}", headers={"x-line-signature": "x", "host": "127.0.0.1:8787"})
+    assert seen == ["https://abc.trycloudflare.com", ""]
 
 
 # ------------------------------------------------------------------ scheduler

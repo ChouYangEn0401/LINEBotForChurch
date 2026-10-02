@@ -44,6 +44,7 @@ from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, normalize_name, validate_teams
 from church_bot.core.planner import DATE_FMT
+from church_bot.core.public_url import public_base
 from church_bot.core.quota import QuotaSnapshot
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
@@ -1028,8 +1029,13 @@ def create_app(paths: Paths) -> FastAPI:
     @app.post("/line/webhook", include_in_schema=False)
     async def line_webhook(request: Request):
         body = await request.body()
+        # LINE 連得到的網址就是「外面看到的網址」：記下來，誰在 LINE 打「/服務網址」就回這一個
+        # （cloudflared 會把原本的網址放在 X-Forwarded-Host；簽章驗過才會真的記，見 webhook.handle）
+        headers = request.headers
+        url = public_base(headers.get("x-forwarded-host") or headers.get("host", ""),
+                          headers.get("x-forwarded-proto", "https"))
         try:
-            count = await run_in_threadpool(webhook.handle, body, request.headers.get("x-line-signature", ""))
+            count = await run_in_threadpool(webhook.handle, body, headers.get("x-line-signature", ""), url)
         except SignatureError as exc:
             log.warning("%s", exc)
             return JSONResponse({"ok": False, "error": exc.message}, status_code=400)

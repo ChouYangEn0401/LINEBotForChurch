@@ -1,6 +1,8 @@
 """免費模式：開一個 Cloudflare 臨時網址，自動登記成 LINE 的 Webhook URL。
 
 開著的時候，群組打 /提醒、/我的ID、/我的名字 機器人都會回（Reply 免費）；關掉就停。
+網址每次重開都不一樣，所以登記的同時也記在資料庫：誰要進管理網頁，在 LINE 打「/服務網址」
+機器人就回最新的那一個（見 core/public_url.py）。
 以前是「cloudflared 的輸出 → PowerShell 過濾 → 呼叫 Python」，PowerShell 讀管線會一次攢一大段才處理、
 還會把 Python 的輸出卡住看不到，實測會登記失敗；現在直接由 Python 開 cloudflared、一行一行讀它的輸出。
 """
@@ -17,6 +19,8 @@ from typing import Callable
 import httpx
 
 from church_bot.config import Paths, load_settings
+from church_bot.core.history import History
+from church_bot.core.public_url import save_service_url
 from church_bot.errors import ChurchBotError, MessengerError
 
 log = logging.getLogger(__name__)
@@ -80,6 +84,8 @@ def register_webhook(paths: Paths, url: str, out: Callable[[str], None], *, trie
                     out("⏳ LINE 還找不到這個剛建好的網址，等它生效（通常不到一分鐘）...")
                 sleep(wait)
         log.info("已把 LINE Webhook URL 登記成 %s", url)
+        # 記下這次的對外網址：管理員在 LINE 打「/服務網址」就拿得到，不用一個一個貼給人
+        save_service_url(History(paths.db_file), base, source="register")
         out(f"✅ 已自動登記到 LINE：{url}")
         _endpoint, active = messenger.webhook_info()
         for attempt in range(tries):

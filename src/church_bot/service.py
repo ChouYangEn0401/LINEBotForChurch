@@ -23,6 +23,7 @@ from church_bot.core.dispatcher import Dispatcher
 from church_bot.core.history import History
 from church_bot.core.parser import SheetInfo, inspect_sheet, parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
+from church_bot.core.public_url import ServiceUrl, load_service_url, save_service_url
 from church_bot.core.quota import QuotaSnapshot, load_quota, save_quota
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
@@ -382,6 +383,15 @@ class BotService:
             except ChurchBotError as exc:
                 snapshot = snapshot.failed(exc.message, now)
         save_quota(self.history, snapshot.dirty(now))
+
+    # ------------------------------------------------------------------ 對外網址（見 core/public_url.py）
+
+    def service_url(self) -> ServiceUrl:
+        """目前對外的管理網頁網址（免費模式每次重開都會變）。沒記錄過就是空的。"""
+        return load_service_url(self.history)
+
+    def remember_service_url(self, url: str, source: str = "webhook") -> ServiceUrl:
+        return save_service_url(self.history, url, source)
 
     def _plan_for(self, ctx: Context, targets: list[Target], today: dt.date) -> Plan:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
