@@ -11,6 +11,7 @@
 * /我的名字 王小明 → 登記真實姓名，等管理員確認（「收集名單」開著才能用）
 * /我的暱稱 阿明 → 多登記一個稱呼（一個人可以有好幾個，不會蓋掉真實姓名）
 * /設定 名稱=值 → 修改少數設定，要輸入一次性驗證碼（/驗證 123456、/取消；見 remote_config.py）
+* /服務網址 → 管理網頁現在的網址（每次重開免費模式都會變，所以不用再一個一個貼給管理員）
 * /提醒（或 /現在提醒）→ 在設定好的提醒群組裡，誰都可以打；立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度）。
   排程時間前 2 天內打過、內容也一樣，排程就略過（見 History.skip_reason），服事表改過才會再送
 * /別周測試 1004 → **只有管理員**：試印別一週的提醒，不記錄、不影響排程（見 service.preview_for）
@@ -75,8 +76,9 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "permissions": ("權限顯示", "權限", "權限說明", "誰可以用", "permissions", "perms"),
     "my_permissions": ("我的權限", "我的資料", "myperms", "whoami"),
     "test_week": ("別周測試", "別週測試", "測試提醒", "測試", "testweek", "test"),
+    "service_url": ("服務網址", "管理網址", "管理網頁", "網址", "網站", "後台", "serviceurl", "url", "site", "web"),
 }
-NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions"}
+NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions", "service_url"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -96,6 +98,7 @@ HELP_TEXT = (
     "　→ 再加一個稱呼；服事表寫暱稱也認得出是你\n"
     "・/我的ID　→ 你自己的 LINE ID\n"
     "・/群組ID　→ 這個聊天室的 ID\n"
+    "・/服務網址　→ 管理網頁現在的網址（要密碼才進得去）\n"
     "・/我的權限　→ 你目前的狀況（有沒有對應到同工…）\n"
     "・/權限　→ 誰是管理員、哪個指令誰能用\n"
     "・/說明　→ 這段說明（/help、/? 也可以）\n"
@@ -110,7 +113,7 @@ HELP_TEXT = (
 )
 
 
-EVERYONE_COMMANDS = "/提醒、/我的名字、/我的暱稱、/我的ID、/群組ID、/說明、/權限、/我的權限"
+EVERYONE_COMMANDS = "/提醒、/我的名字、/我的暱稱、/我的ID、/群組ID、/服務網址、/說明、/權限、/我的權限"
 ADMIN_COMMANDS = "/別周測試"
 TEST_WEEK_USAGE = ("用法：/別周測試 1004\n（10/04、10-4、10月4日、2026/10/4 都可以）\n"
                    "會在你打指令的這個聊天室試印那一天起這一週的提醒：不會發到其他群組、不會 @ 別的群組的人、"
@@ -348,6 +351,8 @@ class WebhookHandler:
             chat.reply("已取消這次的設定修改。" if cancelled else "目前沒有等你驗證的設定修改。")
         elif command.name == "notify_now":
             self._notify_now(chat)
+        elif command.name == "service_url":
+            self._service_url(chat)
         elif command.name == "help":
             chat.reply(HELP_TEXT)
 
@@ -445,6 +450,30 @@ class WebhookHandler:
             chat.chat_id, send=lambda items: chat.messenger.reply_texts(chat.reply_token, items))
         if not messages:
             chat.reply(note)
+
+    # ------------------------------------------------------------------ /服務網址
+
+    def _service_url(self, chat: _Chat) -> None:
+        """「/服務網址」：回管理網頁現在的網址（見 core/public_url.py）。
+
+        誰都可以問，因為進得去還要密碼：換網址的人只要更新一次，其他管理員自己來問就好，不用一個一個貼。
+        還沒設密碼時只回給管理員——那種狀態下，拿到網址的人就能改設定。
+        """
+        current = self.service.service_url()
+        if not current.known:
+            chat.reply("我還不知道對外的網址 🤔\n"
+                       "請管理員在那台電腦上開「免費模式」（3-open-webhook），開好之後再打一次「/服務網址」。")
+            return
+        if not chat.settings.web.password and not self._is_admin(chat):
+            chat.reply("管理網頁現在還沒設密碼，誰點進去都能改設定，所以我先不公開網址 🙏\n"
+                       "請管理員到「設定 → 金鑰與密碼」設一個密碼，之後大家打「/服務網址」就拿得到。")
+            return
+        warning = "" if chat.settings.web.password else "\n⚠️ 這個網站目前還沒設密碼，請管理員盡快設一個。"
+        chat.reply(f"🖥 管理網頁現在的網址：\n{current.url}\n\n"
+                   "・要密碼才進得去，密碼問管理員\n"
+                   "・網址每次重開都會變，隨時打「/服務網址」就會給你最新的\n"
+                   "・那台電腦關機、或關掉免費模式的時候連不進去\n"
+                   f"（{current.describe()}）{warning}")
 
     def _register_name(self, arg: str, chat: _Chat) -> None:
         """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""

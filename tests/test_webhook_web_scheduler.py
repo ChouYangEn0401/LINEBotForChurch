@@ -102,6 +102,9 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
     ("/別周測試 1004", Command("test_week", "1004")),
     ("/別週測試 10/04", Command("test_week", "10/04")),
     ("/別周測試", Command("test_week", "")),
+    ("/服務網址", Command("service_url")),
+    ("/網址", Command("service_url")),
+    ("/url", Command("service_url")),
 ])
 def test_parse_command(text, expected):
     assert parse_command(text) == expected
@@ -340,6 +343,40 @@ def test_bad_signature_is_rejected(handler):
 
 
 # ------------------------------------------------------------------ 對外網址（core/public_url.py）
+
+
+def test_service_url_command_replies_the_current_address(handler, paths):
+    """換了網址不用貼給每位管理員：誰想進管理網頁，自己打「/服務網址」問機器人。"""
+    write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\nUI_PASSWORD=pw\n")
+    body = say("/服務網址")
+    handler.handle(body, sign(body), "https://abc.trycloudflare.com")
+    reply = FakeLine.replies[-1][1]
+    assert "https://abc.trycloudflare.com" in reply and "密碼" in reply
+
+    body = say("/網址", token="r2")  # 重開免費模式 → 新網址，再問就是新的
+    handler.handle(body, sign(body), "https://xyz.trycloudflare.com")
+    assert "https://xyz.trycloudflare.com" in FakeLine.replies[-1][1]
+
+
+def test_service_url_is_only_given_to_admins_while_there_is_no_password(handler, paths):
+    """沒設密碼時，拿到網址就等於能改設定：那種狀態下只回給管理員，並要求先設密碼。"""
+    body = say("/服務網址")
+    handler.handle(body, sign(body), "https://abc.trycloudflare.com")
+    reply = FakeLine.replies[-1][1]
+    assert "https://abc" not in reply and "還沒設密碼" in reply
+
+    settings = load_settings(paths)
+    settings.line.admin_target_id = uid()  # 打指令的人就是管理員
+    save_settings(paths, settings)
+    body = say("/服務網址", token="r2")
+    handler.handle(body, sign(body), "https://abc.trycloudflare.com")
+    assert "https://abc.trycloudflare.com" in FakeLine.replies[-1][1] and "⚠️" in FakeLine.replies[-1][1]
+
+
+def test_service_url_says_so_when_it_does_not_know_the_address_yet(handler):
+    body = say("/服務網址")
+    handler.handle(body, sign(body))
+    assert "還不知道對外的網址" in FakeLine.replies[-1][1]
 
 
 def test_public_base_keeps_real_hosts_and_drops_local_ones():

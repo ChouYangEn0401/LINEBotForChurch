@@ -157,6 +157,7 @@ def _announce(webhook: str, ok: bool, out: Callable[[str], None]) -> None:
         out(" ✅ 免費模式開好了！（網址已自動登記到 LINE，不用手動貼）")
         out("")
         out(" 現在可以在群組打：/提醒、/我的ID、/我的名字 你的名字")
+        out(" 其他管理員想進管理網頁，打「/服務網址」機器人就會回這次的網址（不用貼給他們）")
     else:
         copy_to_clipboard(webhook)
         out(" ⚠️ 自動登記沒有完全成功（看上面的說明）。也可以手動貼（已複製）：")
