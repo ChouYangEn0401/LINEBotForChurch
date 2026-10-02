@@ -44,6 +44,7 @@ from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, normalize_name, validate_teams
 from church_bot.core.planner import DATE_FMT
+from church_bot.core.quota import QuotaSnapshot
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
@@ -285,14 +286,32 @@ def create_app(paths: Paths) -> FastAPI:
     @ui.get("/", response_class=HTMLResponse)
     def index(request: Request):
         report, plan = service.preview()
-        quota = service.quota_status()
-        quota_low = bool(quota and quota.remaining is not None and quota.remaining < QUOTA_LOW_THRESHOLD)
         return page(
             request, "index.html", report=report, plan=plan, last=service.history.last_run(),
             problems=[i for i in report.issues if i.severity is not Severity.INFO],
             infos=[i for i in report.issues if i.severity is Severity.INFO],
-            steps=workflow_steps(report), quota=quota, quota_low=quota_low,
+            steps=workflow_steps(report), quota=quota_json(service.quota_status()),
         )
+
+    def quota_json(snapshot: QuotaSnapshot | None) -> dict[str, Any] | None:
+        """本月用量那一格要顯示的東西。None = 不適用（測試模式、關掉額度檢查），那一格就不出現。
+
+        畫面和 /api/quota 共用同一份：app.js 收到新的就直接換掉那一格的字，不用重新整理。
+        """
+        if snapshot is None:
+            return None
+        remaining = snapshot.remaining
+        return {"value": snapshot.value_text(), "detail": snapshot.detail_text(dt.datetime.now().astimezone()),
+                "low": remaining is not None and remaining < QUOTA_LOW_THRESHOLD,
+                "stale": bool(snapshot.error) or not snapshot.known}
+
+    @api.get("/quota", summary="本月 LINE 用量（該查的時候會順便向 LINE 問一次）")
+    def api_quota(force: bool = False):
+        """主控台畫出來之後由 app.js 問這一支，所以「開著頁面」和「重開網頁」都會看到最新的用量。
+
+        ``force=1`` 是那一格的「⟳」：不管快照多新，一定重新問一次（見 service.refresh_quota）。
+        """
+        return quota_json(service.refresh_quota(force=force)) or {}
 
     def workflow_steps(report: RunReport) -> list[Step]:
         try:

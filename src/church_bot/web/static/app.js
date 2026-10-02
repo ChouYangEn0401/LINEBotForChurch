@@ -79,6 +79,31 @@ window.addEventListener("pageshow", () => {
     .catch(() => { /* 問不到就留著原本那行說明 */ });
 })();
 
+// ---------- 主控台「本月 LINE 額度」：頁面畫出來之後去問最新的，⟳ 可以立刻重問 ----------
+// 頁面上的數字是存下來的快照（所以一定馬上有東西看），這裡再問 /api/quota 換成最新的。
+(() => {
+  const box = document.querySelector("[data-quota]");
+  if (!box) return;
+  const value = box.querySelector("[data-quota-value]");
+  const detail = box.querySelector("[data-quota-detail]");
+  const button = box.querySelector("[data-quota-refresh]");
+  const ask = (force) => {
+    button?.classList.add("busy");
+    return fetch("/api/quota" + (force ? "?force=1" : ""), { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((quota) => {
+        if (!quota || !quota.value) return;
+        value.textContent = quota.value;
+        value.className = "v" + (quota.low ? " warn" : "") + (quota.stale ? " muted" : "");
+        detail.textContent = quota.detail;
+      })
+      .catch(() => { /* 問不到就留著存下來的那個數字 */ })
+      .finally(() => button?.classList.remove("busy"));
+  };
+  button?.addEventListener("click", () => ask(true));
+  ask(false);
+})();
+
 // ---------- 上方訊息列的 ✕ ----------
 document.querySelectorAll("[data-dismiss-banner]").forEach((button) => {
   button.addEventListener("click", () => button.closest(".banner").remove());

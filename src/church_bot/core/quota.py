@@ -66,6 +66,17 @@ class QuotaSnapshot:
     def describe(self) -> str:
         return Quota(limit=self.limit, used=self.used).describe() if self.known else "還沒查到本月用量"
 
+    def value_text(self) -> str:
+        """主控台那一格的大字：「37 / 200」、「37」（無上限）、「—」（還沒查到）。"""
+        if not self.known:
+            return "—"
+        return f"{self.used} / {self.limit}" if self.limit is not None else str(self.used)
+
+    def detail_text(self, now: dt.datetime) -> str:
+        """大字底下那一行：還剩幾則 + 這個數字新不新。"""
+        left = "" if not self.known else f"還剩 {self.remaining} 則" if self.remaining is not None else "沒有上限"
+        return "・".join(part for part in (left, self.status_text(now)) if part)
+
     def age_text(self, now: dt.datetime) -> str:
         """「這個數字是什麼時候的」。看得出新不新，才知道它真的會更新。"""
         if self.checked_at is None:

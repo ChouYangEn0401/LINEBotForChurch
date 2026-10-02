@@ -53,10 +53,13 @@
     {% endif %}
   </a>
   {% if quota %}
-  <div class="metric">
-    <span class="k">本月 LINE 額度 {{ ui.info("送到群組是按群組人數算則數；免費方案每月 200 則。") }}</span>
-    <span class="v {{ 'warn' if quota_low }}">{{ quota.used }}{% if quota.limit is not none %} / {{ quota.limit }}{% endif %}</span>
-    <span class="d">{% if quota.remaining is not none %}還剩 {{ quota.remaining }} 則{% else %}沒有上限{% endif %}</span>
+  {# 先顯示存下來的數字（頁面不用等 LINE），再由 app.js 問 /api/quota 換成最新的；⟳ = 現在立刻重問 #}
+  <div class="metric" data-quota>
+    <span class="k">本月 LINE 額度 {{ ui.info("送到群組是按群組人數算則數；免費方案每月 200 則。LINE 的用量統計會延遲幾分鐘。") }}
+      <button class="btn btn-sm btn-ghost refresh" type="button" data-quota-refresh title="現在向 LINE 重新查一次">⟳</button>
+    </span>
+    <span class="v {{ 'warn' if quota.low }}{{ ' muted' if quota.stale }}" data-quota-value>{{ quota.value }}</span>
+    <span class="d" data-quota-detail>{{ quota.detail }}</span>
   </div>
   {% endif %}
   <a class="metric" href="#sending">

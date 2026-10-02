@@ -404,6 +404,31 @@ def test_sidebar_status_says_how_each_page_is_doing(client):
     assert nav["runs"]["sub"] == "還沒有發送過"
 
 
+def test_quota_tile_comes_from_the_snapshot_and_api_keeps_it_fresh(client, paths, monkeypatch):
+    """主控台的用量那一格：先畫存下來的數字，再由 app.js 問 /api/quota 換成最新的（⟳ = force=1）。"""
+    from church_bot.messengers.base import Quota
+    from tests.conftest import FakeMessenger
+
+    assert "data-quota" not in client.get("/").text  # 測試模式（console）不顯示這一格
+    assert client.get("/api/quota").json() == {}
+
+    settings = load_settings(paths)
+    settings.messenger.kind = "line"
+    save_settings(paths, settings)
+    fake = FakeMessenger()
+    fake.quota_value = Quota(limit=200, used=37)
+    monkeypatch.setattr("church_bot.service.build_messenger", lambda settings, paths: fake)
+
+    assert client.get("/api/quota").json()["value"] == "37 / 200"
+    page = client.get("/").text
+    assert "data-quota" in page and "37 / 200" in page and "剛剛更新" in page  # 存下來了，不用再連網
+
+    fake.quota_value = Quota(limit=200, used=190)
+    assert client.get("/api/quota").json()["value"] == "37 / 200"  # 快照還很新，不重問
+    forced = client.get("/api/quota?force=1").json()
+    assert forced["value"] == "190 / 200" and forced["low"] and "還剩 10 則" in forced["detail"]
+
+
 def test_roster_page_shows_the_sheet_and_what_the_program_read(client):
     page = client.get("/roster").text
     assert "整張表" in page and "程式讀到的結果" in page and "換一份服事表" in page and "roster.js" in page
