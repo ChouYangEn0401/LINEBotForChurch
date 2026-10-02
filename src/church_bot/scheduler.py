@@ -6,6 +6,7 @@
   不符合的那幾週會直接跳過（判斷方式見 ``is_active_week``，跟哪一次啟動程式無關，重開機也不會錯亂）。
 * 開機補發：如果排程時間電腦剛好關機 / 睡眠，之後 12 小時內打開程式會自動補發一次。
   已經送過的訊息不會重送（有防重複機制），所以補發很安全。
+* 順便固定更新「本月 LINE 用量」的快照（見 _watch_quota、core/quota.py），主控台那一格才會自己變新。
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from church_bot.service import BotService
 log = logging.getLogger(__name__)
 
 JOB_ID = "weekly-reminder"
+QUOTA_JOB_ID = "quota-refresh"
+QUOTA_EVERY_MINUTES = 5  # 多久檢查一次「該不該再問 LINE 用量」（真的會連網的頻率由 core/quota.py 的 FRESH 決定）
 CATCHUP_HOURS = 12
 _WEEK_EPOCH = dt.date(2024, 1, 1)  # 固定基準點（星期一）；只用來算「第幾週」，不代表任何實際意義
 
@@ -96,6 +99,7 @@ class BotScheduler:
         self._scheduler.start()
         self.reload()
         self._maybe_catch_up()
+        self._watch_quota()
 
     def shutdown(self) -> None:
         if self._scheduler.running:
@@ -160,6 +164,22 @@ class BotScheduler:
     @staticmethod
     def _today(timezone: str) -> dt.date:
         return dt.datetime.now(ZoneInfo(timezone)).date()
+
+    def _watch_quota(self) -> None:
+        """本月 LINE 用量：開管理網頁時先問一次（所以重開就會更新），之後固定回來看該不該再問。
+
+        「該不該」由快照自己決定（見 core/quota.py）：平常最多每 FRESH 問一次，
+        剛發送完排在 5 分鐘後——那時 LINE 的統計才算得進這一次。
+        """
+        self._scheduler.add_job(self._refresh_quota, "interval", minutes=QUOTA_EVERY_MINUTES, id=QUOTA_JOB_ID,
+                                next_run_time=dt.datetime.now(), coalesce=True, max_instances=1,
+                                replace_existing=True)
+
+    def _refresh_quota(self) -> None:
+        try:
+            self.service.refresh_quota()
+        except Exception:  # noqa: BLE001 - 查用量失敗不該影響發送；refresh_quota 已經把原因記進快照
+            log.exception("更新本月 LINE 用量失敗")
 
     def _maybe_catch_up(self) -> None:
         try:

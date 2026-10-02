@@ -1,16 +1,49 @@
 import datetime as dt
+import time
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
 from church_bot.models import Member, OutgoingMessage
-from church_bot.scheduler import BotScheduler, is_active_week, next_fire_time, previous_fire_time
+from church_bot.scheduler import (
+    QUOTA_EVERY_MINUTES, QUOTA_JOB_ID, BotScheduler, is_active_week, next_fire_time, previous_fire_time,
+)
 from church_bot.service import BotService
 from church_bot.tables import MemberTable, TargetTable
 from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
 from tests.conftest import write
 from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
+
+def test_quota_is_refreshed_when_the_management_web_app_starts(paths, monkeypatch):
+    """用量不會停在舊數字：開管理網頁先問一次，之後每 5 分鐘回來看該不該再問（見 core/quota.py）。"""
+    calls: list[dict] = []
+    monkeypatch.setattr(BotService, "refresh_quota", lambda self, **kw: calls.append(kw))
+    monkeypatch.setattr(BotScheduler, "_maybe_catch_up", lambda self: None)
+    settings = Settings()
+    settings.schedule.enabled = False
+    save_settings(paths, settings)
+
+    scheduler = BotScheduler(BotService(paths))
+    scheduler.start()
+    try:
+        deadline = time.monotonic() + 5
+        while not calls and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert calls == [{}]
+        job = scheduler._scheduler.get_job(QUOTA_JOB_ID)
+        assert job is not None and job.trigger.interval == dt.timedelta(minutes=QUOTA_EVERY_MINUTES)
+    finally:
+        scheduler.shutdown()
+
+
+def test_quota_refresh_failure_never_breaks_the_scheduler(paths, monkeypatch):
+    def boom(self, **kw):
+        raise RuntimeError("LINE 爛掉了")
+
+    monkeypatch.setattr(BotService, "refresh_quota", boom)
+    BotScheduler(BotService(paths))._refresh_quota()  # 不丟例外，只寫進記錄檔
+
 
 # ------------------------------------------------------------------ webhook
 
