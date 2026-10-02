@@ -23,11 +23,11 @@ from church_bot.core.dispatcher import Dispatcher
 from church_bot.core.history import History
 from church_bot.core.parser import SheetInfo, inspect_sheet, parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
+from church_bot.core.quota import QuotaSnapshot, load_quota, save_quota
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, SourceError
 from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
-from church_bot.messengers.base import Quota
 from church_bot.models import (
     TRIGGER_ZH, Delivery, DeliveryStatus, Issue, Member, OutgoingMessage, RawSheet, Roster, RunReport, Severity,
     Target, Team, tagged,
@@ -220,6 +220,8 @@ class BotService:
                                            "請把 data/church_bot.log 傳給維護的人。"))
             finally:
                 report.finished_at = dt.datetime.now().astimezone()
+                if not dry_run and report.count_sent:
+                    self._note_push(messenger)  # 用量變了：馬上更新快照，並排一次 5 分鐘後的重查
                 if not dry_run and ctx is not None and not (will_retry and worth_retrying(report)):
                     self._alert_admin(ctx.settings, messenger, report)
                 if not dry_run:  # 預覽不記錄：網頁每次打開都會預覽，記下來只會讓資料庫一直變大
@@ -322,25 +324,64 @@ class BotService:
             log.debug("讀不到服事表，「LINE 群組」頁就不列出服事項目：%s", exc)
             return []
 
-    def quota_status(self) -> Quota | None:
-        """主控台用：本月 LINE 額度。查不到（console 模式、關閉額度檢查、設定壞了、LINE 連不上）就回 None，
-        主控台那一格就不顯示，不影響其他功能。"""
+    # ------------------------------------------------------------------ 本月 LINE 用量（見 core/quota.py）
+
+    def _quota_watched(self) -> bool:
+        """要不要顯示用量：測試模式（console）和關掉額度檢查的，主控台那一格就不出現。"""
         try:
-            ctx = self.load()
+            settings = load_settings(self.paths)
         except ChurchBotError:
+            return False
+        return settings.messenger.kind != "console" and settings.messenger.check_quota
+
+    def quota_status(self) -> QuotaSnapshot | None:
+        """主控台用：上次查到的本月用量。不連網，所以畫面一定馬上出來；None = 不適用（見 _quota_watched）。"""
+        if not self._quota_watched():
             return None
-        if ctx.settings.messenger.kind == "console" or not ctx.settings.messenger.check_quota:
+        return load_quota(self.history)
+
+    def refresh_quota(self, *, force: bool = False) -> QuotaSnapshot | None:
+        """該查的時候向 LINE 問一次用量並存起來（``force`` = 不管該不該，一定重新問）。
+
+        誰會呼叫：主控台載入後由 app.js 問 /api/quota、管理網頁的定時工作、按「重新查詢」。
+        問不到不丟例外：原因記在快照裡，畫面顯示舊數字＋為什麼是舊的。
+        """
+        if not self._quota_watched():
             return None
+        snapshot = load_quota(self.history)
+        now = dt.datetime.now().astimezone()
+        if not (force or snapshot.due(now)):
+            return snapshot
         try:
-            messenger = build_messenger(ctx.settings, self.paths)
-        except ChurchBotError:
-            return None
+            messenger = build_messenger(load_settings(self.paths), self.paths)
+        except ChurchBotError as exc:
+            return save_quota(self.history, snapshot.failed(exc.message, now))
         try:
-            return messenger.quota()
-        except ChurchBotError:
-            return None
+            quota = messenger.quota()
+        except ChurchBotError as exc:
+            log.info("查不到本月 LINE 用量：%s", exc.message)
+            return save_quota(self.history, snapshot.failed(exc.message, now))
         finally:
             messenger.close()
+        if quota is None:
+            return snapshot
+        return save_quota(self.history, snapshot.updated(quota, now))
+
+    def _note_push(self, messenger: Messenger | None) -> None:
+        """剛 Push 完的收尾：馬上更新一次用量，並排一次 SETTLE 之後的重查。
+
+        LINE 的用量統計會延遲幾分鐘，所以「馬上問到的數字」通常還沒算進這一次；
+        重查由管理網頁的定時工作做（下次打開管理網頁也會補查），這樣用量不會停在發送前的數字。
+        """
+        now = dt.datetime.now().astimezone()
+        snapshot = load_quota(self.history)
+        if messenger is not None:
+            try:
+                if (quota := messenger.quota()) is not None:
+                    snapshot = snapshot.updated(quota, now)
+            except ChurchBotError as exc:
+                snapshot = snapshot.failed(exc.message, now)
+        save_quota(self.history, snapshot.dirty(now))
 
     def _plan_for(self, ctx: Context, targets: list[Target], today: dt.date) -> Plan:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
@@ -461,6 +502,9 @@ class BotService:
                     items.append(CheckItem("LINE 連線", True, f"機器人：{messenger.check()}"))
                     quota = messenger.quota()
                     if quota is not None:
+                        # 系統檢查本來就會問一次，順手存進快照：跑完檢查，主控台那一格就是新的
+                        now = dt.datetime.now().astimezone()
+                        save_quota(self.history, load_quota(self.history).updated(quota, now))
                         low = quota.remaining is not None and quota.remaining < QUOTA_LOW_THRESHOLD
                         items.append(CheckItem("LINE 本月額度", not low, quota.describe(),
                                                "額度快用完了，詳見 docs/LINE_PRICING.md" if low else ""))

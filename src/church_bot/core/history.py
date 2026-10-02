@@ -1,4 +1,5 @@
-"""SQLite 紀錄：每次執行的結果、每則訊息送出的狀態（防重複發送）、LINE 回報的群組與人。
+"""SQLite 紀錄：每次執行的結果、每則訊息送出的狀態（防重複發送）、LINE 回報的群組與人，
+以及幾格「跨程式共用的小狀態」（state 表：本月 LINE 用量快照、目前的對外網址）。
 
 資料檔在 data/church_bot.db。刪掉它不會壞，只是會忘記「送過什麼」、自動收集到的 LINE 帳號和歷史紀錄。
 每個操作都開新連線 + 鎖：網頁和排程在不同執行緒，這樣最單純也最安全。
@@ -74,6 +75,14 @@ CREATE TABLE IF NOT EXISTS memberships (
     first_seen TEXT NOT NULL,
     last_seen TEXT NOT NULL,
     PRIMARY KEY (user_id, chat_id)
+);
+
+-- 一格一件小狀態（JSON）：本月 LINE 用量快照、目前的對外網址…
+-- 管理網頁、cli.bat send、免費模式是三個不同的程式，放這裡誰更新的另一邊下次就看得到。
+CREATE TABLE IF NOT EXISTS state (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 """
 
@@ -166,6 +175,28 @@ class History:
                 conn.commit()
             finally:
                 conn.close()
+
+    # ------------------------------------------------------------------ state（小狀態，見 _SCHEMA）
+
+    def get_state(self, key: str) -> dict:
+        """讀一格小狀態。沒存過、或內容壞掉都回傳空 dict（呼叫的人就當成「還不知道」）。"""
+        with self._conn() as conn:
+            row = conn.execute("SELECT value FROM state WHERE key=?", (key,)).fetchone()
+        if row is None:
+            return {}
+        try:
+            value = json.loads(row["value"])
+        except ValueError:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    def set_state(self, key: str, value: dict) -> None:
+        with self._conn() as conn:
+            conn.execute(
+                "INSERT INTO state (key, value, updated_at) VALUES (?,?,?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at",
+                (key, json.dumps(value, ensure_ascii=False, default=_json_default), _now()),
+            )
 
     # ------------------------------------------------------------------ dedup
 

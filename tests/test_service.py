@@ -7,6 +7,7 @@ import pytest
 
 from church_bot.config import Settings, save_settings
 from church_bot.errors import ConfigError, MessengerError
+from church_bot.core.quota import SETTLE, QuotaSnapshot
 from church_bot.messengers.base import Quota
 from church_bot.models import DeliveryStatus, Member, Target, Team
 from church_bot.service import BotService
@@ -100,6 +101,53 @@ def test_quota_warning(service, fake):
     fake.sizes = {gid(): 30, gid("c"): 10}
     report, _ = service.run("cli")
     assert any(i.code == "quota_low" and "40" in i.message for i in report.issues)
+
+
+# ------------------------------------------------------------------ 本月用量快照（service.refresh_quota）
+
+
+def test_quota_snapshot_is_saved_and_reused_without_asking_line_again(service, fake):
+    fake.quota_value = Quota(limit=200, used=40)
+    assert service.quota_status() == QuotaSnapshot()  # 還沒查過
+
+    snapshot = service.refresh_quota()
+    assert (snapshot.used, snapshot.limit, snapshot.known) == (40, 200, True)
+    assert service.quota_status().used == 40  # 存下來了，下次不用連網
+
+    fake.quota_value = Quota(limit=200, used=99)
+    assert service.refresh_quota().used == 40  # 還很新：不重問
+    assert service.refresh_quota(force=True).used == 99  # 按「重新查詢」才一定重問
+
+
+def test_quota_is_rechecked_after_a_push(service, fake):
+    fake.quota_value = Quota(limit=200, used=40)
+    service.refresh_quota()
+    fake.quota_value = Quota(limit=200, used=70)
+
+    service.run("cli")
+    after = service.quota_status()
+    assert after.used == 70  # 發完馬上更新一次
+    assert after.pending  # 並標記「LINE 的統計可能還沒算進這一次」
+    assert after.due(dt.datetime.now().astimezone() + SETTLE)  # 5 分鐘後要再查一次
+
+
+def test_quota_failure_keeps_the_last_number_visible(service, fake, monkeypatch):
+    fake.quota_value = Quota(limit=200, used=40)
+    service.refresh_quota()
+
+    def broken():
+        raise MessengerError("連 LINE 逾時", "檢查網路")
+
+    monkeypatch.setattr(fake, "quota", broken)
+    snapshot = service.refresh_quota(force=True)
+    assert snapshot.used == 40 and "連 LINE 逾時" in snapshot.error
+
+
+def test_quota_is_not_watched_in_test_mode(service, paths, fake):
+    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
+                                        "messenger": {"kind": "console"}})
+    save_settings(paths, settings)
+    assert service.quota_status() is None and service.refresh_quota() is None
 
 
 def test_missing_token_marks_every_delivery_failed(service, monkeypatch):
