@@ -15,6 +15,7 @@ from church_bot.config import BehaviorSettings
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory
 from church_bot.core.renderer import Renderer, fingerprint, matches_any, select_assignments
+from church_bot.errors import ConfigError
 from church_bot.models import Issue, OutgoingMessage, Person, Roster, ServiceDay, Severity, Target
 from church_bot.tables import LINE_ID_RE
 
@@ -116,7 +117,15 @@ class Planner:
                     continue
                 if not select_assignments(day, target):
                     continue
-                message = self.renderer.render(day, self.directory, target)
+                try:
+                    message = self.renderer.render(day, self.directory, target)
+                except ConfigError as exc:
+                    if not target.template:
+                        raise  # 牧區的模板壞了：每個群組都一樣，整次停下來
+                    # 群組自己的模板壞了：只有這個群組不發，其他群組照常
+                    plan.add(Severity.ERROR, "target_template", f"{exc.message}，這個群組這次不會發", exc.hint)
+                    got_any = True
+                    break
                 plan.messages.append(PlannedMessage(target, day, message, fingerprint(message.text)))
                 got_any = True
             if not got_any:

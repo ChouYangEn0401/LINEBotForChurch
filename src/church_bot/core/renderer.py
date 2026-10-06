@@ -1,14 +1,17 @@
 """把一天的服事安排排成訊息文字（Jinja2 模板，可在設定頁修改）。
 
 模板可用的變數：
-  title        標題（設定頁填的）
+  title        標題（群組自己有填就用群組的，沒填用牧區設定頁的）
   date_text    排好格式的日期，例如「9/13（週日）」
   date         日期物件；weekday = 「週日」
   label        聚會名稱（服事表有「聚會」欄才有）
   note         備註（服事表有「備註」欄才有）
-  footer       結尾文字
+  footer       結尾文字（同上：群組優先）
   target_name  收訊群組名稱
   assignments  服事清單，每一項有 role（服事項目）、names（已用「、」串好的名字）、people（每個人的詳細資料）
+
+每個 LINE 群組可以有自己的提醒訊息（標題、結尾文字、整份模板），空白的部分沿用牧區設定；
+所以同一天的服事，敬拜團群和招待群可以收到語氣不一樣的罐頭訊息。
 
 服事表那一格寫的是小團名稱時（見 core/directory.py），names 會排成「晨光實體團（王晨光、陳小明）」，
 團裡有登記 LINE 帳號的成員照樣 @ 得到。
@@ -19,7 +22,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable
 
 import jinja2
@@ -93,14 +96,30 @@ def register_hint(rows: list[_Row]) -> str:
 class Renderer:
     def __init__(self, cfg: MessageSettings) -> None:
         self.cfg = cfg
-        env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)
+        self._env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)
+        self._template = self._compile(cfg.template)
+        self._own: dict[str, jinja2.Template] = {}  # 群組自己的模板，同一份內容只編譯一次
+
+    def _compile(self, source: str, owner: str = "") -> jinja2.Template:
         try:
-            self._template = env.from_string(cfg.template)
+            return self._env.from_string(source)
         except jinja2.TemplateSyntaxError as exc:
+            if owner:
+                raise ConfigError(
+                    f"「{owner}」自己的訊息模板第 {exc.lineno} 行有錯：{exc.message}",
+                    f"到「LINE 群組」頁編輯「{owner}」：修正模板，或把它清空改用牧區的設定。",
+                ) from exc
             raise ConfigError(
                 f"訊息模板第 {exc.lineno} 行有錯：{exc.message}",
                 "到「設定」頁按「恢復預設模板」，或檢查 {{ }} 和 {% %} 有沒有成對。",
             ) from exc
+
+    def _template_for(self, target: Target | None) -> jinja2.Template:
+        if not (target and target.template):
+            return self._template
+        if target.template not in self._own:
+            self._own[target.template] = self._compile(target.template, target.name)
+        return self._own[target.template]
 
     # ------------------------------------------------------------------ public
 
@@ -137,8 +156,8 @@ class Renderer:
             text=text, mention_text=mention_text, mentions=tuple((k, uid) for uid, k in keys.items())
         )
 
-    def validate(self) -> None:
-        """用假資料試排一次，模板裡打錯變數名稱會在這裡被抓到。"""
+    def validate(self, target: Target | None = None) -> None:
+        """用假資料試排一次，模板裡打錯變數名稱會在這裡被抓到。``target`` = 順便檢查這個群組自己的訊息。"""
         sample = ServiceDay(
             date=dt.date(2026, 9, 13), label="主日崇拜", note="聖餐主日",
             assignments=(Assignment("司琴", ("小明",)), Assignment("音控", ("阿德", "小華")),
@@ -146,7 +165,8 @@ class Renderer:
         )
         directory = Directory([Member(name="王小明", aliases=("小明",), line_user_id="U" + "0" * 32)],
                               [Team(name="示範小團", members=("小明", "阿德"))])
-        self.render(sample, directory, Target(name="測試", line_id="", mention=True))
+        trial = replace(target, roles=(), labels=(), mention=True) if target else Target(name="測試", line_id="")
+        self.render(sample, directory, trial)
 
     # ------------------------------------------------------------------ internals
 
@@ -161,8 +181,8 @@ class Renderer:
             return f"{p.display}（{inside}）" if inside else p.display
 
         context = {
-            "title": self.cfg.title,
-            "footer": self.cfg.footer,
+            "title": (target.title if target and target.title else self.cfg.title),
+            "footer": (target.footer if target and target.footer else self.cfg.footer),
             "date": day.date,
             "date_text": format_date(day.date, self.cfg.date_format),
             "weekday": weekday_zh(day.date),
@@ -180,12 +200,15 @@ class Renderer:
                 for r in rows
             ],
         }
+        owner = target.name if target and target.template else ""
+        where = f"「{owner}」自己的訊息模板" if owner else "訊息模板"
+        fix = f"到「LINE 群組」頁編輯「{owner}」，或把它的模板清空改用牧區的設定。" if owner else "到「設定」頁按「恢復預設模板」。"
         try:
-            return _tidy(self._template.render(**context))
+            return _tidy(self._template_for(target).render(**context))
         except jinja2.UndefinedError as exc:
             raise ConfigError(
-                f"訊息模板用了不存在的變數：{exc.message}",
-                "可用的變數：title、date_text、label、note、footer、assignments（role、names）。",
+                f"{where}用了不存在的變數：{exc.message}",
+                f"可用的變數：title、date_text、label、note、footer、target_name、assignments（role、names）。{fix}",
             ) from exc
         except jinja2.TemplateError as exc:
-            raise ConfigError(f"訊息模板有錯：{exc}", "到「設定」頁按「恢復預設模板」。") from exc
+            raise ConfigError(f"{where}有錯：{exc}", fix) from exc
