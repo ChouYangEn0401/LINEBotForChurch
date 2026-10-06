@@ -97,9 +97,11 @@ def build_admin_alert(report: RunReport, limit: int = 8) -> str:
 
 
 class BotService:
-    def __init__(self, paths: Paths) -> None:
+    def __init__(self, paths: Paths, shared: History | None = None) -> None:
+        """``shared`` = 整個教會共用的資料庫（LINE 用量、對外網址）；沒給就跟自己的同一份（只有一個牧區時）。"""
         self.paths = paths
         self.history = History(paths.db_file)
+        self.shared = shared or self.history
         self._run_lock = threading.Lock()  # 排程和手動按鈕同時按下去也不會重複發送
         self._cache_lock = threading.Lock()
         self._roster_cache: tuple[str, float, Roster] | None = None
@@ -339,7 +341,7 @@ class BotService:
         """主控台用：上次查到的本月用量。不連網，所以畫面一定馬上出來；None = 不適用（見 _quota_watched）。"""
         if not self._quota_watched():
             return None
-        return load_quota(self.history)
+        return load_quota(self.shared)
 
     def refresh_quota(self, *, force: bool = False) -> QuotaSnapshot | None:
         """該查的時候向 LINE 問一次用量並存起來（``force`` = 不管該不該，一定重新問）。
@@ -349,24 +351,24 @@ class BotService:
         """
         if not self._quota_watched():
             return None
-        snapshot = load_quota(self.history)
+        snapshot = load_quota(self.shared)
         now = dt.datetime.now().astimezone()
         if not (force or snapshot.due(now)):
             return snapshot
         try:
             messenger = build_messenger(load_settings(self.paths), self.paths)
         except ChurchBotError as exc:
-            return save_quota(self.history, snapshot.failed(exc.message, now))
+            return save_quota(self.shared, snapshot.failed(exc.message, now))
         try:
             quota = messenger.quota()
         except ChurchBotError as exc:
             log.info("查不到本月 LINE 用量：%s", exc.message)
-            return save_quota(self.history, snapshot.failed(exc.message, now))
+            return save_quota(self.shared, snapshot.failed(exc.message, now))
         finally:
             messenger.close()
         if quota is None:
             return snapshot
-        return save_quota(self.history, snapshot.updated(quota, now))
+        return save_quota(self.shared, snapshot.updated(quota, now))
 
     def _note_push(self, messenger: Messenger | None) -> None:
         """剛 Push 完的收尾：馬上更新一次用量，並排一次 SETTLE 之後的重查。
@@ -375,23 +377,23 @@ class BotService:
         重查由管理網頁的定時工作做（下次打開管理網頁也會補查），這樣用量不會停在發送前的數字。
         """
         now = dt.datetime.now().astimezone()
-        snapshot = load_quota(self.history)
+        snapshot = load_quota(self.shared)
         if messenger is not None:
             try:
                 if (quota := messenger.quota()) is not None:
                     snapshot = snapshot.updated(quota, now)
             except ChurchBotError as exc:
                 snapshot = snapshot.failed(exc.message, now)
-        save_quota(self.history, snapshot.dirty(now))
+        save_quota(self.shared, snapshot.dirty(now))
 
     # ------------------------------------------------------------------ 對外網址（見 core/public_url.py）
 
     def service_url(self) -> ServiceUrl:
         """目前對外的管理網頁網址（免費模式每次重開都會變）。沒記錄過就是空的。"""
-        return load_service_url(self.history)
+        return load_service_url(self.shared)
 
     def remember_service_url(self, url: str, source: str = "webhook") -> ServiceUrl:
-        return save_service_url(self.history, url, source)
+        return save_service_url(self.shared, url, source)
 
     def _plan_for(self, ctx: Context, targets: list[Target], today: dt.date) -> Plan:
         roster = self.fetch_roster(ctx.settings, today, use_cache=True)
@@ -532,7 +534,7 @@ class BotService:
                     if quota is not None:
                         # 系統檢查本來就會問一次，順手存進快照：跑完檢查，主控台那一格就是新的
                         now = dt.datetime.now().astimezone()
-                        save_quota(self.history, load_quota(self.history).updated(quota, now))
+                        save_quota(self.shared, load_quota(self.shared).updated(quota, now))
                         low = quota.remaining is not None and quota.remaining < QUOTA_LOW_THRESHOLD
                         items.append(CheckItem("LINE 本月額度", not low, quota.describe(),
                                                "額度快用完了，詳見 docs/LINE_PRICING.md" if low else ""))

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Generic, Iterable, TypeVar
 
 from church_bot.errors import TableError
+from church_bot.files import write_text
 from church_bot.models import Issue, Member, Severity, Target, Team
 
 LINE_ID_RE = re.compile(r"^[CUR][0-9a-f]{32}$")
@@ -80,15 +81,12 @@ def read_csv_text(path: Path) -> tuple[str, str]:
 
 
 def write_csv(path: Path, header: list[str], rows: list[list[str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(header)
     writer.writerows(rows)
-    tmp = path.with_name(path.name + ".tmp")
     # utf-8-sig：Windows 的 Excel 直接雙擊打開中文才不會亂碼
-    tmp.write_text(buf.getvalue(), encoding="utf-8-sig")
-    tmp.replace(path)
+    write_text(path, buf.getvalue(), encoding="utf-8-sig")
 
 
 # --------------------------------------------------------------------------- generic table
