@@ -62,30 +62,52 @@ def write_demo_roster(paths: Paths, today: dt.date) -> None:
 
 
 def cmd_init(paths: Paths, _: argparse.Namespace) -> int:
-    paths.config_dir.mkdir(parents=True, exist_ok=True)
-    paths.data_dir.mkdir(parents=True, exist_ok=True)
+    """建立 .env 和第一個牧區（範例設定、範例名單、範例服事表）。已經存在的檔案一律不覆蓋。
+
+    ``paths`` 是整個教會：舊版單一牧區先自動搬家；還沒有任何牧區就建「第一個牧區」。
+    ``paths`` 指定了牧區就只準備那一個牧區。
+    """
+    from church_bot.church import add_ministry, load_church, migrate_legacy
+
+    church = paths.church
+    church.config_dir.mkdir(parents=True, exist_ok=True)
+    church.data_dir.mkdir(parents=True, exist_ok=True)
     created = []
-    if not paths.env_file.exists():
-        shutil.copyfile(paths.root / ".env.example", paths.env_file)
+    if not church.env_file.exists():
+        shutil.copyfile(church.root / ".env.example", church.env_file)
         created.append(".env")
-    if not paths.settings_file.exists():
-        shutil.copyfile(paths.config_dir / "settings.example.yaml", paths.settings_file)
-        created.append("config/settings.yaml")
-    for table_cls, target, example in (
-        (TargetTable, paths.targets_file, "targets.example.csv"),
-        (MemberTable, paths.members_file, "members.example.csv"),
-        (TeamTable, paths.teams_file, "teams.example.csv"),
+    target = paths
+    if not paths.ministry:
+        migrate_legacy(church)
+        first = next(iter(load_church(church).ministries), None) or add_ministry(church, "第一個牧區")
+        target = church.for_ministry(first.id)
+    target.config_dir.mkdir(parents=True, exist_ok=True)
+    target.data_dir.mkdir(parents=True, exist_ok=True)
+    folder = target.config_dir.relative_to(church.root).as_posix()
+    examples = church.config_dir
+    if not target.settings_file.exists() or _is_blank_new_ministry(target):
+        shutil.copyfile(examples / "settings.example.yaml", target.settings_file)
+        created.append(f"{folder}/settings.yaml")
+    for table_cls, file, example in (
+        (TargetTable, target.targets_file, "targets.example.csv"),
+        (MemberTable, target.members_file, "members.example.csv"),
+        (TeamTable, target.teams_file, "teams.example.csv"),
     ):
-        if not target.exists() and (paths.config_dir / example).exists():
-            items = table_cls(paths.config_dir / example).load().items  # 透過讀寫轉成 Excel 看得懂的編碼
-            table_cls(target).save(items)
-            created.append(f"config/{target.name}")
-    demo = paths.config_dir / "roster.demo.csv"
+        if not file.exists() and (examples / example).exists():
+            items = table_cls(examples / example).load().items  # 透過讀寫轉成 Excel 看得懂的編碼
+            table_cls(file).save(items)
+            created.append(f"{folder}/{file.name}")
+    demo = target.config_dir / "roster.demo.csv"
     if not demo.exists():
-        write_demo_roster(paths, dt.date.today())
-        created.append("config/roster.demo.csv（範例服事表）")
+        write_demo_roster(target, dt.date.today())
+        created.append(f"{folder}/roster.demo.csv（範例服事表）")
     _print("✅ 設定檔準備好了" + (f"：新增 {', '.join(created)}" if created else "（都已經存在，沒有覆蓋任何檔案）"))
     return 0
+
+
+def _is_blank_new_ministry(paths: Paths) -> bool:
+    """剛用 add_ministry 建好、還沒動過的牧區（沒有任何表）：init 可以放心換成範例設定。"""
+    return not any(f.exists() for f in (paths.targets_file, paths.members_file, paths.teams_file))
 
 
 # --------------------------------------------------------------------------- reporting

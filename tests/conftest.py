@@ -58,10 +58,23 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def paths(tmp_path: Path) -> Paths:
+def root(tmp_path: Path) -> Paths:
+    """整個教會那一層（還沒有任何牧區）。"""
     (tmp_path / "config").mkdir()
     (tmp_path / "data").mkdir()
     return Paths(tmp_path)
+
+
+@pytest.fixture
+def paths(root: Paths) -> Paths:
+    """一個教會只有一個牧區（m1「測試牧區」）的資料夾：大部分測試都在這裡面跑，跟實際使用的樣子一樣。"""
+    from church_bot.church import ChurchConfig, Ministry, save_church
+
+    save_church(root, ChurchConfig([Ministry("m1", "測試牧區")]))
+    m1 = root.for_ministry("m1")
+    m1.config_dir.mkdir(parents=True)
+    m1.data_dir.mkdir(parents=True)
+    return m1
 
 
 @pytest.fixture
@@ -92,7 +105,7 @@ def client(paths: Paths):
     from church_bot.web.app import create_app
 
     for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv", "teams.example.csv"):
-        (paths.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
+        (paths.church.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
     (paths.root / ".env.example").write_bytes((REPO_ROOT / ".env.example").read_bytes())
     cmd_init(paths, None)
     settings = load_settings(paths)

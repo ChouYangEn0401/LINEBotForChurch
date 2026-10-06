@@ -273,9 +273,16 @@ class Paths:
         return self.root / "data" / "church_bot.log"
 
     def resolve(self, p: str | Path) -> Path:
-        """設定檔裡的相對路徑一律相對於專案根目錄。"""
+        """設定檔裡的相對路徑：牧區資料夾裡有這個檔案就用它，否則相對於專案根目錄。
+
+        所以牧區可以把自己的服事表 CSV 放在自己的資料夾、只寫檔名；以前寫的 config/xxx.csv 也照樣找得到。
+        """
         path = Path(p).expanduser()
-        return path if path.is_absolute() else self.root / path
+        if path.is_absolute():
+            return path
+        if self.ministry and (own := self.config_dir / path).exists():
+            return own
+        return self.root / path
 
 
 # --------------------------------------------------------------------------- .env

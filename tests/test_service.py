@@ -34,7 +34,7 @@ def service(paths, fake) -> BotService:
     write(paths.config_dir / "roster.csv", ROSTER)
     settings = Settings()
     settings.source.kind = "csv"
-    settings.source.csv_path = "config/roster.csv"
+    settings.source.csv_path = "roster.csv"
     settings.schedule.enabled = False
     settings.line.admin_target_id = ADMIN
     save_settings(paths, settings)
@@ -144,7 +144,7 @@ def test_quota_failure_keeps_the_last_number_visible(service, fake, monkeypatch)
 
 
 def test_quota_is_not_watched_in_test_mode(service, paths, fake):
-    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
+    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "roster.csv"},
                                         "messenger": {"kind": "console"}})
     save_settings(paths, settings)
     assert service.quota_status() is None and service.refresh_quota() is None
@@ -177,7 +177,7 @@ def test_roster_change_resend_policy(service, paths, fake):
     report, _ = service.run("cli")  # 預設：服事表改過 → 送新的
     assert {d.status for d in report.deliveries} == {DeliveryStatus.SENT}
 
-    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
+    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "roster.csv"},
                                         "schedule": {"enabled": False}, "line": {"admin_target_id": ADMIN},
                                         "behavior": {"resend_if_changed": False}})
     save_settings(paths, settings)
@@ -241,7 +241,7 @@ def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
     """docs/QUICKSTART_TEST.md 教的做法：LINE 群組的 LINE_ID 填自己的 U... userId，安全地只測試自己。"""
     write(paths.config_dir / "roster.csv", ROSTER)
     settings = Settings()
-    settings.source.kind, settings.source.csv_path = "csv", "config/roster.csv"
+    settings.source.kind, settings.source.csv_path = "csv", "roster.csv"
     settings.schedule.enabled = False
     save_settings(paths, settings)
     me = uid("9")
@@ -276,7 +276,7 @@ def test_team_name_on_the_roster_lists_the_whole_team(paths, fake):
 2026/9/13,晨光實體團,小明
 """)
     settings = Settings()
-    settings.source.csv_path = "config/roster.csv"
+    settings.source.csv_path = "roster.csv"
     settings.schedule.enabled = False
     save_settings(paths, settings)
     TargetTable(paths.targets_file).save([Target("同工群", gid())])
@@ -297,7 +297,7 @@ def test_inactive_team_and_inactive_member_inside_it_are_both_reported(paths, fa
 2026/9/13,休息小團
 """)
     settings = Settings()
-    settings.source.csv_path = "config/roster.csv"
+    settings.source.csv_path = "roster.csv"
     settings.schedule.enabled = False
     save_settings(paths, settings)
     TargetTable(paths.targets_file).save([Target("同工群", gid())])

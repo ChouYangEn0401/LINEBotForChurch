@@ -676,7 +676,7 @@ def test_alerts_go_to_admin_members_when_no_target_is_set(paths, monkeypatch):
     monkeypatch.setattr("church_bot.service.build_messenger", lambda settings, paths: fake)
     write(paths.config_dir / "roster.csv", "日期,講員\n2026/9/13,王牧師\n")
     settings = Settings()
-    settings.source.kind, settings.source.csv_path, settings.schedule.enabled = "csv", "config/roster.csv", False
+    settings.source.kind, settings.source.csv_path, settings.schedule.enabled = "csv", "roster.csv", False
     save_settings(paths, settings)
     MemberTable(paths.members_file).save([Member("陳小明", line_user_id=uid("1"), admin=True),
                                           Member("林美華", line_user_id=uid("2"), admin=True), Member("沒帳號", admin=True)])

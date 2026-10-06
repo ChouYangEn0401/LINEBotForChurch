@@ -39,7 +39,7 @@ def service(paths, fake) -> BotService:
     write(paths.config_dir / "roster.csv", "日期,講員,司琴\n2026/9/13,王牧師,小明\n2026/9/20,李傳道,美華\n")
     settings = Settings()
     settings.source.kind = "csv"
-    settings.source.csv_path = "config/roster.csv"
+    settings.source.csv_path = "roster.csv"
     settings.line.admin_target_id = ADMIN
     save_settings(paths, settings)
     TargetTable(paths.targets_file).save([Target("同工群", gid()), Target("敬拜團", gid("c"))])
@@ -73,7 +73,7 @@ def test_scheduled_run_happens_once_per_fire_time(service):
 
 
 def test_scheduled_run_respects_the_auto_send_switch(service, paths):
-    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
+    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "roster.csv"},
                                         "schedule": {"enabled": False}})
     save_settings(paths, settings)
     assert "自動發送已關閉" in scheduled_skip_reason(service, THU_2005)
