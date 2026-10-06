@@ -119,3 +119,62 @@ def test_manager_gets_past_the_site_password_too(client, paths, manager):
     assert "伺服器管理員登入" in client.get(CHURCH + "/").text
     client.post(CHURCH + "/manager/login", data={"password": PASSWORD})
     assert client.get(CHURCH + "/").status_code == 200 and is_manager(client)
+
+
+# ------------------------------------------------------------------ 全教會設定 → 伺服器管理員
+
+
+def env(paths):
+    from church_bot.config import read_env_file
+
+    return read_env_file(paths.env_file)
+
+
+def test_set_the_manager_password_on_this_computer(client, paths):
+    client.cookies.clear()  # 還沒設管理者密碼：本機就是管理者
+    page = client.get(CHURCH + "/settings").text
+    assert "伺服器管理員" in page and "還沒設" in page
+    r = client.post(CHURCH + "/settings/manager-password", data={"password": "short", "confirm": "short"},
+                    follow_redirects=False)
+    assert "level=error" in r.headers["location"]
+    r = client.post(CHURCH + "/settings/manager-password", data={"password": PASSWORD, "confirm": PASSWORD},
+                    follow_redirects=False)
+    assert "level=ok" in r.headers["location"] and env(paths)["SERVER_MANAGER_PASSWORD"] == PASSWORD
+    assert is_manager(client)  # 改的人自己不用重新登入
+
+
+def test_authenticator_is_saved_only_after_a_matching_code(client, paths):
+    client.cookies.clear()
+    page = client.get(CHURCH + "/settings?totp_setup=1").text
+    import re as _re
+
+    secret = _re.search(r'name="secret" value="([A-Z2-7]+)"', page)[1]
+    assert "<svg" in page or "輸入設定金鑰" in page
+    r = client.post(CHURCH + "/settings/totp/confirm", data={"secret": secret, "code": "000000"}, follow_redirects=False)
+    assert "level=error" in r.headers["location"] and not env(paths).get("SERVER_MANAGER_TOTP_SECRET")
+    code = totp.code_at(secret, totp.now_counter())
+    client.post(CHURCH + "/settings/totp/confirm", data={"secret": secret, "code": code})
+    assert env(paths)["SERVER_MANAGER_TOTP_SECRET"] == secret
+
+
+def test_manager_keys_cannot_be_changed_from_outside(client, paths, manager):
+    client.post(CHURCH + "/manager/login", data={"password": PASSWORD}, headers=REMOTE)
+    client.post(CHURCH + "/manager/totp", data={"code": totp.code_at(manager, totp.now_counter())}, headers=REMOTE)
+    assert is_manager(client, REMOTE)
+    assert "只能在執行機器人的那台電腦上改" in client.get(CHURCH + "/settings", headers=REMOTE).text
+    for url, data in (("/settings/manager-password", {"password": "x" * 12, "confirm": "x" * 12}),
+                      ("/settings/totp/remove", {}), ("/settings/telegram", {"chat_id": "1"})):
+        r = client.post(CHURCH + url, data=data, headers=REMOTE, follow_redirects=False)
+        assert "level=error" in r.headers["location"]
+    assert env(paths)["SERVER_MANAGER_PASSWORD"] == PASSWORD and env(paths)["SERVER_MANAGER_TOTP_SECRET"] == manager
+
+
+def test_telegram_settings_and_test_message(client, paths, manager, monkeypatch):
+    monkeypatch.setattr("church_bot.web.app.TelegramSender", FakeTelegram)
+    client.post(CHURCH + "/manager/login", data={"password": PASSWORD})
+    r = client.post(CHURCH + "/settings/telegram", data={"chat_id": "not a number"}, follow_redirects=False)
+    assert "level=error" in r.headers["location"]
+    client.post(CHURCH + "/settings/telegram", data={"token": "", "chat_id": "777"})  # token 留空 = 不改
+    assert env(paths)["SERVER_MANAGER_TELEGRAM_ID"] == "777" and env(paths)["TELEGRAM_BOT_TOKEN"] == "bot-token"
+    client.post(CHURCH + "/settings/telegram/test")
+    assert FakeTelegram.sent[-1][0] == "777"

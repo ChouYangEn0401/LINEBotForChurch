@@ -28,9 +28,9 @@
         <span class="help">沒設定 = LINE 聊天室指令沒有反應；每週提醒不受影響。</span>
       </div>
       <div class="ffield">
-        <label for="password">網站密碼</label>
+        <label for="password">網站密碼（第一層）</label>
         <input type="password" id="password" name="password" autocomplete="new-password" placeholder="{{ password_status or '沒有密碼' }}">
-        <span class="help">沒有密碼 = 只有這台電腦打得開。改了以後所有人都要重新登入。牧區還可以各自再設一層（在牧區的「設定 → 這個牧區」）。</span>
+        <span class="help">大家共用的那一組：進得來 = 看得到首頁、可以新增牧區；進牧區還要那個牧區的密碼。沒有密碼 = 只有這台電腦打得開。改了以後所有人都要重新登入。</span>
       </div>
       <div class="ffield ffield-chk">
         <label><input type="checkbox" name="clear_password">
@@ -44,8 +44,82 @@
   </form>
 </section>
 
+<section class="fcard" id="manager" data-fcard>
+  {{ card_head("伺服器管理員", "管理者密碼，以及從外面登入時的第二道驗證（驗證器 App、Telegram 登入碼，設一個就可以）。", 3) }}
+  <div class="fcard-body">
+    {% if not local %}
+    <div class="ffield" style="--span:12"><span class="note">🔒 這一張只能在執行機器人的那台電腦上改（從外面借到管理者身分的人換不掉鑰匙）。下面只顯示現在的狀況。</span></div>
+    {% endif %}
+    <form method="post" action="/settings/manager-password" class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:5">
+        <label for="mgr_password">管理者密碼 <span class="badge {{ 'ok' if mgr.password else 'warn' }}">{{ "已設定" if mgr.password else "還沒設" }}</span></label>
+        <input type="password" id="mgr_password" name="password" autocomplete="new-password" minlength="10" {{ "disabled" if not local }}
+               placeholder="{{ '輸入新的就會換掉' if mgr.password else '至少 10 個字' }}">
+        <span class="help">{{ "換掉之後，其他地方登入的管理者都要重新登入。" if mgr.password else "還沒設的時候，坐在這台電腦前面的人就是伺服器管理員；設了之後要用它登入（右上角「管理員登入」）。" }}不能跟網站密碼一樣。</span>
+      </div>
+      <div class="ffield" style="--span:5">
+        <label for="mgr_confirm">再輸入一次</label>
+        <input type="password" id="mgr_confirm" name="confirm" autocomplete="new-password" {{ "disabled" if not local }}>
+      </div>
+      <div class="ffield" style="--span:2"><label>&nbsp;</label><button type="submit" class="btn" {{ "disabled" if not local }}>儲存密碼</button></div>
+    </form>
+
+    <div class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:12">
+        <span class="ffield-lab">驗證器 App（Google Authenticator 這類）<span class="badge {{ 'ok' if mgr.totp else '' }}">{{ "已設定" if mgr.totp else "沒有設" }}</span></span>
+        {% if totp_new %}
+        <div class="totp-setup">
+          {% if totp_new.qr %}<div class="qr">{{ totp_new.qr | safe }}</div>{% endif %}
+          <div class="stack">
+            <span class="help">① 手機打開 Google Authenticator →「＋」→ 掃描 QR code{{ "" if totp_new.qr else "（這台電腦沒有裝 QR 套件，改用「輸入設定金鑰」）" }}。<br>
+              掃不到的話選「輸入設定金鑰」，帳戶名稱隨意，金鑰輸入：</span>
+            <code class="secret copy">{{ totp_new.spaced }}</code>
+            <form method="post" action="/settings/totp/confirm" class="row">
+              <input type="hidden" name="secret" value="{{ totp_new.secret }}">
+              <input type="text" name="code" inputmode="numeric" maxlength="7" placeholder="② App 上的 6 位數" required style="max-width:180px">
+              <button type="submit" class="btn btn-primary">確認並儲存</button>
+              <a class="btn btn-ghost" href="/settings#manager">取消</a>
+            </form>
+          </div>
+        </div>
+        {% else %}
+        <div class="row">
+          <a class="btn btn-sm {{ 'disabled' if not local }}" href="{{ '/settings?totp_setup=1#manager' if local else '#manager' }}">{{ "重新設定" if mgr.totp else "設定驗證器 App" }}</a>
+          {% if mgr.totp and local %}
+          <form method="post" action="/settings/totp/remove" data-confirm="移除驗證器 App？之後從外面登入只能用 Telegram 登入碼（沒設的話從外面就不能登入管理者）。">
+            <button type="submit" class="btn btn-sm btn-danger">移除</button></form>
+          {% endif %}
+          <span class="help">從外面登入時輸入 App 上的 6 位數（每 30 秒換一組）。手機沒網路也能用。</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="post" action="/settings/telegram" class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:5">
+        <label for="tg_token">Telegram 機器人 token <span class="badge {{ 'ok' if mgr.telegram_token and mgr.telegram_id else '' }}">{{ "已設定" if mgr.telegram_token and mgr.telegram_id else "沒有設" }}</span></label>
+        <input type="password" id="tg_token" name="token" autocomplete="off" {{ "disabled" if not local }} placeholder="{{ mgr.telegram_token or '找 @BotFather 拿；跟排程用的同一個就可以' }}">
+        <span class="help">留空 = 不改。</span>
+      </div>
+      <div class="ffield" style="--span:4">
+        <label for="tg_id">你的 Telegram ID</label>
+        <input type="text" id="tg_id" name="chat_id" inputmode="numeric" value="{{ mgr.telegram_id }}" {{ "disabled" if not local }} placeholder="一串數字">
+        <span class="help">在 Telegram 問 @userinfobot 就知道。要先跟上面那個機器人說過一句話，它才傳得到你。</span>
+      </div>
+      <div class="ffield" style="--span:3"><label>&nbsp;</label>
+        <div class="row"><button type="submit" class="btn" {{ "disabled" if not local }}>儲存</button></div></div>
+    </form>
+    {% if local and mgr.telegram_token and mgr.telegram_id %}
+    <form method="post" action="/settings/telegram/test" class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:12"><div class="row"><button type="submit" class="btn btn-sm">傳測試訊息</button>
+        <span class="help">從外面登入時按「傳 6 位數到我的 Telegram」，90 秒內在同一頁輸入。</span></div></div>
+    </form>
+    {% endif %}
+  </div>
+</section>
+
 <section class="fcard" id="ministry-passwords" data-fcard>
-  {{ card_head("牧區密碼", "哪些牧區另外設了第二層密碼。密碼本身由各牧區自己在裡面設。", rows | length) }}
+  {{ card_head("牧區密碼", "每個牧區的管理員用自己牧區的密碼登入；你是伺服器管理員，可以替任何牧區設定或清掉。", rows | length) }}
   <div class="fcard-body">
     <div class="table-wrap" style="grid-column: 1 / -1">
       <table class="data">
@@ -55,7 +129,8 @@
           <tr>
             <td><b>{{ r.name }}</b><div class="id admin-only">{{ r.id }}</div></td>
             <td>{% if r.locked %}<span class="badge">🔒 有設</span>{% else %}<span class="muted">沒有設</span>{% endif %}</td>
-            <td class="ops">{% if r.locked %}
+            <td class="ops"><a class="btn btn-sm" href="/m/{{ r.id }}/settings#ministry">{{ "換密碼" if r.locked else "設定密碼" }}</a>
+              {% if r.locked %}
               <form method="post" action="/m/{{ r.id }}/forgot-password" data-confirm="清掉「{{ r.name }}」的牧區密碼？清掉之後只有伺服器管理員進得去，記得再設一個新的。">
                 <button type="submit" class="btn btn-sm btn-danger">清掉密碼</button></form>
             {% endif %}</td>

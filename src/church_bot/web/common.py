@@ -49,6 +49,7 @@ ADMIN_COOKIE = "church_bot_admin"  # 右上角「進階頁面」（只是收起�
 SESSION_COOKIE = "church_bot_session"
 MANAGER_COOKIE = "church_bot_manager"
 MANAGER_SESSION = dt.timedelta(hours=12)
+MIN_MANAGER_PASSWORD = 10
 LAYOUTS_ZH = {"auto": "自動判斷（推薦）", "wide": "日期在左、一列一次聚會", "long": "一列一項服事",
               "matrix": "日期在上、一欄一次聚會"}
 

@@ -54,7 +54,7 @@ def qr_svg(text: str) -> str | None:
         import segno
     except ImportError:
         return None
-    return segno.make(text, error="m").svg_inline(scale=5, dark="#1e222d", light="#ffffff")
+    return segno.make(text, error="m").svg_inline(scale=4, dark="#1e222d", light="#ffffff")
 
 
 class Verifier:

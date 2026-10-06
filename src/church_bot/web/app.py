@@ -32,10 +32,12 @@ from church_bot import __version__
 from church_bot.church import MIN_MINISTRY_PASSWORD, add_ministry, check_password, edit_ministry, hash_password
 from church_bot.config import Paths, load_settings, read_env_file, update_env_file
 from church_bot.core import versions
+from church_bot.core import totp
+from church_bot.core.login_codes import LoginCodeError, TelegramSender
 from church_bot.core.public_url import public_base
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.web.common import (
-    ADMIN_COOKIE, HERE, MANAGER_COOKIE, SESSION_COOKIE, LoginRequired, ManagerRequired, MinistryLocked, Web,
+    ADMIN_COOKIE, HERE, MANAGER_COOKIE, MANAGER_SESSION, MIN_MANAGER_PASSWORD, SESSION_COOKIE, LoginRequired, ManagerRequired, MinistryLocked, Web,
     is_local, mask, ministry_cookie, ministry_token, quota_json, redirect, safe_next,
 )
 from church_bot.web.manager import manager_routes
@@ -243,7 +245,7 @@ def create_app(paths: Paths) -> FastAPI:
     # ------------------------------------------------------------------ 全教會設定：LINE 金鑰、網站密碼
 
     @manager.get("/settings", response_class=HTMLResponse)
-    def church_settings(request: Request):
+    def church_settings(request: Request, totp_setup: str = ""):
         env = {**read_env_file(web.paths.env_file),
                **{k: v for k, v in os.environ.items() if k.startswith(("LINE_", "UI_"))}}
         try:
@@ -254,7 +256,88 @@ def create_app(paths: Paths) -> FastAPI:
                         token_status=mask(env.get("LINE_CHANNEL_ACCESS_TOKEN", "")),
                         secret_status=mask(env.get("LINE_CHANNEL_SECRET", "")),
                         password_status="已設定" if env.get("UI_PASSWORD") else "", web_settings=web_settings,
-                        rows=ministry_rows(), local=is_local(request))
+                        rows=ministry_rows(), local=is_local(request), mgr=manager_status(),
+                        totp_new=new_totp() if totp_setup == "1" and is_local(request) else None)
+
+    # --- 伺服器管理員自己的密碼、第二道驗證（只能在那台電腦上改：從外面借到管理者身分的人換不掉鑰匙） ---
+
+    def manager_status() -> dict[str, Any]:
+        return {"password": bool(web.manager_password()), "totp": bool(web.env("SERVER_MANAGER_TOTP_SECRET")),
+                "telegram_token": mask(web.env("TELEGRAM_BOT_TOKEN")),
+                "telegram_id": web.env("SERVER_MANAGER_TELEGRAM_ID")}
+
+    def new_totp() -> dict[str, Any]:
+        secret = totp.new_secret()
+        uri = totp.otpauth_uri(secret)
+        return {"secret": secret, "uri": uri, "qr": totp.qr_svg(uri),
+                "spaced": " ".join(secret[i:i + 4] for i in range(0, len(secret), 4))}
+
+    def local_only(request: Request):
+        if not is_local(request):
+            return redirect("/settings#manager", "管理者密碼和第二道驗證只能在執行機器人的那台電腦上改", "error")
+        return None
+
+    @manager.post("/settings/manager-password")
+    def manager_password_save(request: Request, password: str = Form(""), confirm: str = Form("")):
+        if refused := local_only(request):
+            return refused
+        password = password.strip()
+        if len(password) < MIN_MANAGER_PASSWORD:
+            return redirect("/settings#manager", f"管理者密碼至少 {MIN_MANAGER_PASSWORD} 個字", "error")
+        if password != confirm.strip():
+            return redirect("/settings#manager", "兩次輸入的管理者密碼不一樣", "error")
+        if password == web.current_password():
+            return redirect("/settings#manager", "管理者密碼不能跟網站密碼一樣", "error")
+        update_env_file(web.paths.env_file, {"SERVER_MANAGER_PASSWORD": password})
+        log.warning("伺服器管理員密碼已變更（本機）")
+        resp = redirect("/settings#manager", "管理者密碼已更新：其他地方登入的管理者都要重新登入")
+        resp.set_cookie(MANAGER_COOKIE, web.manager_cookie_value(), httponly=True, samesite="lax",
+                        max_age=int(MANAGER_SESSION.total_seconds()))  # 改的人自己不用重新登入
+        return resp
+
+    @manager.post("/settings/totp/confirm")
+    def totp_confirm(request: Request, secret: str = Form(""), code: str = Form("")):
+        """先用 App 上的 6 位數確認掃對了，才存：不然存了一組手機上沒有的金鑰，從外面就登不進來。"""
+        if refused := local_only(request):
+            return refused
+        if not totp.Verifier().check(secret, code):
+            return redirect("/settings?totp_setup=1#manager", "6 位數不對：請重新掃一次 QR code（每次打開都是新的一組）", "error")
+        update_env_file(web.paths.env_file, {"SERVER_MANAGER_TOTP_SECRET": secret})
+        log.warning("伺服器管理員驗證器 App 已設定（本機）")
+        return redirect("/settings#manager", "驗證器 App 設定好了：從外面登入時可以用它的 6 位數")
+
+    @manager.post("/settings/totp/remove")
+    def totp_remove(request: Request):
+        if refused := local_only(request):
+            return refused
+        update_env_file(web.paths.env_file, {"SERVER_MANAGER_TOTP_SECRET": ""})
+        return redirect("/settings#manager", "已移除驗證器 App（手機上那一組可以刪掉）")
+
+    @manager.post("/settings/telegram")
+    def telegram_save(request: Request, token: str = Form(""), chat_id: str = Form("")):
+        if refused := local_only(request):
+            return refused
+        chat_id = chat_id.strip()
+        if chat_id and not chat_id.lstrip("-").isdigit():
+            return redirect("/settings#manager", "Telegram ID 是一串數字（問 @userinfobot 就知道）", "error")
+        updates = {"SERVER_MANAGER_TELEGRAM_ID": chat_id}
+        if token.strip():
+            updates["TELEGRAM_BOT_TOKEN"] = token.strip()
+        update_env_file(web.paths.env_file, updates)
+        return redirect("/settings#manager", "Telegram 登入碼設定已儲存，按「傳測試訊息」確認收得到")
+
+    @manager.post("/settings/telegram/test")
+    def telegram_test(request: Request):
+        if refused := local_only(request):
+            return refused
+        if not (web.env("TELEGRAM_BOT_TOKEN") and web.env("SERVER_MANAGER_TELEGRAM_ID")):
+            return redirect("/settings#manager", "還沒填 Telegram 機器人 token 和你的 Telegram ID", "error")
+        try:
+            TelegramSender(web.env("TELEGRAM_BOT_TOKEN")).send(
+                web.env("SERVER_MANAGER_TELEGRAM_ID"), "✅ 服事提醒機器人：之後從外面登入伺服器管理員，登入碼會傳到這裡。")
+        except LoginCodeError as exc:
+            return redirect("/settings#manager", f"{exc.message}。{exc.hint}", "error")
+        return redirect("/settings#manager", "已傳測試訊息到你的 Telegram")
 
     @manager.post("/settings/secrets")
     def settings_secrets(token: str = Form(""), secret: str = Form(""), password: str = Form(""),

@@ -493,3 +493,10 @@ details.change .what .sub { font-size: 12px; color: var(--muted); }
 .diff .del { color: var(--bad); background: var(--bad-soft); display: block; }
 .diff .ctx { color: var(--dim); display: block; }
 .diff .hunk { color: var(--muted); display: block; }
+
+/* ---------- 全教會設定：驗證器 App 的 QR code ---------- */
+.totp-setup { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.totp-setup .qr { padding: 8px; background: #ffffff; border-radius: 6px; line-height: 0; }
+.totp-setup .stack { flex: 1; min-width: 240px; }
+.totp-setup .secret { font-size: 14px; letter-spacing: .06em; padding: 4px 8px; align-self: flex-start; }
+.btn.disabled { opacity: .5; pointer-events: none; }
