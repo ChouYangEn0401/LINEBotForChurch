@@ -91,7 +91,8 @@ def cmd_init(paths: Paths, _: argparse.Namespace) -> int:
     target.data_dir.mkdir(parents=True, exist_ok=True)
     folder = target.config_dir.relative_to(church.root).as_posix()
     examples = church.config_dir
-    if not target.settings_file.exists() or _is_blank_new_ministry(target):
+    blank = _is_blank_new_ministry(target)
+    if not target.settings_file.exists() or blank:
         shutil.copyfile(examples / "settings.example.yaml", target.settings_file)
         created.append(f"{folder}/settings.yaml")
     for table_cls, file, example in (
@@ -99,7 +100,7 @@ def cmd_init(paths: Paths, _: argparse.Namespace) -> int:
         (MemberTable, target.members_file, "members.example.csv"),
         (TeamTable, target.teams_file, "teams.example.csv"),
     ):
-        if not file.exists() and (examples / example).exists():
+        if (not file.exists() or blank) and (examples / example).exists():
             items = table_cls(examples / example).load().items  # 透過讀寫轉成 Excel 看得懂的編碼
             table_cls(file).save(items)
             created.append(f"{folder}/{file.name}")
@@ -112,8 +113,14 @@ def cmd_init(paths: Paths, _: argparse.Namespace) -> int:
 
 
 def _is_blank_new_ministry(paths: Paths) -> bool:
-    """剛用 add_ministry 建好、還沒動過的牧區（沒有任何表）：init 可以放心換成範例設定。"""
-    return not any(f.exists() for f in (paths.targets_file, paths.members_file, paths.teams_file))
+    """剛用 add_ministry 建好、還沒動過的牧區（表都是空的或還沒建立）：init 可以放心換成範例設定和名單。"""
+    for table in (TargetTable(paths.targets_file), MemberTable(paths.members_file), TeamTable(paths.teams_file)):
+        try:
+            if table.path.exists() and table.load().items:
+                return False
+        except ChurchBotError:
+            return False  # 讀不懂的檔案一定是有人動過，不要蓋掉
+    return True
 
 
 # --------------------------------------------------------------------------- reporting

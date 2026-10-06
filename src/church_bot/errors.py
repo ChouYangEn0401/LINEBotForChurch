@@ -23,6 +23,10 @@ class ConfigError(ChurchBotError):
     """設定檔讀不到 / 格式錯。"""
 
 
+class SourceNotSetError(ConfigError):
+    """還沒接服事表（剛建好的牧區）。跟其他設定錯誤分開，主控台才會帶人去「服事表」頁接上，而不是設定頁。"""
+
+
 class TableError(ChurchBotError):
     """對照表（CSV）讀不到 / 格式錯。"""
 

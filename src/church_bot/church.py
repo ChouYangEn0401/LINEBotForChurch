@@ -30,6 +30,7 @@ import yaml
 from church_bot.config import Paths, Settings, load_settings, save_settings
 from church_bot.errors import ConfigError
 from church_bot.files import write_text
+from church_bot.tables import MemberTable, TargetTable
 
 log = logging.getLogger(__name__)
 
@@ -168,6 +169,9 @@ def add_ministry(paths: Paths, name: str, note: str = "") -> Ministry:
         mpaths.data_dir.mkdir(parents=True, exist_ok=True)
         if not mpaths.settings_file.exists():
             save_settings(mpaths, new_ministry_settings())
+        for table in (TargetTable(mpaths.targets_file), MemberTable(mpaths.members_file)):
+            if not table.path.exists():
+                table.save([])  # 空的表（只有表頭）：主控台直接說「還沒有群組」，不會先跳「找不到檔案」
         cfg.ministries.append(ministry)
         created.append(ministry)
 

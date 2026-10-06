@@ -18,7 +18,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 
-from church_bot.errors import ConfigError, SourceError
+from church_bot.errors import ConfigError, SourceError, SourceNotSetError
 from church_bot.models import RawSheet
 from church_bot.sources.base import split_worksheets
 
@@ -36,7 +36,7 @@ def parse_sheet_url(url: str) -> tuple[str, str, bool]:
     """回傳 (試算表 ID, gid, 是否為「發佈到網路」網址)。"""
     url = (url or "").strip()
     if not url:
-        raise ConfigError("還沒填 Google Sheet 網址", "到網頁「服事表」頁貼上 Google Sheet 的網址。")
+        raise SourceNotSetError("還沒接服事表", "到「服事表」頁貼上 Google Sheet 的網址（開成知道連結的人可以檢視）。")
     gid_match = _GID_RE.search(url)
     gid = gid_match.group(1) if gid_match else parse_qs(urlparse(url).query).get("gid", [""])[0]
     if pub := _PUB_RE.search(url):
