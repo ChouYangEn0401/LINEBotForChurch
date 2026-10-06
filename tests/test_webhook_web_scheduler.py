@@ -10,6 +10,7 @@ from church_bot.models import Member, OutgoingMessage
 from church_bot.scheduler import (
     QUOTA_EVERY_MINUTES, QUOTA_JOB_ID, BotScheduler, is_active_week, next_fire_time, previous_fire_time,
 )
+from church_bot.ministries import Church
 from church_bot.service import BotService
 from church_bot.tables import MemberTable, TargetTable
 from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
@@ -19,13 +20,13 @@ from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
 def test_quota_is_refreshed_when_the_management_web_app_starts(paths, monkeypatch):
     """用量不會停在舊數字：開管理網頁先問一次，之後每 5 分鐘回來看該不該再問（見 core/quota.py）。"""
     calls: list[dict] = []
-    monkeypatch.setattr(BotService, "refresh_quota", lambda self, **kw: calls.append(kw))
+    monkeypatch.setattr(Church, "refresh_quota", lambda self, **kw: calls.append(kw))
     monkeypatch.setattr(BotScheduler, "_maybe_catch_up", lambda self: None)
     settings = Settings()
     settings.schedule.enabled = False
     save_settings(paths, settings)
 
-    scheduler = BotScheduler(BotService(paths))
+    scheduler = BotScheduler(Church(paths.church))
     scheduler.start()
     try:
         deadline = time.monotonic() + 5
@@ -42,8 +43,8 @@ def test_quota_refresh_failure_never_breaks_the_scheduler(paths, monkeypatch):
     def boom(self, **kw):
         raise RuntimeError("LINE 爛掉了")
 
-    monkeypatch.setattr(BotService, "refresh_quota", boom)
-    BotScheduler(BotService(paths))._refresh_quota()  # 不丟例外，只寫進記錄檔
+    monkeypatch.setattr(Church, "refresh_quota", boom)
+    BotScheduler(Church(paths.church))._refresh_quota()  # 不丟例外，只寫進記錄檔
 
 
 # ------------------------------------------------------------------ webhook
@@ -466,11 +467,11 @@ def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths,
     calls: list[str] = []
     monkeypatch.setattr(BotService, "run", lambda self, trigger, **kw: calls.append(trigger))
     monkeypatch.setattr("church_bot.scheduler.is_active_week", lambda cfg, date: False)
-    scheduler = BotScheduler(BotService(paths))
+    scheduler = BotScheduler(Church(paths.church))
 
-    scheduler._run("schedule")  # 非發送週 → 跳過，不執行
+    scheduler._run("m1", "schedule")  # 非發送週 → 跳過，不執行
     for trigger in ("catchup", "manual", "cli"):
-        scheduler._run(trigger)  # 不受「每 N 週」影響，一定執行
+        scheduler._run("m1", trigger)  # 不受「每 N 週」影響，一定執行
 
     assert calls == ["catchup", "manual", "cli"]
 

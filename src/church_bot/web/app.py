@@ -172,7 +172,8 @@ def create_app(paths: Paths) -> FastAPI:
     # 暫時：網頁還是只管一個牧區（下一步改成首頁列出所有牧區）
     service = church.service(paths.ministry or church.ministries()[0].id)
     paths = service.paths
-    scheduler = BotScheduler(service)
+    scheduler = BotScheduler(church)
+    mid = paths.ministry
     webhook = WebhookHandler(church, Verifier(), on_settings_changed=scheduler.reload)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     asset_hash = hashlib.sha1()
@@ -225,10 +226,10 @@ def create_app(paths: Paths) -> FastAPI:
         ctx.setdefault("flash_level", request.query_params.get("level", "ok"))
         pending = webhook.verifier.current()
         today = dt.date.today()
-        next_run = scheduler.next_run_text()
+        next_run = scheduler.next_run_text(mid)
         # 內建排程關著 = 由 Telegram 來呼叫 cli.bat send；對看畫面的人來說這不是「關閉」，是「別人在排」
-        schedule_text = scheduler.status if next_run != "（沒有排程）" else "由 Telegram 排程發送"
-        base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status, "schedule_text": schedule_text,
+        schedule_text = scheduler.status_for(mid) if next_run != "（沒有排程）" else "由 Telegram 排程發送"
+        base = {"nav": name.removesuffix(".html"), "schedule_status": scheduler.status_for(mid), "schedule_text": schedule_text,
                 "next_run": next_run, "has_password": bool(current_password()),
                 "pending_change": pending,
                 "pending_minutes": webhook.verifier.minutes_left(pending) if pending else 0,
@@ -333,7 +334,7 @@ def create_app(paths: Paths) -> FastAPI:
         return build_steps(issues=report.issues, settings=ctx.settings, roster=roster, roster_error=roster_error,
                            members=ctx.members, targets=ctx.targets, unknown_names=unknown,
                            pending_claims=sum(1 for a in accounts if a.needs_review and not a.ignored),
-                           next_run=scheduler.next_run_text())
+                           next_run=scheduler.next_run_text(mid))
 
     @api.get("/nav", summary="側欄每一項現在的狀況（那行小字和右邊的數字）")
     def api_nav():
@@ -370,7 +371,7 @@ def create_app(paths: Paths) -> FastAPI:
         status["runs"] = ({"sub": f"上次 {last.started_at[5:16].replace('-', '/').replace('T', ' ')} · {last.status_zh}",
                            "count": 0, "tone": tone.get(last.status, "")} if last
                           else {"sub": "還沒有發送過", "count": 0, "tone": ""})
-        status["settings"] = {"sub": scheduler.status if scheduler.next_run() else "由 Telegram 排程發送",
+        status["settings"] = {"sub": scheduler.status_for(mid) if scheduler.next_run(mid) else "由 Telegram 排程發送",
                               "count": 0, "tone": ""}
         return status
 
@@ -884,7 +885,7 @@ def create_app(paths: Paths) -> FastAPI:
                                               error=f"{exc.message}　{exc.hint}".strip())
             save_settings(paths, new)
         await run_in_threadpool(scheduler.reload)
-        return _redirect("/settings", f"設定已儲存。自動發送：{scheduler.status}")
+        return _redirect("/settings", f"設定已儲存。自動發送：{scheduler.status_for(mid)}")
 
     @ui.post("/remote-config/approve")
     def remote_config_approve():
@@ -1028,8 +1029,8 @@ def create_app(paths: Paths) -> FastAPI:
     @api.get("/status", summary="目前狀態")
     def api_status():
         last = service.history.last_run()
-        return {"version": __version__, "schedule": scheduler.status,
-                "next_run": scheduler.next_run().isoformat() if scheduler.next_run() else None,
+        return {"version": __version__, "schedule": scheduler.status_for(mid),
+                "next_run": scheduler.next_run(mid).isoformat() if scheduler.next_run(mid) else None,
                 "last_run": jsonable_encoder(last) if last else None}
 
     @api.get("/preview", summary="預覽這次會發的訊息（不會送出）")

@@ -96,6 +96,20 @@ class Church:
     def units(self) -> list[Unit]:
         return [Unit(m, self.service(m.id)) for m in self.ministries()]
 
+    # ------------------------------------------------------------------ 本月 LINE 用量（整個帳號共用一份）
+
+    def _quota_unit(self) -> Unit | None:
+        """由哪個牧區的設定去問 LINE 用量：第一個「正式發送、有開額度檢查」的牧區。都是測試模式就不問。"""
+        return next((u for u in self.units() if u.service.quota_status() is not None), None)
+
+    def refresh_quota(self, *, force: bool = False):  # noqa: ANN201 - QuotaSnapshot | None
+        unit = self._quota_unit()
+        return unit.service.refresh_quota(force=force) if unit else None
+
+    def quota_status(self):  # noqa: ANN201 - QuotaSnapshot | None
+        unit = self._quota_unit()
+        return unit.service.quota_status() if unit else None
+
     # ------------------------------------------------------------------ LINE 群組、人 → 哪個牧區
 
     def owner_of(self, chat_id: str) -> Unit | None:

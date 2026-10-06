@@ -100,3 +100,49 @@ def test_bot_removed_from_a_group_alerts_only_that_ministry(handler):
 def test_permissions_name_the_ministry(handler):
     reply = send(handler, say("/權限", chat=YOUTH))
     assert "青年牧區" in reply and "青年牧區管理員" in reply and "壯年牧區管理員" not in reply
+
+
+# ------------------------------------------------------------------ 每個牧區一個鬧鐘
+
+
+def test_each_ministry_gets_its_own_alarm(church, root, monkeypatch):
+    from church_bot.scheduler import BotScheduler, due_on
+
+    youth = load_settings(root.for_ministry("m1"))
+    youth.schedule.enabled, youth.schedule.day_of_week, youth.schedule.time = True, "thu", "20:00"
+    save_settings(root.for_ministry("m1"), youth)
+    adult = load_settings(root.for_ministry("m2"))
+    adult.schedule.enabled, adult.schedule.day_of_week, adult.schedule.time = True, "sat", "09:30"
+    save_settings(root.for_ministry("m2"), adult)
+
+    scheduler = BotScheduler(church)
+    scheduler._scheduler.start(paused=True)
+    try:
+        scheduler.reload()
+        assert {j.id for j in scheduler._scheduler.get_jobs()} == {"weekly-m1", "weekly-m2"}
+        assert scheduler.status_for("m2") == "每星期六 09:30"
+        assert scheduler.next_run("m1").weekday() == 3 and scheduler.next_run("m2").weekday() == 5
+        assert scheduler.status == "2 個牧區自動發送"
+
+        adult.schedule.enabled = False  # 壯年牧區關掉：重排之後只剩青年牧區
+        save_settings(root.for_ministry("m2"), adult)
+        scheduler.reload()
+        assert [j.id for j in scheduler._scheduler.get_jobs()] == ["weekly-m1"]
+        assert scheduler.status_for("m2") == "自動發送已關閉"
+    finally:
+        scheduler.shutdown()
+
+    import datetime as dt
+    thursday = dt.date(2026, 10, 8)
+    assert due_on(youth.schedule, thursday) and not due_on(youth.schedule, thursday + dt.timedelta(days=1))
+    assert not due_on(adult.schedule, dt.date(2026, 10, 10))  # 關掉的牧區不算到期
+
+
+def test_alarm_only_sends_its_own_ministry(church, monkeypatch):
+    from church_bot.scheduler import BotScheduler
+    from church_bot.service import BotService
+
+    sent: list[str] = []
+    monkeypatch.setattr(BotService, "run", lambda self, trigger, **kw: sent.append(self.paths.ministry))
+    BotScheduler(church)._run("m2", "schedule")
+    assert sent == ["m2"]
