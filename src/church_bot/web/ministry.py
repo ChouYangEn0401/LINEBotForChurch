@@ -2,7 +2,7 @@
 
 每一頁跟單一牧區時一模一樣，只是多了「哪個牧區」（``m``，見 common.MinistryView）：
 讀寫的是那個牧區資料夾裡的設定和名單、那個牧區的資料庫，網址前面多了 /m/<編號>。
-進來之前已經過了兩層密碼（common.Web.require_login、Web.ministry）。
+進來之前已經檢查過身分（網站密碼 common.Web.require_login；牧區密碼或伺服器管理員 Web.ministry）。
 """
 
 from __future__ import annotations

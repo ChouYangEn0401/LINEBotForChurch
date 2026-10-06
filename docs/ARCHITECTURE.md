@@ -44,6 +44,9 @@
 | `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字與暱稱、群組成員關係）、跨程式共用的小狀態（`state` 表）；舊資料庫開啟時自動補欄位 |
 | `core/accounts.py` | LINE 帳號 ↔ 同工名單的對應狀態（已對應／改名／對應／衝突／加入）、待確認的暱稱 |
 | `core/quota.py` | 本月 LINE 用量的快照：什麼時候該再問 LINE、問不到時留住舊數字（主控台那一格、`/api/quota`、`cli.bat quota` 共用） |
+| `core/message_template.py` | 罐頭訊息的【中文標籤】寫法：標籤、【服事名單】一項一行、沒資料就拿掉（舊的 Jinja2 寫法在 renderer 照樣能用） |
+| `core/totp.py` | 驗證器 App 的 6 位數（RFC 6238，標準函式庫），QR code 用 segno（沒裝就顯示金鑰） |
+| `core/login_codes.py` | Telegram 一次性登入碼（照 CSP：碼＋頁面上的 nonce、90 秒、錯 3 次作廢、速率限制） |
 | `core/versions.py` | 變更紀錄：內容定址（SHA-256、zlib、相同內容只存一份）、來源、摘要、差異、還原；直接用 Excel 改的也抓得到 |
 | `core/public_url.py` | 目前對外的網址（免費模式每次重開都會變）：從 Webhook 請求的 Host 認出來，供 LINE 指令「/服務網址」回覆 |
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
@@ -51,8 +54,8 @@
 | `scheduler.py` | APScheduler：每個牧區一個每週鬧鐘 + 開機補發；`due_on` 給 `cli send` 判斷今天輪到誰 |
 | `webhook.py` | LINE Webhook：依群組分到牧區；「/」開頭的聊天指令（`parse_command`）、加入群組、被踢出群組、被動收集 LINE 帳號 |
 | `remote_config.py` | 「/設定」可以改的項目與一次性驗證碼（安全設計寫在檔案開頭） |
-| `web/` | FastAPI：`app.py` 是教會這一層（首頁＝所有牧區、全教會設定、登入），`ministry.py` 是 `/m/<編號>/…` 牧區的後台，`common.py` 是共用零件與兩層密碼；管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*`、`/m/<編號>/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`/m/<編號>/api/nav` 是側欄每一項現在的狀況（首頁也拿它顯示每個牧區的狀況）；`static/roster.js` 把服事表畫成表格；樣式的顏色只從 `static/app.css` 開頭那組變數來 |
-| `cli.py` | `python -m church_bot init / web / check / preview / send / quota / 牧區 / set-webhook / tunnel`（`--牧區` 指定牧區） |
+| `web/` | FastAPI：`app.py` 是教會這一層（首頁＝所有牧區、全教會設定、登入），`ministry.py` 是 `/m/<編號>/…` 牧區的後台，`manager.py` 是伺服器管理員登入，`common.py` 是共用零件與三種身分（訪客、牧區管理員、伺服器管理員）；管理網頁（Jinja2，`templates/_macros.html` 是共用零件）+ `/api/*`、`/m/<編號>/api/*` JSON API；`web/overview.py` 是主控台的「運作流程」和「問題 → 去哪一頁處理」；`/m/<編號>/api/nav` 是側欄每一項現在的狀況（首頁也拿它顯示每個牧區的狀況）；`static/roster.js` 把服事表畫成表格；樣式的顏色只從 `static/app.css` 開頭那組變數來 |
+| `cli.py` | `python -m church_bot init / web / check / preview / send / quota / 牧區 / set-webhook / tunnel`（`--牧區` 指定牧區）；`web` 是外層程式＋子程式（`--child`），子程式用代碼 3 結束就重開（「重新啟動」按鈕） |
 
 ## 錯誤處理原則：不要沉默
 
@@ -112,7 +115,8 @@ pytest
 設定與 `.env`、LINE API（`httpx.MockTransport`：重試、409、額度用完、@ 失敗改純文字）、
 整合測試（假的發送端：防重複、失敗通知、token 錯誤停止、額度警告）、Webhook 簽章與事件、聊天指令解析、
 LINE 帳號對應、「/設定」驗證碼（過期、錯三次、只限本人、每日上限）、資料庫升級、網頁（TestClient）、
-多牧區（搬家、群組分流、每個牧區的鬧鐘、兩層密碼、`cli send` 今天輪到誰）、每個群組自己的訊息、變更紀錄與還原。
+多牧區（搬家、群組分流、每個牧區的鬧鐘、`cli send` 今天輪到誰）、三種身分與伺服器管理員登入（本機／外面、
+驗證器 RFC 測試向量、Telegram 碼的 nonce 與作廢）、重新啟動、每個群組自己的訊息、【中文標籤】跟舊預設排出來一模一樣、變更紀錄與還原。
 大部分測試在 m1「測試牧區」的資料夾裡跑（`conftest.paths`），跟實際使用一樣；`client` 的網址預設在 `/m/m1/` 裡面。
 LINE Webhook 的假物件在 `tests/line_fakes.py`（放在 conftest 會被 pytest 載入成兩份，有狀態的假物件會對不上）。
 
