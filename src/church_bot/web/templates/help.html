@@ -8,7 +8,7 @@
 {% endcall %}
 
 <nav class="seg">
-  <a href="#pages">每一頁做什麼</a><a href="#daily">想做的事去哪裡</a><a href="#setup">第一次設定</a>
+  <a href="#ministries">牧區</a><a href="#pages">每一頁做什麼</a><a href="#daily">想做的事去哪裡</a><a href="#setup">第一次設定</a>
   <a href="#commands">LINE 指令</a><a href="#sheet">服事表怎麼排</a><a href="#faq">常見狀況</a>
 </nav>
 
@@ -22,6 +22,20 @@
     <div class="flow-step"><b>03 送到群組</b><span>每個 LINE 群組收自己要的部分</span></div>
     <div class="flow-arrow">→</div>
     <div class="flow-step"><b>04 有問題就通知</b><span>LINE 私訊管理員，主控台標出來</span></div>
+  </div>
+</section>
+
+<section class="panel" id="ministries">
+  <div class="panel-head">牧區<span class="hint">一個程式、一個 LINE 官方帳號，管很多個牧區</span></div>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td><a href="/">⛪ 首頁</a></td><td>所有牧區：每個牧區現在的狀況、什麼時候發、上次發送。按「新增牧區」幫別的牧區建一套；機器人被邀進還沒分配的群組，也在這裡選它屬於哪個牧區。</td></tr>
+      <tr><td>點進一個牧區</td><td>就是它自己的主控台、服事表、同工名單、LINE 群組、設定，跟別的牧區完全分開。左上角「← 所有牧區」回首頁。</td></tr>
+      <tr><td>每個群組自己的訊息</td><td>「LINE 群組」編輯一個群組 →「這個群組的提醒訊息」：標題、結尾，或整則改寫；留空就用牧區設定的。</td></tr>
+      <tr><td>什麼時候發</td><td>每個牧區在自己的「設定 → 什麼時候發」選星期幾、幾點。後台（2-start）開著就會照時間發；Telegram 呼叫 <code>cli.bat send</code> 會發「今天輪到的牧區」，兩邊都觸發也只發一次。</td></tr>
+      <tr><td>牧區密碼</td><td>網站密碼之外，牧區可以在「設定 → 這個牧區」再設一層。忘記了只能在執行機器人的那台電腦上清掉。</td></tr>
+      <tr><td>改錯了</td><td>牧區裡「管理員 → 變更紀錄」看得到每次改了什麼，一鍵還原。</td></tr>
+    </table>
   </div>
 </section>
 
