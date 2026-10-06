@@ -84,6 +84,12 @@ class Church:
                 self._services[ministry_id] = BotService(self.paths.for_ministry(ministry_id), shared=self.shared)
             return self._services[ministry_id]
 
+    def busy(self) -> bool:
+        """有沒有哪個牧區正在發送。"""
+        with self._lock:
+            services = list(self._services.values())
+        return any(s.busy for s in services)
+
     def unit(self, key: str) -> Unit | None:
         """用編號或名稱找牧區。"""
         ministry = self.config().find(key)

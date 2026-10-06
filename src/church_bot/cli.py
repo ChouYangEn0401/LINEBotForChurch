@@ -379,7 +379,47 @@ def _port_in_use(host: str, port: int) -> bool:
     return False
 
 
+RESTART_CODE = 3  # 管理網頁按「重新啟動」：網頁那個子程式用這個代碼結束，外面那一層就再開一次
+RESTART_LIMIT = 5  # 一分鐘內重開超過這麼多次就停下來（一直壞的話不要無限重開）
+
+
 def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
+    """開管理網頁。外面這一層只負責「開網頁、網頁說要重新啟動就再開一次」，真正的網頁在子程式裡跑
+    （``--child``），所以按「重新啟動」會載入新的程式，例如更新過程式之後。2-start、免費模式、開機自動執行都一樣。"""
+    if not getattr(args, "child", False):
+        return _supervise(args)
+    return _serve(paths, args)
+
+
+def _supervise(args: argparse.Namespace) -> int:
+    base = [sys.executable, "-m", "church_bot", *(["-v"] if getattr(args, "verbose", False) else []), "web", "--child"]
+    base += ["--host", args.host] if args.host else []
+    base += ["--port", str(args.port)] if args.port else []
+    starts: list[float] = []
+    restarted = False
+    while True:
+        command = base + (["--no-browser"] if args.no_browser or restarted else []) + (["--restarted"] if restarted else [])
+        child = subprocess.Popen(command)
+        try:
+            code = child.wait()
+        except KeyboardInterrupt:  # Ctrl+C 也會送到子程式，等它把排程收好再結束
+            try:
+                child.wait(timeout=30)
+            except (subprocess.TimeoutExpired, KeyboardInterrupt):
+                child.kill()
+            return 0
+        if code != RESTART_CODE:
+            return code
+        now = time.monotonic()
+        starts = [t for t in starts if now - t < 60] + [now]
+        if len(starts) > RESTART_LIMIT:
+            _print("❌ 一分鐘內重新啟動太多次，先停下來。請把 data/church_bot.log 傳給維護的人，再雙擊 2-start。")
+            return 1
+        _print("🔄 重新啟動管理網頁…")
+        restarted = True
+
+
+def _serve(paths: Paths, args: argparse.Namespace) -> int:
     import uvicorn
 
     from church_bot.web.app import create_app
@@ -388,6 +428,11 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
     host = args.host or settings.web.host
     port = args.port or settings.web.port
     url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}"
+    if args.restarted:  # 舊的那個剛結束，port 可能還要一下下才放出來
+        for _ in range(40):
+            if not _port_in_use(host, port):
+                break
+            time.sleep(0.5)
     if _port_in_use(host, port):
         _print(f"⚠️ {url} 已經有程式在用了 —— 很可能管理網頁本來就開著。")
         _print("   直接幫你打開瀏覽器；如果打不開，請把設定裡的 port 改成別的數字（例如 8788）。")
@@ -397,13 +442,19 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
     if host not in ("127.0.0.1", "localhost") and not settings.web.password:
         _print("⚠️ 管理網頁開放給其他電腦連線，但沒有設定密碼！請在 .env 設定 UI_PASSWORD。")
 
-    _print(f"✅ 管理網頁：{url}")
-    _print("   要關掉請按 Ctrl + C。")
-    _print("   這個視窗開著的時候，「自動發送」開著的牧區會照各自的時間發（Telegram 再呼叫一次也不會發兩次）。")
+    if args.restarted:
+        _print(f"✅ 已重新啟動：{url}")
+    else:
+        _print(f"✅ 管理網頁：{url}")
+        _print("   要關掉請按 Ctrl + C。")
+        _print("   這個視窗開著的時候，「自動發送」開著的牧區會照各自的時間發（Telegram 再呼叫一次也不會發兩次）。")
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
-    uvicorn.run(create_app(paths), host=host, port=port, log_level="warning")
-    return 0
+    app = create_app(paths)
+    server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
+    app.state.server = server  # 「重新啟動」按鈕靠它讓網頁停下來（見 web/app.py）
+    server.run()
+    return RESTART_CODE if getattr(app.state, "restart_requested", False) else 0
 
 
 # --------------------------------------------------------------------------- main
@@ -420,6 +471,8 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", help="覆蓋設定檔的 host")
     web.add_argument("--port", type=int, help="覆蓋設定檔的 port")
     web.add_argument("--no-browser", action="store_true", help="不要自動打開瀏覽器")
+    web.add_argument("--child", action="store_true", help=argparse.SUPPRESS)  # 外面那一層開的子程式（見 cmd_web）
+    web.add_argument("--restarted", action="store_true", help=argparse.SUPPRESS)
     ministry_help = "只處理這個牧區（名稱或編號，例如 青年牧區 或 m1）"
     check = sub.add_parser("check", help="健康檢查：設定、服事表、LINE 是否都正常（預設每個牧區）")
     check.add_argument("--牧區", "--ministry", "-m", dest="ministry", default="", help=ministry_help)

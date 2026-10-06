@@ -106,6 +106,11 @@ class BotService:
         self._cache_lock = threading.Lock()
         self._roster_cache: tuple[str, float, Roster] | None = None
 
+    @property
+    def busy(self) -> bool:
+        """這個牧區現在正在發送（排程、按鈕、LINE /提醒 都算）。重新啟動前要等它送完。"""
+        return self._run_lock.locked()
+
     # ------------------------------------------------------------------ loading
 
     def load(self) -> Context:

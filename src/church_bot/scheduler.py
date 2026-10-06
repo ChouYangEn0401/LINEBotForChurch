@@ -118,8 +118,9 @@ class BotScheduler:
         self._watch_quota()
 
     def shutdown(self) -> None:
+        """關掉排程。正在發送的那一次會等它送完（重新啟動、Ctrl+C 都不會把發到一半的提醒切斷）。"""
         if self._scheduler.running:
-            self._scheduler.shutdown(wait=False)
+            self._scheduler.shutdown(wait=True)
 
     def reload(self) -> None:
         """設定改了之後呼叫，所有牧區重新排程（新增、刪除牧區也一樣）。"""

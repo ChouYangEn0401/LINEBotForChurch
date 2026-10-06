@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import secrets
+import threading
 from contextlib import asynccontextmanager
 from typing import Any
 from urllib.parse import quote
@@ -45,6 +46,7 @@ from church_bot.web.ministry import ministry_routes
 from church_bot.webhook import SignatureError
 
 log = logging.getLogger(__name__)
+BOOT_ID = secrets.token_hex(8)  # 每次開程式都不一樣：「重新啟動中」那一頁靠它知道新的已經起來了
 
 
 def create_app(paths: Paths) -> FastAPI:
@@ -182,7 +184,7 @@ def create_app(paths: Paths) -> FastAPI:
             # 畫面（templates/）每次都重新讀檔，程式（.py）卻是開程式時就載入的：更新完程式沒有重開，
             # 就會變成「新的畫面配舊的程式」，畫面要的東西程式還沒給。關掉重開就好，不是資料壞掉。
             return web.page(request, "error.html", None, message="程式更新過了，但這個視窗還在跑舊的版本",
-                            hint="請把執行機器人的黑色視窗關掉，再雙擊一次 2-start（資料都沒事）。")
+                            hint="請伺服器管理員按右上角「重新啟動」；或把執行機器人的黑色視窗關掉，再雙擊一次 2-start（資料都沒事）。")
         return web.page(request, "error.html", None, message=f"程式發生未預期的錯誤：{exc!r}",
                         hint="請把 data/church_bot.log 傳給維護的人。")
 
@@ -276,6 +278,21 @@ def create_app(paths: Paths) -> FastAPI:
         if not is_local(request):
             return redirect("/settings#manager", "管理者密碼和第二道驗證只能在執行機器人的那台電腦上改", "error")
         return None
+
+    # --- 重新啟動（例如更新過程式之後）：讓網頁那個子程式結束，外面那一層會再開一次（見 cli.cmd_web） ---
+
+    @manager.post("/restart", response_class=HTMLResponse)
+    def restart(request: Request, next: str = Form("/")):
+        server = getattr(app.state, "server", None)
+        if server is None:
+            return redirect(safe_next(next), "這次不是用 2-start 開的，沒辦法從網頁重新啟動：請關掉執行機器人的視窗再雙擊 2-start",
+                            "error")
+        if church.busy():
+            return redirect(safe_next(next), "有牧區正在發送提醒，等它送完（通常幾秒）再按一次", "warn")
+        app.state.restart_requested = True
+        threading.Timer(0.5, setattr, args=(server, "should_exit", True)).start()  # 先把「重新啟動中」那一頁送出去
+        log.warning("伺服器管理員從網頁重新啟動")
+        return web.templates.TemplateResponse(request, "restarting.html", {"boot": BOOT_ID, "next": safe_next(next)})
 
     @manager.post("/settings/manager-password")
     def manager_password_save(request: Request, password: str = Form(""), confirm: str = Form("")):
@@ -416,7 +433,7 @@ def create_app(paths: Paths) -> FastAPI:
 
     @app.get("/healthz", include_in_schema=False)
     def healthz():
-        return {"ok": True, "version": __version__}
+        return {"ok": True, "version": __version__, "boot": BOOT_ID}
 
     @app.post("/line/webhook", include_in_schema=False)
     async def line_webhook(request: Request):

@@ -65,6 +65,11 @@
       <button type="submit" class="btn btn-sm"
               title="{{ '收起進階頁面：選單只留平常會用到的頁面' if admin_mode else '打開進階頁面：選單多出設定、系統檢查、變更紀錄，畫面多出 LINE ID 這類細節。這不是權限，權限看左邊的身分' }}">{{ "收起進階" if admin_mode else "進階頁面" }}</button>
     </form>
+    {% if is_manager %}
+      <form method="post" action="/restart" data-confirm="重新啟動管理網頁？大約 5 秒：這段時間網頁和 LINE 指令會暫停，正在發送的提醒會先送完，排程不會漏。">
+        <input type="hidden" name="next" value="{{ current_path }}">
+        <button type="submit" class="btn btn-sm" title="更新過程式、或覺得怪怪的時候用；不用再去關黑色視窗">重新啟動</button></form>
+    {% endif %}
     {% if is_manager and manager_set %}
       <form method="post" action="/manager/logout"><button type="submit" class="btn btn-sm btn-ghost" title="回到一般身分（牧區密碼照樣記得）">登出管理員</button></form>
     {% elif not is_manager %}
