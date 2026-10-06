@@ -74,13 +74,13 @@
 - **每月**：看「❓ 說明 → 🩺 系統檢查」的 LINE 本月額度。
 - **每季**：排好下一期服事表（程式會在剩 14 天時提醒）。
 - **更新程式**：拿到新版（`git pull` 或直接覆蓋檔案）後，再執行一次 `1-install`，不會覆蓋任何設定。
-- **備份**：`config/` 底下的 `settings.yaml`、`targets.csv`、`members.csv`、`teams.csv`（有用實驗功能的話加上 `org.csv`），還有 `.env`（機密，另外保管）。
+- **備份**：整個 `config/` 資料夾（`church.yaml` 和每個牧區的 `ministries/<編號>/`），`data/church_bot.db`（變更紀錄），還有 `.env`（機密，另外保管）。改錯東西先看牧區裡的「變更紀錄」，通常一鍵就能還原。
   有在收集 LINE 帳號的話也備份 `data/church_bot.db`（刪掉會忘記送過什麼、收集到但還沒對應的 LINE 帳號；已經對應到同工名單的不受影響）。
 - **出問題**：把 `data/church_bot.log` 傳給維護的人。
 
 ## 8. 已知限制
 
-- 電腦關機時不會發送。每週提醒由 Telegram 機器人排程（呼叫 `cli.bat send`），Telegram 沒開就不會發；`--popup` 的通知視窗只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
+- 電腦關機時不會發送。每週提醒由後台（`2-start`）照每個牧區的時間發，Telegram 機器人呼叫 `cli.bat send` 是備援（發今天輪到的牧區）；兩個都沒開就不會發；`--popup` 的通知視窗只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
 - LINE token 失效時，連管理員通知也送不出去，只能看網頁或 log。
 - 免費的一般 LINE 帳號**拿不到群組完整成員名單**（見 [LINE_IDS_AND_MEMBERS.md](LINE_IDS_AND_MEMBERS.md)）。
 - 管理網頁沒有 CSRF 防護：預設只開放這台電腦；要開放給其他電腦時，務必設定密碼。
@@ -93,7 +93,7 @@
 - 每個群組各自的提醒日、發送前一天的「檢查」、多個群組共用一份服事表設定（見 [ROADMAP.md](ROADMAP.md)）
 - Email 備援通知（LINE 本身壞掉時）
 - 放到雲端主機（電腦不用一直開）
-- 大教會：牧區／小組分流、各自的管理員與服事表（見 [LAB_LARGE_CHURCH.md](LAB_LARGE_CHURCH.md)）
+- 大教會的下一步：每個人一個網頁帳號、用量按牧區統計（牧區分流本身已完成，見 [MINISTRIES.md](MINISTRIES.md)）
 
 ## 10. 開發與版本控制
 
