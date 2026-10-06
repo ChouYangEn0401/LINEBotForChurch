@@ -50,3 +50,25 @@
   {% if caller %}<div class="row">{{ caller() }}</div>{% endif %}
 </div>
 {%- endmacro %}
+
+{#- 提醒訊息的編輯器：左邊打字（點按鈕插入【標籤】），右邊即時預覽（app.js 把整張表單送到 preview_url）。
+    caller() 放在打字框下面那一列（例如「恢復預設」按鈕）。 -#}
+{% macro message_editor(name, value, preview_url, default="", placeholder="", empty_note="") -%}
+<div class="msg-editor" data-msg-editor data-preview="{{ preview_url }}">
+  <div class="msg-edit">
+    <div class="chips msg-tags" aria-label="點一下插入">
+      {% for tag, desc in message_tags.items() %}<button type="button" class="chip" data-insert-tag="【{{ tag }}】" title="{{ desc }}">＋ {{ tag }}</button>{% endfor %}
+    </div>
+    <textarea id="{{ name }}" name="{{ name }}" class="msg-text" rows="11" spellcheck="false" placeholder="{{ placeholder }}" data-default="{{ default }}">{{ value }}</textarea>
+    <span class="help">直接打字；要放資料的地方點上面的按鈕插入【標籤】，送出時換成那一週的資料。
+      <b>【服事名單】</b>那一行會一項一行重複（前後的字每行都有）。沒資料的標籤自動拿掉，整行都沒資料就整行拿掉。{{ empty_note }}</span>
+    {% if caller %}<div class="row">{{ caller() }}</div>{% endif %}
+  </div>
+  <div class="msg-preview">
+    <span class="ffield-lab">群組會收到 <span class="note" data-preview-note></span></span>
+    <pre class="msg" data-preview-text>（預覽載入中…）</pre>
+    <span class="help">只是預覽，不會送出。實際送出時，有對應 LINE 帳號的人會被 @。</span>
+    <div class="banner error" data-preview-error hidden><b>✕</b><span></span></div>
+  </div>
+</div>
+{%- endmacro %}

@@ -500,3 +500,12 @@ details.change .what .sub { font-size: 12px; color: var(--muted); }
 .totp-setup .stack { flex: 1; min-width: 240px; }
 .totp-setup .secret { font-size: 14px; letter-spacing: .06em; padding: 4px 8px; align-self: flex-start; }
 .btn.disabled { opacity: .5; pointer-events: none; }
+
+/* ---------- 提醒訊息編輯器：左邊打字、右邊預覽 ---------- */
+.msg-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.msg-edit, .msg-preview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.msg-tags .chip { cursor: pointer; }
+.msg-text { font: 13.5px/1.65 var(--sans); min-height: 220px; }
+.msg-preview .msg { min-height: 220px; background: var(--bg2); }
+.drawer .msg-editor { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 960px) { .msg-editor { grid-template-columns: minmax(0, 1fr); } }

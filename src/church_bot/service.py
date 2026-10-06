@@ -16,7 +16,7 @@ from dataclasses import dataclass, field, replace
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from church_bot.config import Paths, Settings, load_settings
+from church_bot.config import MessageSettings, Paths, Settings, load_settings
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
 from church_bot.core.dispatcher import Dispatcher
@@ -25,7 +25,7 @@ from church_bot.core.parser import SheetInfo, inspect_sheet, parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
 from church_bot.core.public_url import ServiceUrl, load_service_url, save_service_url
 from church_bot.core.quota import QuotaSnapshot, load_quota, save_quota
-from church_bot.core.renderer import Renderer
+from church_bot.core.renderer import Renderer, matches_any, sample_day, select_assignments
 from church_bot.errors import ChurchBotError, SourceError
 from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
@@ -405,23 +405,29 @@ class BotService:
         planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
         return planner.plan(roster, targets, today)
 
-    def preview_target(self, target: Target) -> tuple[list[str], str]:
-        """「LINE 群組」頁編輯一個群組時，旁邊顯示「這個群組現在會收到什麼」。
+    def sample_message(self, message: MessageSettings, target: Target | None = None) -> tuple[str, str]:
+        """編輯提醒訊息時的即時預覽：用服事表接下來第一場有資料的聚會排一則（還沒存的內容也可以），不會送出。
 
-        停用的、還沒填 ID 的群組也照樣試排（借一個假的 ID），這樣設定訊息時不用先啟用。
-        回傳 (訊息文字, 沒有訊息時的原因)；讀不到服事表也不丟例外，原因寫在第二個值。
+        ``target`` = 某個群組（照它的「只發這些服事／聚會」挑）。服事表讀不到、或接下來都沒有資料，就用範例排。
+        回傳 (訊息文字, 用哪一場排的)；模板寫錯丟 ConfigError（畫面上顯示原因）。
         """
-        trial = replace(target, enabled=True, line_id=target.line_id if LINE_ID_RE.match(target.line_id)
-                        else "C" + "0" * 32)
+        renderer = Renderer(message)
+        trial = replace(target, mention=False) if target else None
+        directory = Directory([])
         try:
             ctx = self.load()
-            plan = self._plan_for(ctx, [trial], self.now(ctx.settings).date())
-        except ChurchBotError as exc:
-            return [], exc.message
-        if texts := [pm.message.text for pm in plan.messages]:
-            return texts, ""
-        reason = next((i.message for i in plan.issues if i.code in ("target_template", "target_nothing")), "")
-        return [], reason or "這幾天服事表沒有東西可以提醒。"
+            directory = ctx.directory
+            today = self.now(ctx.settings).date()
+            roster = self.fetch_roster(ctx.settings, today, use_cache=True)
+            day = next((d for d in roster.days if d.date >= today and select_assignments(d, trial)
+                        and not (trial and trial.labels and not matches_any(d.label, trial.labels))), None)
+        except ChurchBotError:
+            day = None
+        if day is None:
+            sample, sample_directory = sample_day()
+            return renderer.render(sample, sample_directory, trial).text, "服事表接下來沒有這個群組的資料，先用範例排"
+        when = format_date(day.date, DATE_FMT)
+        return renderer.render(day, directory, trial).text, f"用 {when}{' ' + day.label if day.label else ''} 的服事表排的"
 
     def preview_for(self, day: dt.date, chat_id: str = "") -> tuple[list[OutgoingMessage], str]:
         """給 LINE 指令「/別周測試 10/04」用：試印「那一天起往後幾天」的提醒。

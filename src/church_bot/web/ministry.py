@@ -296,12 +296,11 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
             message = load_settings(m.paths).message
         except ConfigError:
             message = Settings().message
-        preview, preview_note = m.service.preview_target(editing) if editing and not error else ([], "")
         extra = {"flash": error, "flash_level": "error"} if error else {}
         return web.page(request, "targets.html", m, targets=result.items, issues=result.issues, chats=chats, editing=editing,
                     show_form=show_form, roles_in_sheet=m.service.roster_roles() if show_form else [],
                     original_name=editing.name if original_name is None and editing else (original_name or ""),
-                    message_defaults=message, preview=preview, preview_note=preview_note, **extra)
+                    message_defaults=message, **extra)
 
     @ui.get("/targets", response_class=HTMLResponse)
     def targets_page(request: Request, edit: str = "", new: str = "", m: MinistryView = Depends(web.ministry)):
@@ -737,6 +736,44 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         moved = remove_ministry(web.paths, m.id)
         await run_in_threadpool(web.scheduler.reload)
         return redirect("/", f"已移除「{m.name}」。資料沒有刪掉，搬到 {moved.relative_to(web.paths.root).as_posix()}")
+
+    # ------------------------------------------------------------------ 提醒訊息的即時預覽
+
+    @api.post("/message-preview", summary="編輯提醒訊息時的即時預覽（還沒存的內容也可以；不會送出）")
+    async def api_message_preview(request: Request, m: MinistryView = Depends(web.ministry)):
+        """設定頁「訊息長什麼樣子」和 LINE 群組的編輯抽屜，打字的時候 app.js 把整張表單送來這裡。
+
+        ``preview_kind=target``：某個群組（空白的部分用牧區設定）；其他：牧區設定本身。
+        """
+        form = {k: str(v) for k, v in (await request.form()).items()}
+        try:
+            base = load_settings(m.paths).message
+        except ConfigError:
+            base = Settings().message
+        template = form.get("template", "").replace("\r\n", "\n").strip()
+        target = None
+        try:
+            if form.get("preview_kind") == "target":
+                message = base
+                target = Target(name=form.get("name", "").strip() or "這個群組", line_id="C" + "0" * 32,
+                                roles=parse_list(form.get("roles", "")), labels=parse_list(form.get("labels", "")),
+                                title=form.get("title", "").strip(), footer=form.get("footer", "").strip(),
+                                template=template)
+            else:
+                updates: dict[str, Any] = {k: form[k].strip() for k in ("title", "footer") if k in form}
+                updates["template"] = template or DEFAULT_TEMPLATE
+                if form.get("date_format", "").strip():
+                    updates["date_format"] = form["date_format"].strip()
+                if "role_order" in form:
+                    updates["role_order"] = list(parse_list(form["role_order"]))
+                if form.get("name_separator"):
+                    updates["name_separator"] = form["name_separator"]
+                message = type(base).model_validate({**base.model_dump(), **updates})
+            text, note = await run_in_threadpool(m.service.sample_message, message, target)
+        except (ChurchBotError, ValidationError) as exc:
+            detail = f"{exc.message}。{exc.hint}".rstrip("。") if isinstance(exc, ChurchBotError) else "有欄位格式不對"
+            return {"text": "", "note": "", "error": detail}
+        return {"text": text, "note": note, "error": ""}
 
     # ------------------------------------------------------------------ 變更紀錄（見 core/versions.py）
 

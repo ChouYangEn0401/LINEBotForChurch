@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 
 from church_bot import __version__
 from church_bot.config import WEEKDAY_ZH, Paths, read_env_file
+from church_bot.core import message_template
 from church_bot.core.quota import QuotaSnapshot
 from church_bot.messengers import MESSENGER_KINDS_ZH
 from church_bot.ministries import Church, Unit
@@ -186,7 +187,7 @@ class Web:
             version=__version__, asset_v=asset_hash.hexdigest()[:10], weekday_zh=WEEKDAY_ZH,
             describe_line_id=describe_line_id, fmt_list=fmt_list, status_zh={s.value: s.zh for s in DeliveryStatus},
             trigger_zh=TRIGGER_ZH, source_kinds=SOURCE_KINDS_ZH, messenger_kinds=MESSENGER_KINDS_ZH,
-            layouts=LAYOUTS_ZH, issue_link=issue_link,
+            layouts=LAYOUTS_ZH, issue_link=issue_link, message_tags=message_template.TAGS,
         )
 
     # ------------------------------------------------------------------ 第一層：整個網站的密碼

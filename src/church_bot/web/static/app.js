@@ -217,9 +217,10 @@ document.querySelectorAll("[data-pick-target]").forEach((chip) => {
 document.querySelectorAll("[data-reset-template]").forEach((button) => {
   button.addEventListener("click", () => {
     const textarea = document.getElementById("template");
-    const question = button.dataset.confirmText || "要把訊息模板改回預設值嗎？按「儲存設定」後才會生效。";
+    const question = button.dataset.confirmText || "要把整則訊息改回預設嗎？按「儲存設定」後才會生效。";
     if (textarea && window.confirm(question)) {
       textarea.value = textarea.dataset.default;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));  // 預覽跟著換
     }
   });
 });
@@ -273,4 +274,43 @@ document.querySelectorAll("[data-picklist]").forEach((box) => {
   box.querySelector("[data-pick-add]").addEventListener("click", add);
   select.addEventListener("change", add);
   render();
+});
+
+// ---------- 提醒訊息編輯器：點按鈕插入【標籤】、打字時右邊即時預覽 ----------
+// 整張表單送到 data-preview（標題、結尾、群組的「只發這些服事」也算進去），回來的就是群組會收到的那一則。
+document.querySelectorAll("[data-msg-editor]").forEach((box) => {
+  const area = box.querySelector("textarea");
+  const form = box.closest("form");
+  const out = box.querySelector("[data-preview-text]");
+  const note = box.querySelector("[data-preview-note]");
+  const error = box.querySelector("[data-preview-error]");
+  let timer = null;
+  let seq = 0;
+  const ask = () => {
+    const mine = ++seq;
+    fetch(box.dataset.preview, { method: "POST", body: new FormData(form), credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!data || mine !== seq) return;  // 打字很快時，只用最後一次的結果
+        error.hidden = !data.error;
+        error.querySelector("span").textContent = data.error || "";
+        if (!data.error) { out.textContent = data.text; note.textContent = data.note ? "・" + data.note : ""; }
+      })
+      .catch(() => { /* 問不到就留著上一次的預覽 */ });
+  };
+  const refresh = () => { clearTimeout(timer); timer = setTimeout(ask, 350); };
+  box.querySelectorAll("[data-insert-tag]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const tag = chip.dataset.insertTag;
+      const start = area.selectionStart ?? area.value.length;
+      const end = area.selectionEnd ?? start;
+      area.value = area.value.slice(0, start) + tag + area.value.slice(end);
+      area.focus();
+      area.selectionStart = area.selectionEnd = start + tag.length;
+      refresh();
+    });
+  });
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", refresh);
+  ask();
 });

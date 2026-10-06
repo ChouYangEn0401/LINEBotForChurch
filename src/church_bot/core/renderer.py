@@ -98,6 +98,18 @@ def register_hint(rows: list[_Row]) -> str:
             "再打「/我的名字 你的名字」登記，之後提醒就會直接 @ 你 🙏")
 
 
+def sample_day() -> tuple[ServiceDay, Directory]:
+    """範例的一場聚會（檢查模板、服事表還沒資料時的預覽用）。"""
+    day = ServiceDay(
+        date=dt.date(2026, 9, 13), label="主日崇拜", note="聖餐主日",
+        assignments=(Assignment("司琴", ("小明",)), Assignment("音控", ("阿德", "小華")),
+                     Assignment("敬拜團", ("示範小團",))),
+    )
+    directory = Directory([Member(name="王小明", aliases=("小明",), line_user_id="U" + "0" * 32)],
+                          [Team(name="示範小團", members=("小明", "阿德"))])
+    return day, directory
+
+
 class Renderer:
     def __init__(self, cfg: MessageSettings) -> None:
         self.cfg = cfg
@@ -170,13 +182,7 @@ class Renderer:
 
     def validate(self, target: Target | None = None) -> None:
         """用假資料試排一次，模板裡打錯變數名稱會在這裡被抓到。``target`` = 順便檢查這個群組自己的訊息。"""
-        sample = ServiceDay(
-            date=dt.date(2026, 9, 13), label="主日崇拜", note="聖餐主日",
-            assignments=(Assignment("司琴", ("小明",)), Assignment("音控", ("阿德", "小華")),
-                         Assignment("敬拜團", ("示範小團",))),
-        )
-        directory = Directory([Member(name="王小明", aliases=("小明",), line_user_id="U" + "0" * 32)],
-                              [Team(name="示範小團", members=("小明", "阿德"))])
+        sample, directory = sample_day()
         trial = replace(target, roles=(), labels=(), mention=True) if target else Target(name="測試", line_id="")
         self.render(sample, directory, trial)
 

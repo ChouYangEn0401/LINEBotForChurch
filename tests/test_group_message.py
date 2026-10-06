@@ -69,7 +69,25 @@ def test_web_saves_group_message_and_shows_preview(client, paths):
     saved = next(t for t in TargetTable(paths.targets_file).load().items if t.name == "敬拜團")
     assert (saved.title, saved.footer, saved.template) == ("敬拜團這週誰上場", "記得練團", "")
     page = client.get(CHURCH + r.headers["location"]).text
-    assert "這個群組現在會收到" in page and "敬拜團這週誰上場" in page
+    assert "群組會收到" in page and 'data-insert-tag="【服事名單】"' in page and 'value="敬拜團這週誰上場"' in page
+
+
+def test_live_preview_uses_what_is_typed_before_saving(client):
+    """打字的時候預覽就跟著變（還沒按儲存）；空白的部分用牧區設定。"""
+    group = {"preview_kind": "target", "name": "敬拜團", "roles": "司琴", "title": "🎸 這週誰上場", "footer": "",
+             "template": ""}
+    data = client.post("/api/message-preview", data=group).json()
+    assert data["error"] == "" and data["text"].startswith("📣 🎸 這週誰上場") and "司琴：" in data["text"]
+    assert "講員" not in data["text"]  # 照這個群組的「只發這些服事」
+    data = client.post("/api/message-preview", data={**group, "template": "🙏【群組名稱】\n・【服事名單】"}).json()
+    assert data["text"].startswith("🙏敬拜團\n・司琴：")
+    data = client.post("/api/message-preview", data={**group, "template": "【標提】"}).json()
+    assert "【標提】" in data["error"] and data["text"] == ""
+
+
+def test_live_preview_for_the_ministry_settings(client):
+    data = client.post("/api/message-preview", data={"title": "青年崇拜", "footer": "", "template": ""}).json()
+    assert data["text"].startswith("📣 青年崇拜") and "謝謝大家" not in data["text"] and data["note"].startswith("用 ")
 
 
 def test_web_keeps_typed_template_when_it_is_broken(client, paths):

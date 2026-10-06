@@ -167,21 +167,15 @@
         <input type="text" id="footer" name="footer" value="{{ t.footer if t else '' }}" placeholder="{{ message_defaults.footer or '（設定頁沒有結尾文字）' }}">
         <span class="help">留空 = 用設定頁的結尾。可以寫這一群才需要知道的事，例如「週六 7 點練團」。</span>
       </div>
-      <details class="sub-details" {{ "open" if t and t.template }}>
-        <summary>整則改寫（進階）</summary>
-        <div class="ffield">
-          <textarea id="template" name="template" class="code" data-default="{{ message_defaults.template }}">{{ t.template if t else '' }}</textarea>
-          <span class="help">留空 = 用設定頁的訊息模板。可用的變數跟設定頁一樣，另外 {{ "{{ target_name }}" }} 是這個群組的名稱。
-            <button type="button" class="link-btn" data-reset-template data-confirm-text="要把設定頁的訊息模板複製到這裡來改嗎？目前框裡的內容會被蓋掉。">從設定頁複製一份來改</button></span>
-        </div>
-      </details>
-      {% if editing and (preview or preview_note) %}
       <div class="ffield" id="preview">
-        <span class="ffield-lab">這個群組現在會收到</span>
-        {% for text in preview %}<pre class="msg">{{ text }}</pre>{% else %}<span class="note">{{ preview_note }}</span>{% endfor %}
-        <span class="help">照已經儲存的設定、服事表現在的內容排出來的；改完按「儲存」就會更新。不會真的送出。</span>
+        <label for="template">整則訊息</label>
+        <input type="hidden" name="preview_kind" value="target">
+        {% call ui.message_editor("template", t.template if t else "", mb ~ "/api/message-preview",
+                                  default=message_defaults.template, placeholder="留空 = 用設定頁那一則（預覽裡的就是它）",
+                                  empty_note="整格留空 = 用設定頁那一則。") %}
+          <button type="button" class="btn btn-sm btn-ghost" data-reset-template data-confirm-text="要把設定頁那一則複製到這裡來改嗎？目前框裡的內容會被蓋掉。">從設定頁複製一份來改</button>
+        {% endcall %}
       </div>
-      {% endif %}
     </div>
     <div class="drawer-foot">
       <button type="submit" class="btn btn-primary">儲存</button>

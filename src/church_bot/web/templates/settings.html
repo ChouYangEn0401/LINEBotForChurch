@@ -60,7 +60,7 @@
   </section>
 
   <section class="fcard" id="message" data-fcard>
-    {{ card_head("訊息長什麼樣子", "這一段決定群組裡看到的那則提醒怎麼寫。", 6) }}
+    {{ card_head("訊息長什麼樣子", "這一段決定群組裡看到的那則提醒怎麼寫；右邊即時預覽。", 6) }}
     <div class="fcard-body">
       <div class="ffield">
         <label for="title">標題</label>
@@ -86,10 +86,11 @@
         <span class="help">%-m 月、%-d 日、{weekday} 週日。留空 = 9/13（週日）。</span>
       </div>
       <div class="ffield" style="--span:12">
-        <label for="template">訊息模板</label>
-        <textarea id="template" name="template" class="code" data-default="{{ default_template }}">{{ f.template }}</textarea>
-        <span class="help">改壞了按「恢復預設模板」。可用的變數：{{ "{{ title }}" }}、{{ "{{ date_text }}" }}、{{ "{{ label }}" }}、{{ "{{ note }}" }}、{{ "{{ footer }}" }}、{{ "{% for a in assignments %}" }}。
-          <button type="button" class="link-btn" data-reset-template>恢復預設模板</button></span>
+        <label for="template">整則訊息</label>
+        {% call ui.message_editor("template", f.template, mb ~ "/api/message-preview", default=default_template) %}
+          <button type="button" class="btn btn-sm btn-ghost" data-reset-template>恢復預設</button>
+          <span class="note">每個 LINE 群組還可以有自己的一份（「LINE 群組」編輯群組）。</span>
+        {% endcall %}
       </div>
     </div>
   </section>
