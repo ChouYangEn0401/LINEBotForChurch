@@ -145,7 +145,8 @@ def describe_options(settings: Settings) -> str:
 
 def apply_change(paths: Paths, change: "PendingChange") -> None:
     update_settings(paths, lambda settings: change.option.apply(settings, change.value))
-    log.warning("設定已修改（%s）：%s → %s（提出的人：%s，%s）", change.approved_by, change.option.key, change.value_text,
+    log.warning("設定已修改（%s）：%s%s → %s（提出的人：%s，%s）", change.approved_by,
+                f"{change.ministry_name}・" if change.ministry_name else "", change.option.key, change.value_text,
                 change.requester or change.user_id, change.chat_label)
 
 
@@ -173,6 +174,8 @@ class PendingChange:
     attempts_left: int
     digest: bytes = field(repr=False)
     approved_by: str = ""
+    ministry_id: str = ""  # 改的是哪個牧區的設定（在哪個牧區的群組打的指令）
+    ministry_name: str = ""
 
     def minutes_left(self, now: dt.datetime) -> int:
         return max(1, math.ceil((self.expires_at - now).total_seconds() / 60))
@@ -213,7 +216,7 @@ class Verifier:
         return pending is not None and (pending.user_id, pending.chat_id) == (user_id, chat_id)
 
     def start(self, option: RemoteOption, value: Any, *, user_id: str, chat_id: str, requester: str = "",
-              chat_label: str = "") -> tuple[PendingChange, str]:
+              chat_label: str = "", ministry_id: str = "", ministry_name: str = "") -> tuple[PendingChange, str]:
         with self._lock:
             self._expire()
             if (busy := self._pending) is not None:
@@ -226,7 +229,8 @@ class Verifier:
             self._pending = PendingChange(
                 option=option, value=value, value_text=option.show(value), user_id=user_id, chat_id=chat_id,
                 requester=requester, chat_label=chat_label, expires_at=self._clock() + CODE_TTL,
-                attempts_left=MAX_ATTEMPTS, digest=self._digest(code),
+                attempts_left=MAX_ATTEMPTS, digest=self._digest(code), ministry_id=ministry_id,
+                ministry_name=ministry_name,
             )
             return self._pending, code
 

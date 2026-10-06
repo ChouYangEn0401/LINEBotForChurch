@@ -55,11 +55,12 @@ def test_signature():
 
 
 def test_join_adds_disabled_target_and_replies_group_id(handler, paths):
-    body = event_body({"type": "join", "replyToken": "r1", "source": {"type": "group", "groupId": gid()}})
+    """教會只有一個牧區：機器人被邀進新群組，直接加進那個牧區（跟以前單一牧區時一樣）。"""
+    body = event_body({"type": "join", "replyToken": "r1", "source": {"type": "group", "groupId": gid("j")}})
     assert handler.handle(body, sign(body)) == 1
-    target = TargetTable(paths.targets_file).load().items[0]
-    assert (target.name, target.line_id, target.enabled) == ("敬拜團", gid(), False)
-    assert FakeLine.replies[0][0] == "r1" and gid() in FakeLine.replies[0][1]
+    target = TargetTable(paths.targets_file).load().items[-1]
+    assert (target.name, target.line_id, target.enabled) == ("敬拜團", gid("j"), False)
+    assert FakeLine.replies[0][0] == "r1" and gid("j") in FakeLine.replies[0][1] and "測試牧區" in FakeLine.replies[0][1]
 
 
 def test_my_id_command_and_normal_chat_is_ignored(handler):
@@ -123,7 +124,7 @@ def test_register_name_is_refused_while_collection_is_off(handler, paths):
     body = say("/我的名字 林美華")
     handler.handle(body, sign(body))
     assert "沒有開放" in FakeLine.replies[-1][1]
-    assert handler.service.history.person(uid())["real_name"] == ""
+    assert handler.church.service("m1").history.person(uid())["real_name"] == ""
 
 
 def test_register_name_overwrites_previous_claim(handler, paths):
@@ -131,7 +132,7 @@ def test_register_name_overwrites_previous_claim(handler, paths):
     for text in ("/我的名字 林美", "/我的名字 「林美華」"):
         body = say(text)
         handler.handle(body, sign(body))
-    assert handler.service.history.person(uid())["real_name"] == "林美華"
+    assert handler.church.service("m1").history.person(uid())["real_name"] == "林美華"
     assert "已登記：林美華（LINE 名稱：小美）" in FakeLine.replies[-1][1]
 
     body = say("/我的名字")
@@ -143,7 +144,7 @@ def test_register_name_rejects_very_long_names(handler, paths):
     turn_on_name_collection(paths)
     body = say("/我的名字 " + "長" * 21)
     handler.handle(body, sign(body))
-    assert "太長" in FakeLine.replies[-1][1] and handler.service.history.person(uid())["real_name"] == ""
+    assert "太長" in FakeLine.replies[-1][1] and handler.church.service("m1").history.person(uid())["real_name"] == ""
 
 
 def test_remind_command_works_for_anyone(handler, monkeypatch):
@@ -187,7 +188,7 @@ def test_nicknames_add_up_instead_of_replacing_each_other(handler, paths):
     for text in ("/我的名字 陳小明", "/我的暱稱 阿明", "/我的暱稱 小明哥", "/我的暱稱 阿明"):
         body = say(text)
         handler.handle(body, sign(body))
-    person = handler.service.history.person(uid())
+    person = handler.church.service("m1").history.person(uid())
     assert person["real_name"] == "陳小明"  # /我的暱稱 不會動到登記的真實姓名
     assert nicknames_of(person) == ("阿明", "小明哥")
     assert "已經登記過" in FakeLine.replies[-1][1]  # 同一個暱稱再打一次不會變兩筆
@@ -195,7 +196,7 @@ def test_nicknames_add_up_instead_of_replacing_each_other(handler, paths):
     for i in range(MAX_NICKNAMES):
         body = say(f"/我的暱稱 綽號{i}")
         handler.handle(body, sign(body))
-    assert len(nicknames_of(handler.service.history.person(uid()))) == MAX_NICKNAMES
+    assert len(nicknames_of(handler.church.service("m1").history.person(uid()))) == MAX_NICKNAMES
     assert f"最多登記 {MAX_NICKNAMES} 個" in FakeLine.replies[-1][1]
 
 
@@ -206,7 +207,7 @@ def test_nickname_needs_collection_to_be_on(handler, paths):
     body = say("/我的暱稱 阿明")
     handler.handle(body, sign(body))
     assert "沒有開放" in FakeLine.replies[-1][1]
-    assert handler.service.history.person(uid())["nicknames"] == ""
+    assert handler.church.service("m1").history.person(uid())["nicknames"] == ""
 
 
 def test_nickname_without_an_argument_lists_what_was_registered(handler, paths):
@@ -315,7 +316,7 @@ def test_display_name_is_looked_up_at_most_once_a_day(handler):
         handler.handle(body, sign(body))
     assert FakeLine.profile_lookups == 1
 
-    history = handler.service.history
+    history = handler.church.service("m1").history
     stale = (dt.datetime.now().astimezone() - dt.timedelta(days=2)).isoformat(timespec="seconds")
     with history._conn() as conn:
         conn.execute("UPDATE people SET profile_checked_at=? WHERE user_id=?", (stale, uid()))
@@ -390,13 +391,13 @@ def test_public_base_keeps_real_hosts_and_drops_local_ones():
 def test_the_url_line_connected_to_is_remembered_only_after_the_signature_checks_out(handler):
     body = say("早安")
     handler.handle(body, sign(body), "https://abc.trycloudflare.com")
-    current = handler.service.service_url()
+    current = handler.church.service("m1").service_url()
     assert current.url == "https://abc.trycloudflare.com" and current.source == "webhook"
     assert current.describe().endswith("LINE 剛剛連到這個網址")
 
     with pytest.raises(SignatureError):  # 偽造的 Host 不會被記下來（簽章先驗過才記）
         handler.handle(body, sign(body, "other"), "https://evil.example")
-    assert handler.service.service_url().url == "https://abc.trycloudflare.com"
+    assert handler.church.service("m1").service_url().url == "https://abc.trycloudflare.com"
 
 
 def test_webhook_route_passes_the_forwarded_host_through(client, paths, monkeypatch):

@@ -44,21 +44,21 @@ import logging
 import re
 import sys
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from church_bot.config import Settings, load_settings
 from church_bot.core.dates import parse_user_date
-from church_bot.core.history import MAX_NICKNAMES, nicknames_of
+from church_bot.core.history import MAX_NICKNAMES, History, nicknames_of
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers.line import LineMessenger
-from church_bot.models import Member, OutgoingMessage, Target
+from church_bot.ministries import Church, Unit
+from church_bot.models import Member, OutgoingMessage
 from church_bot.remote_config import (
     CODE_RE, CODE_TTL, PendingChange, Verifier, VerifyError, apply_change, describe_options, find_option,
     parse_assignment,
 )
 from church_bot.service import BotService
-from church_bot.tables import TABLE_WRITE_LOCK, MemberTable, TargetTable
 
 log = logging.getLogger(__name__)
 
@@ -138,7 +138,8 @@ def is_admin(settings: Settings, user_id: str, chat_id: str, admin_ids: Iterable
     return bool(user_id) and user_id in set(admin_ids)
 
 
-def permissions_text(settings: Settings, admin_name: str = "", admin_names: Iterable[str] = ()) -> str:
+def permissions_text(settings: Settings, admin_name: str = "", admin_names: Iterable[str] = (),
+                     ministry_name: str = "") -> str:
     """「/權限」的回覆：誰是管理員、哪個指令誰能用、機器人不會做什麼。
 
     ``admin_names`` 是同工名單裡勾了管理員的人；``admin_name`` 是設定裡「出問題通知誰」那個人的名字（查得到的話）。
@@ -157,7 +158,7 @@ def permissions_text(settings: Settings, admin_name: str = "", admin_names: Iter
                 f"・自動發送「{'開' if settings.schedule.enabled else '關'}」"
                 f"・用 LINE 改設定「{'開' if settings.chat.remote_config else '關'}」")
     return "\n".join([
-        "🔐 誰可以做什麼",
+        f"🔐 誰可以做什麼（{ministry_name}）" if ministry_name else "🔐 誰可以做什麼",
         "",
         admin_line,
         admin_note,
@@ -201,7 +202,7 @@ def parse_command(text: str) -> Command | None:
 
 @dataclass(slots=True)
 class _Chat:
-    """處理一則訊息需要的東西：設定、回覆方式、在哪裡、誰說的。"""
+    """處理一則訊息需要的東西：設定、回覆方式、在哪裡、誰說的、算哪個牧區的。"""
 
     settings: Settings
     messenger: LineMessenger
@@ -209,10 +210,16 @@ class _Chat:
     chat_id: str
     kind: str
     user_id: str
+    service: BotService  # 這則訊息算在哪裡：所屬牧區的；不屬於任何牧區就是整個教會那一層
+    unit: Unit | None = None  # None = 還沒分到牧區的群組，或分不出是哪個牧區的私訊
     display_name: str = ""
 
     def reply(self, text: str) -> None:
         self.messenger.reply(self.reply_token, text)
+
+    @property
+    def in_group(self) -> bool:
+        return self.kind in ("group", "room")
 
 
 def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
@@ -221,6 +228,8 @@ def verify_signature(channel_secret: str, body: bytes, signature: str) -> bool:
 
 
 PROFILE_REFRESH = dt.timedelta(days=1)
+UNASSIGNED = ("這個群組還沒分到任何牧區 🙏\n"
+              "請管理員打開管理網頁，在首頁「還沒分配的群組」把它分到它的牧區，之後這個指令就能用了。")
 
 
 def _checked_recently(stamp: str) -> bool:
@@ -246,11 +255,24 @@ def _print_to_screen(text: str) -> None:
 
 
 class WebhookHandler:
-    def __init__(self, service: BotService, verifier: Verifier | None = None,
+    """一個 LINE 官方帳號、很多個牧區：每個事件先看「這個群組在哪個牧區的清單裡」，再交給那個牧區處理。
+
+    * 群組在某個牧區的「LINE 群組」清單裡 → 用那個牧區的設定、名單、資料庫。
+    * 不在任何牧區（機器人剛被邀進去）→ 記在整個教會那一層，首頁「還沒分配的群組」會列出來；
+      教會只有一個牧區時直接加進那個牧區（跟以前單一牧區時一樣）。
+    * 私訊：看這個人跟哪個牧區有關（同工名單、在哪個牧區的群組講過話）；要改設定、試印別週時，
+      看他是哪個牧區的管理員，只有一個就用那個，好幾個就請他到那個牧區的群組裡打。
+    """
+
+    def __init__(self, church: Church, verifier: Verifier | None = None,
                  on_settings_changed: Callable[[], None] | None = None) -> None:
-        self.service = service
+        self.church = church
         self.verifier = verifier or Verifier()
         self.on_settings_changed = on_settings_changed
+
+    @property
+    def shared(self) -> BotService:
+        return self.church.root
 
     def handle(self, body: bytes, signature: str, public_url: str = "") -> int:
         """回傳處理了幾個事件。簽章不對丟 SignatureError；沒設定 secret 丟 ConfigError。
@@ -258,13 +280,13 @@ class WebhookHandler:
         ``public_url`` = LINE 剛剛打到的那個對外網址（網頁那一層從請求的 Host 推出來）。
         一定要等簽章驗過才記：不然誰都能偽造一個 Host，把假網址餵給「/服務網址」。
         """
-        settings = load_settings(self.service.paths)
+        settings = load_settings(self.church.paths)
         if not settings.line.channel_secret:
             raise ConfigError("收到 LINE Webhook，但沒有設定 LINE_CHANNEL_SECRET", "到「設定 → 金鑰與密碼」填入 Channel secret。")
         if not verify_signature(settings.line.channel_secret, body, signature):
             raise SignatureError("LINE Webhook 簽章不符（Channel secret 可能填錯）", "確認「設定 → 金鑰與密碼」的 Channel secret。")
         if public_url:
-            self.service.remember_service_url(public_url)
+            self.shared.remember_service_url(public_url)
         events = json.loads(body.decode("utf-8") or "{}").get("events", [])
         if not events:
             return 0  # LINE 後台按「Verify」時會送空的事件
@@ -272,46 +294,84 @@ class WebhookHandler:
         try:
             for event in events:
                 try:
-                    self._handle_event(event, messenger, settings)
+                    self._handle_event(event, messenger)
                 except ChurchBotError as exc:
                     log.error("處理 LINE 事件失敗：%s", exc)
         finally:
             messenger.close()
         return len(events)
 
+    # ------------------------------------------------------------------ 這則訊息算哪個牧區
+
+    def _unit_for(self, chat_id: str, kind: str, user_id: str) -> Unit | None:
+        if (owner := self.church.owner_of(chat_id)) is not None:
+            return owner
+        if kind == "user":  # 私訊：只跟一個牧區有關就算那個牧區
+            units = self.church.units_of_person(user_id)
+            return units[0] if len(units) == 1 else None
+        return None
+
+    def _chat(self, unit: Unit | None, messenger: LineMessenger, reply_token: str, chat_id: str, kind: str,
+              user_id: str, display_name: str = "") -> _Chat:
+        service = unit.service if unit else self.shared
+        return _Chat(load_settings(service.paths), messenger, reply_token, chat_id, kind, user_id, service, unit,
+                     display_name)
+
+    @staticmethod
+    def _as_unit(chat: _Chat, unit: Unit) -> _Chat:
+        return replace(chat, service=unit.service, unit=unit, settings=load_settings(unit.service.paths))
+
+    def _admin_unit(self, chat: _Chat) -> tuple[Unit | None, str]:
+        """要改設定、試印別週時用哪個牧區。回傳 (牧區, 找不到時要回的話)。"""
+        if chat.unit is not None:
+            return chat.unit, ""
+        if chat.in_group:
+            return None, UNASSIGNED
+        units = self.church.admin_units(chat.user_id)
+        if len(units) == 1:
+            return units[0], ""
+        if units:
+            names = "、".join(u.name for u in units)
+            return None, f"你是好幾個牧區（{names}）的管理員，請到要處理的那個牧區的群組裡打這個指令 🙏"
+        return None, ""
+
     # ------------------------------------------------------------------ events
 
-    def _handle_event(self, event: dict, messenger: LineMessenger, settings: Settings) -> None:
+    def _handle_event(self, event: dict, messenger: LineMessenger) -> None:
         etype = event.get("type")
         source = event.get("source", {})
         kind = source.get("type", "")
         chat_id = source.get("groupId") or source.get("roomId") or source.get("userId", "")
+        user_id = source.get("userId", "")
         reply_token = event.get("replyToken", "")
-        history = self.service.history
+        unit = self._unit_for(chat_id, kind, user_id)
+        history = unit.service.history if unit else self.shared.history
 
         if etype == "join":
             name = messenger.group_name(chat_id) if kind == "group" else ""
             history.remember_chat(chat_id, kind, name)
-            added = self._auto_add_target(chat_id, name)
             log.info("機器人被加進%s：%s（%s）", "群組" if kind == "group" else "聊天室", name or "?", chat_id)
-            note = "已自動加到管理網頁的「LINE 群組」頁（尚未啟用）。" if added else "這個群組已經在「LINE 群組」頁裡了。"
-            messenger.reply(reply_token, f"大家好！我是服事提醒小幫手 🙌\n這個群組的 ID：\n{chat_id}\n\n管理員：{note}")
+            messenger.reply(reply_token, f"大家好！我是服事提醒小幫手 🙌\n這個群組的 ID：\n{chat_id}\n\n"
+                                         f"管理員：{self._place_new_chat(chat_id, name, unit)}")
         elif etype == "memberJoined":
-            self._report_new_members(event, chat_id, kind, reply_token, messenger)
+            self._report_new_members(event, chat_id, kind, reply_token, messenger, history)
         elif etype == "leave":
             history.remember_chat(chat_id, kind, status="left")
             log.warning("機器人被移出群組：%s", chat_id)
-            self._alert_left(chat_id, messenger, self.service.admin_targets(settings, self._members()))
+            if unit is not None:
+                self._alert_left(chat_id, messenger, unit)
         elif etype == "follow":
-            history.remember_chat(chat_id, "user")
-            name = self._touch_person(chat_id, chat_id, "user", messenger)
+            self.shared.history.remember_chat(chat_id, "user")
+            name = self._touch_person(chat_id, chat_id, "user", messenger, self.shared.history)
             greeting = f" 你好，{name}！" if name else ""
             messenger.reply(reply_token, f"謝謝你加我好友 🙌{greeting}\n你的 LINE ID：\n{chat_id}\n\n{HELP_TEXT}")
         elif etype == "message" and event.get("message", {}).get("type") == "text":
-            if kind in ("group", "room"):
+            in_group = kind in ("group", "room")
+            if in_group:
                 history.remember_chat(chat_id, kind)
-            user_id = source.get("userId", "")
-            name = self._touch_person(user_id, chat_id, kind, messenger) if user_id else ""
+            # 私訊的人記在整個教會那一層：他是哪個牧區的人，看同工名單和他在哪些群組講過話
+            people = history if in_group else self.shared.history
+            name = self._touch_person(user_id, chat_id, kind, messenger, people) if user_id else ""
             text = event["message"].get("text", "")
             command = parse_command(text)
             if command is None and user_id and self.verifier.waiting_for(user_id, chat_id):
@@ -319,13 +379,23 @@ class WebhookHandler:
                 if CODE_RE.fullmatch(bare):  # 等驗證碼的人直接打 6 位數字也算
                     command = Command("verify", bare)
             if command is not None:
-                chat = _Chat(settings, messenger, reply_token, chat_id, kind, user_id, name)
-                self._handle_command(command, chat)
+                self._handle_command(command, self._chat(unit, messenger, reply_token, chat_id, kind, user_id, name))
+
+    def _place_new_chat(self, chat_id: str, name: str, unit: Unit | None) -> str:
+        """機器人被邀進一個群組：已經在某個牧區就說在哪裡；教會只有一個牧區就直接放進去；不然等管理員分配。"""
+        if unit is not None:
+            return f"這個群組已經在「{unit.name}」的「LINE 群組」頁裡了。"
+        units = self.church.units()
+        if len(units) == 1:
+            self.church.assign_chat(chat_id, units[0].id, name)
+            return f"已自動加到「{units[0].name}」的「LINE 群組」頁（尚未啟用）。"
+        return "請打開管理網頁，在首頁「還沒分配的群組」把這個群組分到它的牧區。"
 
     def _handle_command(self, command: Command, chat: _Chat) -> None:
         if command.name == "chat_id":
             label = {"group": "群組", "room": "聊天室", "user": "你的"}.get(chat.kind, "")
-            chat.reply(f"這個{label} ID：\n{chat.chat_id}")
+            where = f"\n（屬於「{chat.unit.name}」）" if chat.unit and chat.in_group else ""
+            chat.reply(f"這個{label} ID：\n{chat.chat_id}{where}")
         elif command.name == "my_id":
             if not chat.user_id:
                 chat.reply("抓不到你的 ID（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的ID」。")
@@ -337,7 +407,9 @@ class WebhookHandler:
         elif command.name == "my_nickname":
             self._register_nickname(command.arg, chat)
         elif command.name == "permissions":
-            chat.reply(permissions_text(chat.settings, self._admin_name(chat.settings), self._admin_names()))
+            primary = self._primary(chat)
+            chat.reply(permissions_text(primary.settings, self._admin_name(primary), self._admin_names(primary),
+                                        primary.unit.name if primary.unit else ""))
         elif command.name == "my_permissions":
             self._my_permissions(chat)
         elif command.name == "test_week":
@@ -359,6 +431,11 @@ class WebhookHandler:
     # ------------------------------------------------------------------ /設定（見 remote_config.py）
 
     def _request_change(self, arg: str, chat: _Chat) -> None:
+        unit, problem = self._admin_unit(chat)
+        if unit is None:
+            chat.reply(problem or "要在提醒群組裡打「/設定」，才知道要改哪個牧區的設定 🙏")
+            return
+        chat = self._as_unit(chat, unit)
         settings = chat.settings
         if not settings.chat.remote_config:
             chat.reply("目前沒有開放用 LINE 修改設定（管理網頁「設定 → LINE 聊天室指令」可以打開）。")
@@ -386,35 +463,36 @@ class WebhookHandler:
         if option.show(value) == option.current(settings):
             chat.reply(f"「{option.key}」本來就是「{option.show(value)}」，不用改。")
             return
-        chat_info = self.service.history.chat(chat.chat_id) or {}
+        chat_info = chat.service.history.chat(chat.chat_id) or {}
         label = chat_info.get("name") or {"group": "群組", "room": "多人聊天室", "user": "私訊"}.get(chat.kind, "")
         try:
             pending, code = self.verifier.start(option, value, user_id=chat.user_id, chat_id=chat.chat_id,
-                                                requester=chat.display_name, chat_label=label)
+                                                requester=chat.display_name, chat_label=label,
+                                                ministry_id=unit.id, ministry_name=unit.name)
         except VerifyError as exc:
             chat.reply(exc.message)
             return
         where = self._deliver_code(pending, code, chat)
         minutes = int(CODE_TTL.total_seconds() // 60)
-        chat.reply(f"🔐 要把「{option.key}」改成「{pending.value_text}」，需要驗證碼。\n{where}\n"
+        chat.reply(f"🔐 要把「{unit.name}」的「{option.key}」改成「{pending.value_text}」，需要驗證碼。\n{where}\n"
                    f"請在 {minutes} 分鐘內打「/驗證 六位數字」（或直接打那 6 個數字）。打 /取消 可以取消。")
 
     def _deliver_code(self, pending: PendingChange, code: str, chat: _Chat) -> str:
         """把驗證碼送到打指令的人以外的地方，回傳「驗證碼在哪裡」的說明。"""
         who = pending.requester or pending.user_id
-        _print_to_screen(f"\n🔐 [LINE 設定驗證碼] {who}（{pending.chat_label}）要把「{pending.option.key}」"
-                         f"改成「{pending.value_text}」→ 驗證碼：{code}（5 分鐘內有效，只能用一次）\n")
-        log.warning("LINE 設定修改等待驗證：%s（%s）要把「%s」改成「%s」", who, pending.chat_label, pending.option.key,
-                    pending.value_text)
+        _print_to_screen(f"\n🔐 [LINE 設定驗證碼] {who}（{pending.ministry_name}・{pending.chat_label}）要把"
+                         f"「{pending.option.key}」改成「{pending.value_text}」→ 驗證碼：{code}（5 分鐘內有效，只能用一次）\n")
+        log.warning("LINE 設定修改等待驗證：%s（%s・%s）要把「%s」改成「%s」", who, pending.ministry_name, pending.chat_label,
+                    pending.option.key, pending.value_text)
         on_screen = "驗證碼顯示在執行機器人的電腦畫面上（管理網頁也可以直接核准）。"
-        targets = self.service.admin_targets(chat.settings, self._members())
+        targets = chat.service.admin_targets(chat.settings, self._members(chat))
         if not (chat.settings.chat.send_code_to_admin and targets):
             return on_screen
         if not self.verifier.allow_push():
             log.warning("今天用 LINE 私訊驗證碼的次數已達上限，這次只顯示在電腦畫面上")
             return on_screen
-        text = (f"🔐 有人要用 LINE 修改機器人設定\n・誰：{who}\n・在哪裡：{pending.chat_label}\n"
-                f"・要改：{pending.option.key} → {pending.value_text}\n\n驗證碼：{code}\n\n"
+        text = (f"🔐 有人要用 LINE 修改機器人設定\n・誰：{who}\n・牧區：{pending.ministry_name}\n"
+                f"・在哪裡：{pending.chat_label}\n・要改：{pending.option.key} → {pending.value_text}\n\n驗證碼：{code}\n\n"
                 "5 分鐘內有效、只能用一次。是你同意的修改才把驗證碼告訴對方；不是的話不用理它，時間到自動失效。")
         try:
             for target in targets:
@@ -422,7 +500,7 @@ class WebhookHandler:
         except ChurchBotError as exc:
             log.error("用 LINE 私訊驗證碼給管理員失敗：%s", exc)
             return on_screen
-        return "驗證碼已經私訊給管理員，也顯示在執行機器人的電腦畫面上。"
+        return "驗證碼已經私訊給這個牧區的管理員，也顯示在執行機器人的電腦畫面上。"
 
     def _verify(self, arg: str, chat: _Chat) -> None:
         code = re.sub(r"\s+", "", arg)
@@ -435,18 +513,23 @@ class WebhookHandler:
             chat.reply(exc.message)
             return
         self.apply(pending)
-        chat.reply(f"✅ 已更新：{pending.option.key} → {pending.value_text}")
+        where = f"{pending.ministry_name}・" if pending.ministry_name else ""
+        chat.reply(f"✅ 已更新：{where}{pending.option.key} → {pending.value_text}")
 
     def apply(self, pending: PendingChange) -> None:
-        apply_change(self.service.paths, pending)
+        paths = self.church.paths.for_ministry(pending.ministry_id) if pending.ministry_id else self.church.paths
+        apply_change(paths, pending)
         if pending.option.reschedule and self.on_settings_changed is not None:
             self.on_settings_changed()
 
     # ------------------------------------------------------------------ /提醒（免費 Reply，見 service.notify_now）
 
     def _notify_now(self, chat: _Chat) -> None:
+        if chat.unit is None and chat.in_group:
+            chat.reply(UNASSIGNED)
+            return
         # 誰都可以打：Reply 免費，而且只會回在「LINE 群組」頁啟用的群組（service.notify_now 會檢查）
-        messages, note = self.service.notify_now(
+        messages, note = chat.service.notify_now(
             chat.chat_id, send=lambda items: chat.messenger.reply_texts(chat.reply_token, items))
         if not messages:
             chat.reply(note)
@@ -457,14 +540,15 @@ class WebhookHandler:
         """「/服務網址」：回管理網頁現在的網址（見 core/public_url.py）。
 
         誰都可以問，因為進得去還要密碼：換網址的人只要更新一次，其他管理員自己來問就好，不用一個一個貼。
-        還沒設密碼時只回給管理員——那種狀態下，拿到網址的人就能改設定。
+        還沒設密碼時只回給管理員（任何一個牧區的管理員都算）——那種狀態下，拿到網址的人就能改設定。
         """
-        current = self.service.service_url()
+        current = self.shared.service_url()
         if not current.known:
             chat.reply("我還不知道對外的網址 🤔\n"
                        "請管理員在那台電腦上開「免費模式」（3-open-webhook），開好之後再打一次「/服務網址」。")
             return
-        if not chat.settings.web.password and not self._is_admin(chat):
+        some_admin = self._is_admin(chat) or bool(self.church.admin_units(chat.user_id))
+        if not chat.settings.web.password and not some_admin:
             chat.reply("管理網頁現在還沒設密碼，誰點進去都能改設定，所以我先不公開網址 🙏\n"
                        "請管理員到「設定 → 金鑰與密碼」設一個密碼，之後大家打「/服務網址」就拿得到。")
             return
@@ -475,25 +559,41 @@ class WebhookHandler:
                    "・那台電腦關機、或關掉免費模式的時候連不進去\n"
                    f"（{current.describe()}）{warning}")
 
+    # ------------------------------------------------------------------ /我的名字、/我的暱稱
+
+    def _claim_services(self, chat: _Chat) -> list[BotService]:
+        """登記的名字要記在哪裡：群組 → 那個牧區（還沒分配就先記在教會那一層，分配時會一起交過去）；
+        私訊 → 他有關的每一個牧區（每個牧區的管理員各自確認），都沒有就先記在教會那一層。"""
+        if chat.unit is not None and chat.in_group:
+            return [chat.service]
+        if chat.in_group:
+            return [self.shared]
+        return [u.service for u in self.church.units_of_person(chat.user_id)] or [self.shared]
+
+    def _open_for_names(self, chat: _Chat) -> list[BotService]:
+        return [s for s in self._claim_services(chat) if load_settings(s.paths).chat.collect_names]
+
     def _register_name(self, arg: str, chat: _Chat) -> None:
         """「/我的名字 王小明」：先記在資料庫，等管理員在「同工名單」頁按確認；後登記的蓋掉先登記的。"""
         if not chat.user_id:
             chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
             return
         real_name = re.sub(r"\s+", " ", arg).strip().strip("「」『』\"'").strip()
-        history = self.service.history
         if not real_name:
-            current = (history.person(chat.user_id) or {}).get("real_name", "")
+            current = next((p["real_name"] for s in self._claim_services(chat)
+                            if (p := s.history.person(chat.user_id)) and p.get("real_name")), "")
             status = f"你登記過的名字：{current}（等管理員確認）\n" if current else ""
             chat.reply(f"{status}登記方式：打「/我的名字 王小明」（換成你的真實姓名）")
             return
-        if not chat.settings.chat.collect_names:
+        services = self._open_for_names(chat)
+        if not services:
             chat.reply("目前沒有開放登記名字 🙏 需要登記時，管理員會先打開這個功能。")
             return
         if len(real_name) > NAME_MAX_LENGTH:
             chat.reply(f"名字太長了（最多 {NAME_MAX_LENGTH} 個字），請再打一次。")
             return
-        history.claim_real_name(chat.user_id, real_name)
+        for service in services:
+            service.history.claim_real_name(chat.user_id, real_name)
         log.info("LINE 帳號登記名字：%s → %s（%s）", chat.display_name or "?", real_name, chat.user_id)
         line_name = f"（LINE 名稱：{chat.display_name}）" if chat.display_name else ""
         chat.reply(f"收到 🙌 已登記：{real_name}{line_name}\n"
@@ -508,24 +608,25 @@ class WebhookHandler:
             chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次。")
             return
         nickname = re.sub(r"\s+", " ", arg).strip().strip("「」『』\"'").strip()
-        history = self.service.history
         if not nickname:
-            current = nicknames_of(history.person(chat.user_id))
+            current = next((found for s in self._claim_services(chat)
+                            if (found := nicknames_of(s.history.person(chat.user_id)))), ())
             status = f"你登記過的暱稱：{'、'.join(current)}（等管理員確認）\n" if current else ""
             chat.reply(f"{status}登記方式：打「/我的暱稱 阿明」（換成大家平常怎麼叫你）\n"
                        "服事表寫這個稱呼時，機器人就知道是你。真實姓名請用「/我的名字」。")
             return
-        if not chat.settings.chat.collect_names:
+        services = self._open_for_names(chat)
+        if not services:
             chat.reply("目前沒有開放登記名字 🙏 需要登記時，管理員會先打開這個功能。")
             return
         if len(nickname) > NAME_MAX_LENGTH:
             chat.reply(f"暱稱太長了（最多 {NAME_MAX_LENGTH} 個字），請再打一次。")
             return
-        problem = history.claim_nickname(chat.user_id, nickname)
-        if problem == "duplicate":
+        problems = [service.history.claim_nickname(chat.user_id, nickname) for service in services]
+        if all(p == "duplicate" for p in problems):
             chat.reply(f"「{nickname}」你已經登記過了 👌 等管理員確認就會生效。")
             return
-        if problem == "full":
+        if all(p == "full" for p in problems):
             chat.reply(f"一個人最多登記 {MAX_NICKNAMES} 個暱稱 🙏 想換的話，請管理員到「同工名單」頁調整。")
             return
         log.info("LINE 帳號登記暱稱：%s → %s（%s）", chat.display_name or "?", nickname, chat.user_id)
@@ -534,42 +635,53 @@ class WebhookHandler:
 
     # ------------------------------------------------------------------ /權限、/我的權限
 
-    def _members(self) -> list[Member]:
-        try:
-            return MemberTable(self.service.paths.members_file).load().items
-        except ChurchBotError as exc:
-            log.error("讀同工名單失敗：%s", exc)
-            return []
+    def _primary(self, chat: _Chat) -> _Chat:
+        """問權限時用哪個牧區：所屬的牧區；分不出來的私訊就用他有關的第一個牧區。"""
+        if chat.unit is not None or chat.in_group:
+            return chat
+        units = self.church.units_of_person(chat.user_id)
+        return self._as_unit(chat, units[0]) if units else chat
 
-    def _admin_ids(self) -> set[str]:
+    @staticmethod
+    def _members(chat: _Chat) -> list[Member]:
+        return chat.unit.members() if chat.unit is not None else []  # 不屬於任何牧區：沒有同工名單
+
+    def _admin_ids(self, chat: _Chat) -> set[str]:
         """同工名單裡勾了「管理員」而且對應好 LINE 帳號的人。"""
-        return {m.line_user_id for m in self._members() if m.admin and m.line_user_id}
+        return {m.line_user_id for m in self._members(chat) if m.admin and m.line_user_id}
 
-    def _admin_names(self) -> list[str]:
-        return [m.name for m in self._members() if m.admin and m.line_user_id]
+    def _admin_names(self, chat: _Chat) -> list[str]:
+        return [m.name for m in self._members(chat) if m.admin and m.line_user_id]
 
     def _is_admin(self, chat: _Chat) -> bool:
-        return is_admin(chat.settings, chat.user_id, chat.chat_id, self._admin_ids())
+        return is_admin(chat.settings, chat.user_id, chat.chat_id, self._admin_ids(chat))
 
-    def _admin_name(self, settings: Settings) -> str:
+    def _admin_name(self, chat: _Chat) -> str:
         """設定裡「出問題通知誰」那個人的名字（先看同工名單，再看 LINE 名稱）；查不到就空字串。"""
-        admin = (settings.line.admin_target_id or "").strip()
+        admin = (chat.settings.line.admin_target_id or "").strip()
         if not admin:
             return ""
-        if member := next((m for m in self._members() if m.line_user_id == admin), None):
+        if member := next((m for m in self._members(chat) if m.line_user_id == admin), None):
             return member.name
-        return (self.service.history.person(admin) or {}).get("display_name", "")
+        known = chat.service.history.person(admin) or self.shared.history.person(admin) or {}
+        return known.get("display_name", "")
 
     def _my_permissions(self, chat: _Chat) -> None:
         if not chat.user_id:
             chat.reply("抓不到你的 LINE 帳號（電腦版 LINE 不會提供），請用手機 LINE 再打一次「/我的權限」。")
             return
-        person = self.service.history.person(chat.user_id) or {}
-        member = next((m for m in self._members() if m.line_user_id == chat.user_id), None)
+        chat = self._primary(chat)
+        person = chat.service.history.person(chat.user_id) or {}
+        member = next((m for m in self._members(chat) if m.line_user_id == chat.user_id), None)
         admin = self._is_admin(chat)
         lines = ["👤 你的狀況", "",
                  f"・LINE 名稱：{chat.display_name or '（抓不到）'}",
                  f"・你的 LINE ID：{chat.user_id}"]
+        units = self.church.units_of_person(chat.user_id)
+        if len(units) > 1:
+            lines.append(f"・你在的牧區：{'、'.join(u.name for u in units)}")
+        if chat.unit is not None and len(self.church.ministries()) > 1:
+            lines.append(f"・下面是「{chat.unit.name}」的狀況")
         if member is None:
             lines += ["・同工名單：還沒對應到你 ⚠️ 提醒不會 @ 你",
                       "　打「/我的名字 你的真實姓名」登記，管理員確認後就 @ 得到了"]
@@ -591,44 +703,50 @@ class WebhookHandler:
     # ------------------------------------------------------------------ /別周測試（純預覽，見 service.preview_for）
 
     def _test_week(self, arg: str, chat: _Chat) -> None:
-        if not self._is_admin(chat):
-            extra = ("請管理員來打。" if chat.settings.line.admin_target_id or self._admin_ids()
+        unit, problem = self._admin_unit(chat)
+        if unit is not None:
+            chat = self._as_unit(chat, unit)
+        if unit is None or not self._is_admin(chat):
+            if problem:
+                chat.reply(problem)
+                return
+            extra = ("請管理員來打。" if chat.settings.line.admin_target_id or self._admin_ids(chat)
                      else "（目前還沒有管理員：到管理網頁「同工名單」把自己勾成管理員。）")
             chat.reply(f"「/別周測試」只有管理員可以用 🙏{extra}\n大家都可以打「/提醒」看這一週的服事。")
             return
         if not arg:
             chat.reply(TEST_WEEK_USAGE)
             return
-        day = parse_user_date(arg, self.service.now(chat.settings).date())
+        day = parse_user_date(arg, chat.service.now(chat.settings).date())
         if day is None:
             chat.reply(f"看不懂日期「{arg}」🤔\n{TEST_WEEK_USAGE}")
             return
-        messages, note = self.service.preview_for(day, chat.chat_id)
+        messages, note = chat.service.preview_for(day, chat.chat_id)
         if not messages:
             chat.reply(note)
             return
         chat.messenger.reply_texts(chat.reply_token, [*messages, note])
 
     def _report_new_members(self, event: dict, chat_id: str, kind: str, reply_token: str,
-                            messenger: LineMessenger) -> None:
+                            messenger: LineMessenger, history: History) -> None:
         members = event.get("joined", {}).get("members", [])
         uids = [m.get("userId") for m in members if m.get("type") == "user" and m.get("userId")]
         if not uids:
             return
         lines = []
         for uid in uids:
-            name = self._touch_person(uid, chat_id, kind, messenger)
+            name = self._touch_person(uid, chat_id, kind, messenger, history)
             lines.append(f"{name}（{uid}）" if name else uid)
         messenger.reply(reply_token, "歡迎新朋友加入 🙌\n" + "\n".join(lines))
 
     # ------------------------------------------------------------------ helpers
 
-    def _touch_person(self, user_id: str, chat_id: str, kind: str, messenger: LineMessenger) -> str:
+    @staticmethod
+    def _touch_person(user_id: str, chat_id: str, kind: str, messenger: LineMessenger, history: History) -> str:
         """背景記錄一個人（被動收集，見檔案開頭說明），回傳目前已知的顯示名稱（可能是空字串）。
 
         顯示名稱最多一天向 LINE 查一次：有人改了 LINE 名稱，隔天講話就會更新；查不到也算查過，不會每句話都重查。
         """
-        history = self.service.history
         known = history.person(user_id) or {}
         name = known.get("display_name", "")
         if not _checked_recently(known.get("profile_checked_at", "")):
@@ -639,27 +757,18 @@ class WebhookHandler:
         history.remember_person(user_id, "", chat_id)
         return name
 
-    def _auto_add_target(self, chat_id: str, name: str) -> bool:
-        table = TargetTable(self.service.paths.targets_file)
-        with TABLE_WRITE_LOCK:
-            items = table.load().items if table.path.exists() else []
-            if any(t.line_id == chat_id for t in items):
-                return False
-            today = dt.date.today().isoformat()
-            items.append(Target(name=name or f"新群組 {today}", line_id=chat_id, enabled=False,
-                                note=f"機器人自動加入（{today}），確認後把「啟用」改成「是」"))
-            table.save(items)
-        return True
-
-    def _alert_left(self, chat_id: str, messenger: LineMessenger, admin_ids: list[str]) -> None:
-        targets = TargetTable(self.service.paths.targets_file)
-        try:
-            hit = next((t for t in targets.load().items if t.line_id == chat_id and t.enabled), None)
-        except ChurchBotError:
-            hit = None
-        if hit is None or not admin_ids:
+    def _alert_left(self, chat_id: str, messenger: LineMessenger, unit: Unit) -> None:
+        hit = next((t for t in unit.targets() if t.line_id == chat_id and t.enabled), None)
+        if hit is None:
             return
-        text = (f"⚠️ 服事提醒機器人被移出「{hit.name}」群組了，這個群組以後收不到提醒。\n"
+        try:
+            admin_ids = unit.service.admin_targets(load_settings(unit.service.paths), unit.members())
+        except ChurchBotError as exc:
+            log.error("讀「%s」的設定失敗，沒辦法通知管理員機器人被移出群組：%s", unit.name, exc)
+            return
+        if not admin_ids:
+            return
+        text = (f"⚠️ 服事提醒機器人被移出「{unit.name}」的「{hit.name}」群組了，這個群組以後收不到提醒。\n"
                 "如果是不小心的，請重新邀請機器人進群組；不再需要的話，到管理網頁把這個群組停用。")
         try:
             for admin_id in admin_ids:

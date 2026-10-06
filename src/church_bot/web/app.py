@@ -49,6 +49,7 @@ from church_bot.core.quota import QuotaSnapshot
 from church_bot.core.renderer import Renderer
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers import MESSENGER_KINDS_ZH, build_messenger
+from church_bot.ministries import Church
 from church_bot.models import (
     TRIGGER_ZH, DeliveryStatus, Issue, Member, OutgoingMessage, RunReport, Severity, Target, Team,
 )
@@ -167,9 +168,12 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
 
 
 def create_app(paths: Paths) -> FastAPI:
-    service = BotService(paths)
+    church = Church(paths.church)
+    # 暫時：網頁還是只管一個牧區（下一步改成首頁列出所有牧區）
+    service = church.service(paths.ministry or church.ministries()[0].id)
+    paths = service.paths
     scheduler = BotScheduler(service)
-    webhook = WebhookHandler(service, Verifier(), on_settings_changed=scheduler.reload)
+    webhook = WebhookHandler(church, Verifier(), on_settings_changed=scheduler.reload)
     templates = Jinja2Templates(directory=str(HERE / "templates"))
     asset_hash = hashlib.sha1()
     for static in sorted((HERE / "static").glob("*")):

@@ -79,15 +79,23 @@ def paths(root: Paths) -> Paths:
 
 @pytest.fixture
 def handler(paths: Paths, monkeypatch: pytest.MonkeyPatch):
-    """LINE Webhook 處理器，LINE 換成 tests/line_fakes.py 的 FakeLine。"""
-    from church_bot.service import BotService
+    """LINE Webhook 處理器，LINE 換成 tests/line_fakes.py 的 FakeLine。
+
+    gid() 這個群組已經在 m1 的「LINE 群組」清單裡（先不啟用）：大部分指令測試都假設「在自己牧區的群組裡打」。
+    """
+    from church_bot.models import Target
+    from church_bot.tables import TargetTable
+    from tests.line_fakes import gid
+
+    TargetTable(paths.targets_file).save([Target("同工群", gid(), enabled=False)])
+    from church_bot.ministries import Church
     from church_bot.webhook import WebhookHandler
     from tests.line_fakes import SECRET, FakeLine
 
     write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\n")
     FakeLine.reset()
     monkeypatch.setattr("church_bot.webhook.LineMessenger", FakeLine)
-    return WebhookHandler(BotService(paths))
+    return WebhookHandler(Church(paths.church))
 
 
 # --------------------------------------------------------------------------- web

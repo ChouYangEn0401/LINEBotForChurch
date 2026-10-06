@@ -152,7 +152,7 @@ def test_change_setting_from_line_with_code_sent_to_admin(line_handler, paths, c
 
     body = say(f"/驗證 {code}")
     line_handler.handle(body, sign(body))
-    assert FakeLine.replies[-1][1] == "✅ 已更新：收集名單 → 開"
+    assert FakeLine.replies[-1][1] == "✅ 已更新：測試牧區・收集名單 → 開"
     assert load_settings(paths).chat.collect_names
     assert code not in (paths.data_dir / "church_bot.db").read_bytes().decode("latin-1")
 
