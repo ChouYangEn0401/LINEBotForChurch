@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 CHURCH_LOCK = threading.RLock()
 ID_RE = re.compile(r"^m\d+$")
 NAME_MAX_LENGTH = 30
+MIN_MINISTRY_PASSWORD = 4
 LEGACY_FILES = ("settings.yaml", "targets.csv", "members.csv", "teams.csv")
 DEFAULT_FIRST_NAME = "第一個牧區"
 _PBKDF2_ROUNDS = 200_000

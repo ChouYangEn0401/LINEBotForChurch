@@ -4,10 +4,14 @@
 * ``/``、``/settings``、``/help``…：整個教會那一層（首頁是所有牧區）。
 * ``/m/<編號>/…``：某個牧區自己的後台，裡面的每一頁跟單一牧區時一模一樣，只是網址前面多了牧區。
 
-兩層密碼：
-* 第一層是整個網站（.env 的 UI_PASSWORD），沒登入什麼都看不到，Webhook 除外。
-* 第二層是牧區自己決定要不要設（church.yaml 存雜湊）。進那個牧區要輸入一次，瀏覽器記住；
-  密碼一改，大家都要重新輸入。忘記了只能在那台電腦上（127.0.0.1）清掉，或用指令列。
+三種身分（伺服器檢查，不是只把按鈕藏起來）：
+* 訪客：輸入網站密碼（.env 的 UI_PASSWORD）進來的人。看得到首頁、可以新增牧區（新增時要設牧區密碼）；
+  要進任何一個牧區都要那個牧區的密碼。沒登入什麼都看不到，Webhook 除外。
+* 牧區管理員：輸入了某個牧區的密碼（church.yaml 存雜湊），只能管那一個牧區；
+  瀏覽器記 30 天，密碼一改大家都要重新輸入。還沒設密碼的牧區只有伺服器管理員進得去。
+* 伺服器管理員（server_manager）：另一組管理者密碼（.env 的 SERVER_MANAGER_PASSWORD）登入，
+  所有牧區都進得去（牧區密碼對他無效），管全教會設定、任何牧區的密碼、重新啟動。
+  還沒設管理者密碼時，坐在那台電腦前面（本機）的人就是伺服器管理員（第一次設定用）。
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import datetime as dt
 import hashlib
 import hmac
 import os
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -40,8 +45,10 @@ from church_bot.web.overview import issue_link
 from church_bot.webhook import WebhookHandler
 
 HERE = Path(__file__).parent
-ADMIN_COOKIE = "church_bot_admin"  # 右上角「切換身分」（只是收起進階畫面，不是權限）
+ADMIN_COOKIE = "church_bot_admin"  # 右上角「進階頁面」（只是收起進階畫面，不是權限）
 SESSION_COOKIE = "church_bot_session"
+MANAGER_COOKIE = "church_bot_manager"
+MANAGER_SESSION = dt.timedelta(hours=12)
 LAYOUTS_ZH = {"auto": "自動判斷（推薦）", "wide": "日期在左、一列一次聚會", "long": "一列一項服事",
               "matrix": "日期在上、一欄一次聚會"}
 
@@ -142,6 +149,14 @@ class MinistryLocked(Exception):
         self.next_url = next_url
 
 
+class ManagerRequired(Exception):
+    """這件事只有伺服器管理員能做。"""
+
+    def __init__(self, next_url: str = "/") -> None:
+        super().__init__(next_url)
+        self.next_url = next_url
+
+
 def ministry_cookie(ministry_id: str) -> str:
     return f"church_bot_m_{ministry_id}"
 
@@ -192,19 +207,65 @@ class Web:
             return
         raise LoginRequired()
 
-    # ------------------------------------------------------------------ 第二層：牧區自己的密碼
+    # ------------------------------------------------------------------ 伺服器管理員（server_manager）
+
+    def manager_password(self) -> str:
+        return (os.environ.get("SERVER_MANAGER_PASSWORD")
+                or read_env_file(self.paths.env_file).get("SERVER_MANAGER_PASSWORD", ""))
+
+    def _secret(self) -> bytes:
+        """簽 cookie 用的金鑰：第一次用時隨機產生、存在教會共用的資料庫，重開程式（例如按「重新啟動」）也不會登出。"""
+        state = self.church.shared.get_state("web_secret")
+        if not state.get("key"):
+            state = {"key": secrets.token_hex(32)}
+            self.church.shared.set_state("web_secret", state)
+        return bytes.fromhex(state["key"])
+
+    def _manager_sig(self, expires: str) -> str:
+        bound = hashlib.sha256(self.manager_password().encode()).hexdigest()  # 換管理者密碼 → 舊 cookie 全部失效
+        return hmac.new(self._secret(), f"manager|{expires}|{bound}".encode(), hashlib.sha256).hexdigest()
+
+    def manager_cookie_value(self) -> str:
+        expires = str(int((dt.datetime.now() + MANAGER_SESSION).timestamp()))
+        return f"{expires}.{self._manager_sig(expires)}"
+
+    def is_manager(self, request: Request) -> bool:
+        if not self.manager_password():
+            return is_local(request)  # 還沒設管理者密碼：坐在這台電腦前面的人就是管理者（第一次設定用）
+        expires, _, sig = request.cookies.get(MANAGER_COOKIE, "").partition(".")
+        if not expires.isdigit() or int(expires) < dt.datetime.now().timestamp():
+            return False
+        return hmac.compare_digest(sig, self._manager_sig(expires))
+
+    def require_manager(self, request: Request) -> None:
+        if not self.is_manager(request):
+            raise ManagerRequired(request.url.path if request.method == "GET" else "/")
+
+    # ------------------------------------------------------------------ 牧區管理員：牧區自己的密碼
+
+    def unlocked(self, request: Request, ministry_id: str) -> bool:
+        """這個瀏覽器能不能管這個牧區：伺服器管理員一律可以；其他人要輸入過那個牧區的密碼。"""
+        if self.is_manager(request):
+            return True
+        ministry = self.church.config().get(ministry_id)
+        return bool(ministry and ministry.has_password and hmac.compare_digest(
+            request.cookies.get(ministry_cookie(ministry_id), ""), ministry_token(ministry.password_hash)))
 
     def ministry(self, request: Request, mid: str) -> MinistryView:
-        """網址裡的牧區（/m/<編號>/…）。找不到 → 404；牧區設了密碼而這個瀏覽器還沒輸入過 → 顯示牧區的登入畫面。"""
+        """網址裡的牧區（/m/<編號>/…）。找不到 → 404；不是伺服器管理員、也還沒輸入那個牧區的密碼 → 牧區的登入畫面。"""
         ministry = self.church.config().get(mid)
         if ministry is None:
             raise HTTPException(404, f"找不到牧區「{mid}」，可能已經移除了。回首頁看現有的牧區。")
         view = MinistryView(Unit(ministry, self.church.service(ministry.id)))
-        if ministry.has_password and not hmac.compare_digest(
-                request.cookies.get(ministry_cookie(mid), ""), ministry_token(ministry.password_hash)):
+        if not self.unlocked(request, mid):
             next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
             raise MinistryLocked(view.unit, next_url if request.method == "GET" else view.base + "/")
         return view
+
+    def role(self, request: Request, m: MinistryView | None = None) -> str:
+        if self.is_manager(request):
+            return "manager"
+        return "admin" if m is not None else "visitor"
 
     # ------------------------------------------------------------------ 變更紀錄（見 core/versions.py）
 
@@ -240,6 +301,8 @@ class Web:
         ctx.setdefault("flash", request.query_params.get("msg", ""))
         ctx.setdefault("flash_level", request.query_params.get("level", "ok"))
         pending = self.webhook.verifier.current()
+        if pending is not None and not (self.is_manager(request) or self.unlocked(request, pending.ministry_id)):
+            pending = None  # LINE「/設定」等驗證的那一條：只給能管那個牧區的人看、核准
         today = dt.date.today()
         if m is not None:
             status = self.scheduler.status_for(m.id)
@@ -259,5 +322,6 @@ class Web:
                 "pending_minutes": self.webhook.verifier.minutes_left(pending) if pending else 0,
                 "admin_mode": request.cookies.get(ADMIN_COOKIE) == "1", "current_path": request.url.path,
                 "today_text": f"{today.isoformat()} · 週{'一二三四五六日'[today.weekday()]}",
-                "m": m, "mb": m.base if m else "", "ministries": self.church.ministries()}
+                "m": m, "mb": m.base if m else "", "ministries": self.church.ministries(),
+                "role": self.role(request, m), "is_manager": self.is_manager(request)}
         return self.templates.TemplateResponse(request, name, {**base, **ctx})

@@ -58,12 +58,12 @@
   {% if m %}<span class="crumb">/</span><a class="brand-sub" href="{{ mb }}/" title="這個牧區的主控台">{{ m.name }}</a>{% endif %}
   <span class="top-status" title="每週提醒什麼時候發">{{ schedule_text }}{% if next_run and next_run != '（沒有排程）' %} · 下次 {{ next_run }}{% endif %}</span>
   <div class="top-actions">
-    <span class="role-badge {{ 'admin' if admin_mode }}">{{ "管理員" if admin_mode else "一般" }}</span>
+    <span class="role-badge {{ role }}" title="{{ {'manager': '所有牧區、全教會設定都能管', 'admin': '只能管這個牧區', 'visitor': '看得到首頁、可以新增牧區；進牧區要那個牧區的密碼'}[role] }}">{{ {"manager": "伺服器管理員", "admin": "牧區管理員", "visitor": "訪客"}[role] }}</span>
     <form method="post" action="/admin-mode">
       <input type="hidden" name="next" value="{{ current_path }}">
       <input type="hidden" name="enabled" value="{{ '0' if admin_mode else '1' }}">
       <button type="submit" class="btn btn-sm"
-              title="{{ '回到一般畫面：選單只留平常會用到的頁面' if admin_mode else '切到管理員：選單多出設定、系統檢查，畫面多出 LINE ID 這類細節。這不是權限，要限制誰能開網頁請設密碼' }}">切換身分</button>
+              title="{{ '收起進階頁面：選單只留平常會用到的頁面' if admin_mode else '打開進階頁面：選單多出設定、系統檢查、變更紀錄，畫面多出 LINE ID 這類細節。這不是權限，權限看左邊的身分' }}">{{ "收起進階" if admin_mode else "進階頁面" }}</button>
     </form>
     <button type="button" class="icon-btn" id="btn-theme" title="切換深色 / 淺色">◐</button>
     {% if has_password %}
@@ -78,7 +78,7 @@
       <a class="side-back" href="/">← 所有牧區</a>
       <div class="side-unit"><b>{{ m.name }}</b>{% if m.unit.ministry.note %}<span>{{ m.unit.ministry.note }}</span>{% endif %}</div>
       {% endif %}
-      {% for title, items in nav_groups + ([admin_group] if admin_mode else []) %}
+      {% for title, items in nav_groups + ([admin_group] if admin_mode and (m or is_manager) else []) %}
         {% if title %}<div class="group-title">{{ title }}</div>{% endif %}
         {% for href, icon, label, hint, key, pages in items %}
           <a href="{{ href }}" class="side-item {{ 'active' if nav in pages }}" data-nav="{{ key }}"

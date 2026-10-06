@@ -1,6 +1,8 @@
-"""管理網頁的兩層：首頁（所有牧區、還沒分配的群組）和牧區自己的後台（/m/<編號>/…）、第二層密碼。"""
+"""管理網頁的兩層：首頁（所有牧區、還沒分配的群組）和牧區自己的後台（/m/<編號>/…），
+以及三種身分：訪客（網站密碼）、牧區管理員（牧區密碼）、伺服器管理員（管理者密碼）。"""
 
-from church_bot.church import add_ministry, load_church
+from church_bot.church import add_ministry, edit_ministry, hash_password, load_church
+from church_bot.config import update_env_file
 from church_bot.models import Target
 from church_bot.tables import TargetTable
 from tests.conftest import CHURCH, gid
@@ -15,11 +17,23 @@ def test_home_lists_every_ministry_and_links_into_it(client, paths):
     assert "← 所有牧區" in inside and "壯年牧區" in inside and 'href="/m/m2/targets"' in inside
 
 
-def test_add_ministry_from_the_home_page(client, paths):
+def as_visitor(client, paths) -> None:
+    """設了管理者密碼、又沒登入管理者：這個瀏覽器就只是訪客（測試的 client 算本機，沒設密碼時是管理者）。"""
+    update_env_file(paths.env_file, {"SERVER_MANAGER_PASSWORD": "manager-password-123"})
+    client.cookies.clear()
+
+
+def test_add_ministry_needs_its_password_and_the_creator_gets_in(client, paths):
+    as_visitor(client, paths)
     r = client.post(CHURCH + "/ministries/add", data={"name": "兒童牧區", "note": "小羊"}, follow_redirects=False)
+    assert "level=error" in r.headers["location"] and len(load_church(paths).ministries) == 1  # 沒設密碼不能建
+    r = client.post(CHURCH + "/ministries/add", data={"name": "兒童牧區", "note": "小羊", "password": "lamb"},
+                    follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/m/m2/")
     assert [m.name for m in load_church(paths).ministries] == ["測試牧區", "兒童牧區"]
-    r = client.post(CHURCH + "/ministries/add", data={"name": "兒童牧區"}, follow_redirects=False)
+    assert load_church(paths).get("m2").has_password
+    assert client.get(CHURCH + "/m/m2/").status_code == 200  # 建的人這個瀏覽器已經記住了
+    r = client.post(CHURCH + "/ministries/add", data={"name": "兒童牧區", "password": "lamb"}, follow_redirects=False)
     assert "level=error" in r.headers["location"]  # 同名不行
 
 
@@ -45,7 +59,7 @@ def test_second_layer_password(client, paths):
     assert r.status_code == 303 and load_church(paths).get("m1").has_password
     assert client.get("/").status_code == 200  # 設密碼的人這個瀏覽器已經記住了
 
-    client.cookies.clear()
+    as_visitor(client, paths)
     locked = client.get("/targets")
     assert "牧區密碼" in locked.text and "/m/m1/unlock" in locked.text and "陳小明" not in locked.text
     assert locked.status_code == 401 and client.get("/api/nav").status_code == 401  # JavaScript 問的回 401
@@ -56,14 +70,39 @@ def test_second_layer_password(client, paths):
     assert "群組" in client.get("/targets").text and "/m/m1/unlock" not in client.get("/targets").text
 
 
-def test_forgotten_password_can_only_be_cleared_on_this_computer(client, paths):
-    client.post("/ministry/password", data={"password": "abcd"})
-    client.cookies.clear()
-    remote = client.post(CHURCH + "/m/m1/forgot-password", headers={"cf-connecting-ip": "1.2.3.4"},
-                         follow_redirects=False)
-    assert "level=error" in remote.headers["location"] and load_church(paths).get("m1").has_password
-    local = client.post(CHURCH + "/m/m1/forgot-password", follow_redirects=False)
-    assert local.headers["location"].startswith("/m/m1/settings") and not load_church(paths).get("m1").has_password
+def test_ministry_without_a_password_is_only_for_the_server_manager(client, paths):
+    as_visitor(client, paths)
+    page = client.get("/")
+    assert page.status_code == 401 and "只有伺服器管理員進得去" in page.text and "/unlock" not in page.text
+
+
+def test_visitor_and_ministry_admin_cannot_reach_manager_pages(client, paths):
+    edit_ministry(paths.church, "m1", password_hash=hash_password("abcd"))
+    as_visitor(client, paths)
+    home = client.get(CHURCH + "/")
+    assert home.status_code == 200 and "訪客" in home.text and "輸入密碼 →" in home.text
+    for url in ("/settings", "/history"):
+        assert client.get(CHURCH + url).status_code == 403
+    assert client.post(CHURCH + "/m/m1/forgot-password").status_code == 403
+    client.post(CHURCH + "/m/m1/unlock", data={"password": "abcd"})
+    assert "牧區管理員" in client.get("/").text
+    assert client.get(CHURCH + "/settings").status_code == 403  # 牧區管理員也不行
+    add_ministry(paths, "壯年牧區")
+    r = client.post(CHURCH + "/m/m1/ministry/delete", data={"confirm": "測試牧區"})
+    assert r.status_code == 403 and len(load_church(paths).ministries) == 2  # 移除牧區只有伺服器管理員
+
+
+def test_server_manager_is_not_stopped_by_ministry_passwords(client, paths):
+    edit_ministry(paths.church, "m1", password_hash=hash_password("abcd"))
+    client.cookies.clear()  # 沒設管理者密碼：本機的人就是伺服器管理員（第一次設定用）
+    assert client.get("/targets").status_code == 200 and "伺服器管理員" in client.get("/").text
+    r = client.post(CHURCH + "/m/m1/forgot-password", follow_redirects=False)
+    assert r.headers["location"].startswith("/m/m1/settings") and not load_church(paths).get("m1").has_password
+
+
+def test_remote_visitor_is_never_the_server_manager(client, paths):
+    remote = {"cf-connecting-ip": "1.2.3.4"}  # 從免費模式的臨時網址連進來
+    assert client.get(CHURCH + "/settings", headers=remote).status_code == 403
 
 
 def test_rename_and_remove_a_ministry(client, paths):

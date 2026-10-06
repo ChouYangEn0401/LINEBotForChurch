@@ -57,7 +57,7 @@
         <tr class="clickable" data-href="/m/{{ r.id }}/">
           <td><b>{{ "🔒 " if r.locked }}{{ r.name }}</b>{% if r.note %}<div class="sub">{{ r.note }}</div>{% endif %}
             <div class="id admin-only">{{ r.id }}</div></td>
-          <td>{% if r.locked %}<span class="muted">要輸入牧區密碼才看得到</span>
+          <td>{% if not r.open %}<span class="muted">🔒 要輸入牧區密碼才看得到</span>
               {% else %}<span class="unit-status muted" data-unit-status="{{ r.id }}">讀取中…</span>{% endif %}</td>
           <td class="nowrap"><b>{{ r.groups }}</b> 個會收到提醒{% if r.groups_total != r.groups %}<div class="sub">共 {{ r.groups_total }} 個</div>{% endif %}
             <div class="sub">同工 {{ r.members }} 位</div></td>
@@ -66,7 +66,7 @@
               <span class="badge {{ {'error': 'bad', 'warning': 'warn', 'ok': 'ok'}[r.last.status] }}">{{ r.last.status_zh }}</span>
               <div class="sub">{{ r.last.started_at[5:16] | replace("T", " ") | replace("-", "/") }} · 送出 {{ r.last.sent }} 則</div>
             {% else %}<span class="muted">還沒有發送過</span>{% endif %}</td>
-          <td class="ops"><a class="btn btn-sm btn-primary" href="/m/{{ r.id }}/">打開 →</a></td>
+          <td class="ops"><a class="btn btn-sm {{ 'btn-primary' if r.open }}" href="/m/{{ r.id }}/">{{ "打開 →" if r.open else "輸入密碼 →" }}</a></td>
         </tr>
       {% endfor %}
       </tbody>
@@ -141,6 +141,11 @@
         <label for="note">備註</label>
         <input type="text" id="note" name="note" placeholder="例如負責人：王小明、林美華">
         <span class="help">留空 = 首頁不顯示。</span>
+      </div>
+      <div class="ffield">
+        <label for="password"><span class="req">*</span>牧區密碼</label>
+        <input type="password" id="password" name="password" required minlength="4" autocomplete="new-password">
+        <span class="help">至少 4 個字。之後進這個牧區要用它，請告訴這個牧區的負責人；忘記了找伺服器管理員重設。</span>
       </div>
       <p class="note">建好之後是一個空的牧區：服事表還沒接、沒有群組，自動發送先關著，不會亂發。</p>
     </div>

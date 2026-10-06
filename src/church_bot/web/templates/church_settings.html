@@ -56,10 +56,8 @@
             <td><b>{{ r.name }}</b><div class="id admin-only">{{ r.id }}</div></td>
             <td>{% if r.locked %}<span class="badge">🔒 有設</span>{% else %}<span class="muted">沒有設</span>{% endif %}</td>
             <td class="ops">{% if r.locked %}
-              {% if local %}
-              <form method="post" action="/m/{{ r.id }}/forgot-password" data-confirm="清掉「{{ r.name }}」的牧區密碼？清掉之後只要網站密碼就進得去。">
-                <button type="submit" class="btn btn-sm btn-danger">忘記了，清掉密碼</button></form>
-              {% else %}<span class="note">忘記密碼只能在執行機器人的那台電腦上清</span>{% endif %}
+              <form method="post" action="/m/{{ r.id }}/forgot-password" data-confirm="清掉「{{ r.name }}」的牧區密碼？清掉之後只有伺服器管理員進得去，記得再設一個新的。">
+                <button type="submit" class="btn btn-sm btn-danger">清掉密碼</button></form>
             {% endif %}</td>
           </tr>
         {% endfor %}

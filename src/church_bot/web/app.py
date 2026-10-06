@@ -29,14 +29,14 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from church_bot import __version__
-from church_bot.church import add_ministry, check_password, edit_ministry
+from church_bot.church import MIN_MINISTRY_PASSWORD, add_ministry, check_password, edit_ministry, hash_password
 from church_bot.config import Paths, load_settings, read_env_file, update_env_file
 from church_bot.core import versions
 from church_bot.core.public_url import public_base
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.web.common import (
-    ADMIN_COOKIE, HERE, SESSION_COOKIE, LoginRequired, MinistryLocked, Web, is_local, mask, ministry_cookie,
-    ministry_token, quota_json, redirect, safe_next,
+    ADMIN_COOKIE, HERE, MANAGER_COOKIE, SESSION_COOKIE, LoginRequired, ManagerRequired, MinistryLocked, Web,
+    is_local, mask, ministry_cookie, ministry_token, quota_json, redirect, safe_next,
 )
 from church_bot.web.ministry import ministry_routes
 from church_bot.webhook import SignatureError
@@ -62,6 +62,8 @@ def create_app(paths: Paths) -> FastAPI:
     app.state.webhook = webhook
 
     ui = APIRouter(dependencies=[Depends(web.require_login)])
+    # 只有伺服器管理員：全教會設定、還沒分配的群組、教會這一層的變更紀錄、清掉任何牧區的密碼
+    manager = APIRouter(dependencies=[Depends(web.require_login), Depends(web.require_manager)])
     api = APIRouter(prefix="/api", tags=["API"], dependencies=[Depends(web.require_login)])
 
     @app.middleware("http")
@@ -96,15 +98,17 @@ def create_app(paths: Paths) -> FastAPI:
     def logout():
         resp = redirect("/")
         resp.delete_cookie(SESSION_COOKIE)
+        resp.delete_cookie(MANAGER_COOKIE)
         for ministry in church.ministries():
             resp.delete_cookie(ministry_cookie(ministry.id))
         return resp
 
     @ui.post("/admin-mode")
     def admin_mode(enabled: str = Form(""), next: str = Form("/")):
-        """右上角「切換身分」：切到管理員 = 側欄多出設定、系統檢查，畫面上多出 ID、檔案位置這類細節。"""
+        """右上角「進階頁面」：打開 = 側欄多出設定、系統檢查、變更紀錄，畫面上多出 ID、檔案位置這類細節。
+        只是把畫面收起來，不是權限：權限看身分（訪客、牧區管理員、伺服器管理員，見 web/common.py）。"""
         on = enabled == "1"
-        resp = redirect(safe_next(next), "已切到管理員：側欄多了設定、系統檢查" if on else "已回到一般畫面")
+        resp = redirect(safe_next(next), "已打開進階頁面：側欄多了設定、系統檢查、變更紀錄" if on else "已收起進階頁面")
         if on:
             resp.set_cookie(ADMIN_COOKIE, "1", samesite="lax", max_age=60 * 60 * 24 * 365)
         else:
@@ -117,9 +121,17 @@ def create_app(paths: Paths) -> FastAPI:
     async def ministry_locked(request: Request, exc: MinistryLocked):
         if "/api/" in request.url.path:  # 首頁、側欄用 JavaScript 來問的：回「要密碼」，不要回一整頁登入畫面
             return JSONResponse({"detail": f"「{exc.unit.name}」要先輸入牧區密碼"}, status_code=401)
-        response = web.page(request, "ministry_login.html", None, locked=exc.unit.ministry, next=exc.next_url,
-                            local=is_local(request))
+        response = web.page(request, "ministry_login.html", None, locked=exc.unit.ministry, next=exc.next_url)
         response.status_code = 401
+        return response
+
+    @app.exception_handler(ManagerRequired)
+    async def manager_required(request: Request, exc: ManagerRequired):
+        if "/api/" in request.url.path:
+            return JSONResponse({"detail": "只有伺服器管理員可以"}, status_code=403)
+        response = web.page(request, "error.html", None, message="這裡只有伺服器管理員可以進來",
+                            hint="請用伺服器管理員的密碼登入（右上角「伺服器管理員」）。")
+        response.status_code = 403
         return response
 
     @ui.post("/m/{mid}/unlock")
@@ -132,23 +144,20 @@ def create_app(paths: Paths) -> FastAPI:
             return redirect(target)
         if not check_password(password, ministry.password_hash):
             return web.page(request, "ministry_login.html", None, locked=ministry, next=target,
-                            error="密碼不對，再試一次", local=is_local(request))
+                            error="密碼不對，再試一次")
         resp = redirect(target)
         resp.set_cookie(ministry_cookie(mid), ministry_token(ministry.password_hash), httponly=True, samesite="lax",
                         max_age=60 * 60 * 24 * 30)
         return resp
 
-    @ui.post("/m/{mid}/forgot-password")
-    def ministry_forgot_password(request: Request, mid: str):
-        """忘記牧區密碼：只有坐在那台電腦前面（127.0.0.1、不是透過臨時網址）才能清掉。"""
+    @manager.post("/m/{mid}/forgot-password")
+    def ministry_forgot_password(mid: str):
+        """忘記牧區密碼：只有伺服器管理員能清掉（或在那台電腦上執行 cli.bat 牧區 clear-password）。"""
         ministry = church.config().get(mid)
         if ministry is None:
             return redirect("/", "找不到這個牧區", "error")
-        if not is_local(request):
-            return redirect("/", f"「{ministry.name}」的密碼只能在執行機器人的那台電腦上清掉："
-                                 f"在那台電腦打開管理網頁，或執行 cli.bat 牧區 clear-password {mid}", "error")
         edit_ministry(web.paths, mid, password_hash="")
-        log.warning("在本機清掉了「%s」的牧區密碼", ministry.name)
+        log.warning("伺服器管理員清掉了「%s」的牧區密碼", ministry.name)
         return redirect(f"/m/{mid}/settings#ministry", f"已清掉「{ministry.name}」的密碼，記得重新設一個")
 
     @app.exception_handler(ChurchBotError)
@@ -193,19 +202,29 @@ def create_app(paths: Paths) -> FastAPI:
 
     @ui.get("/", response_class=HTMLResponse)
     def home(request: Request, new: str = ""):
-        return web.page(request, "church_home.html", None, rows=ministry_rows(), unassigned=church.unassigned_chats(),
+        manager_view = web.is_manager(request)
+        rows = [{**r, "open": manager_view or web.unlocked(request, r["id"])} for r in ministry_rows()]
+        return web.page(request, "church_home.html", None, rows=rows,
+                        unassigned=church.unassigned_chats() if manager_view else [],
                         quota=quota_json(church.quota_status()), show_form=new == "1" or not church.ministries())
 
     @ui.post("/ministries/add")
-    async def ministries_add(name: str = Form(""), note: str = Form("")):
+    async def ministries_add(name: str = Form(""), note: str = Form(""), password: str = Form("")):
+        """誰進得了網站都可以新增牧區，但一定要同時設牧區密碼：建的人之後才進得來，別人沒有密碼就進不去。"""
+        if len(password.strip()) < MIN_MINISTRY_PASSWORD:
+            return redirect("/?new=1", f"請設定這個牧區的密碼（至少 {MIN_MINISTRY_PASSWORD} 個字），之後進這個牧區要用", "error")
         try:
             ministry = await run_in_threadpool(add_ministry, web.paths, name, note)
         except ConfigError as exc:
             return redirect("/?new=1", f"{exc.message}。{exc.hint}".rstrip("。"), "error")
+        ministry = edit_ministry(web.paths, ministry.id, password_hash=hash_password(password.strip()))
         await run_in_threadpool(scheduler.reload)
-        return redirect(f"/m/{ministry.id}/", f"已建立「{ministry.name}」：照下面的運作流程，從服事表開始設定")
+        resp = redirect(f"/m/{ministry.id}/", f"已建立「{ministry.name}」：照下面的運作流程，從服事表開始設定")
+        resp.set_cookie(ministry_cookie(ministry.id), ministry_token(ministry.password_hash), httponly=True,
+                        samesite="lax", max_age=60 * 60 * 24 * 30)  # 建的人不用馬上再輸入一次
+        return resp
 
-    @ui.post("/unassigned/assign")
+    @manager.post("/unassigned/assign")
     def unassigned_assign(chat_id: str = Form(...), ministry_id: str = Form(""), name: str = Form("")):
         if not ministry_id:
             return redirect("/", "請先選要分到哪個牧區", "error")
@@ -214,7 +233,7 @@ def create_app(paths: Paths) -> FastAPI:
         return redirect(f"/m/{unit.id}/targets?edit={quote(target.name)}",
                         f"已把群組分到「{unit.name}」（尚未啟用），確認後勾選「要收到提醒」並儲存")
 
-    @ui.post("/unassigned/forget")
+    @manager.post("/unassigned/forget")
     def unassigned_forget(chat_id: str = Form(...)):
         """不需要的群組（例如測試用、機器人已經退出）：從清單拿掉。機器人之後在那裡被叫到還是會再出現。"""
         church.shared.forget_chat(chat_id)
@@ -222,7 +241,7 @@ def create_app(paths: Paths) -> FastAPI:
 
     # ------------------------------------------------------------------ 全教會設定：LINE 金鑰、網站密碼
 
-    @ui.get("/settings", response_class=HTMLResponse)
+    @manager.get("/settings", response_class=HTMLResponse)
     def church_settings(request: Request):
         env = {**read_env_file(web.paths.env_file),
                **{k: v for k, v in os.environ.items() if k.startswith(("LINE_", "UI_"))}}
@@ -236,7 +255,7 @@ def create_app(paths: Paths) -> FastAPI:
                         password_status="已設定" if env.get("UI_PASSWORD") else "", web_settings=web_settings,
                         rows=ministry_rows(), local=is_local(request))
 
-    @ui.post("/settings/secrets")
+    @manager.post("/settings/secrets")
     def settings_secrets(token: str = Form(""), secret: str = Form(""), password: str = Form(""),
                          clear_password: str = Form("")):
         updates = {k: v.strip() for k, v in (("LINE_CHANNEL_ACCESS_TOKEN", token), ("LINE_CHANNEL_SECRET", secret),
@@ -248,11 +267,11 @@ def create_app(paths: Paths) -> FastAPI:
         update_env_file(web.paths.env_file, updates)
         return redirect("/settings", "LINE 金鑰 / 密碼已更新（存在 .env，不會上傳到 git）")
 
-    @ui.get("/history", response_class=HTMLResponse)
+    @manager.get("/history", response_class=HTMLResponse)
     def history_page(request: Request):
         return web.history_page(request, None)
 
-    @ui.post("/history/{change_id}/restore")
+    @manager.post("/history/{change_id}/restore")
     async def history_restore(change_id: int):
         msg, level = await run_in_threadpool(web.restore, change_id, "")
         return redirect("/history", msg, level)
@@ -264,8 +283,15 @@ def create_app(paths: Paths) -> FastAPI:
 
     # --- LINE「/設定」等待驗證的修改：管理網頁可以直接核准／拒絕（上方那一條，在哪一頁都看得到） ---
 
+    def may_decide(request: Request) -> bool:
+        """LINE「/設定」等驗證的修改：伺服器管理員，或能管那個牧區的人，才能核准／拒絕。"""
+        pending = webhook.verifier.current()
+        return pending is None or web.is_manager(request) or web.unlocked(request, pending.ministry_id)
+
     @ui.post("/remote-config/approve")
-    def remote_config_approve(next: str = Form("/")):
+    def remote_config_approve(request: Request, next: str = Form("/")):
+        if not may_decide(request):
+            return redirect(safe_next(next), "只有能管那個牧區的人可以核准", "error")
         pending = webhook.verifier.take("管理網頁核准")
         if pending is None:
             return redirect(safe_next(next), "這個修改已經過期或被處理掉了", "warn")
@@ -275,7 +301,9 @@ def create_app(paths: Paths) -> FastAPI:
         return redirect(safe_next(next), f"已核准：{where}{pending.option.key} → {pending.value_text}（LINE 那邊不會另外通知）")
 
     @ui.post("/remote-config/reject")
-    def remote_config_reject(next: str = Form("/")):
+    def remote_config_reject(request: Request, next: str = Form("/")):
+        if not may_decide(request):
+            return redirect(safe_next(next), "只有能管那個牧區的人可以拒絕", "error")
         pending = webhook.verifier.take("管理網頁拒絕")
         if pending is not None:
             log.warning("管理網頁拒絕了 LINE 設定修改：%s・%s → %s（%s）", pending.ministry_name, pending.option.key,
@@ -326,6 +354,7 @@ def create_app(paths: Paths) -> FastAPI:
 
     ministry_ui, ministry_api = ministry_routes(web)
     app.include_router(ui)
+    app.include_router(manager)
     app.include_router(api)
     app.include_router(ministry_ui)
     app.include_router(ministry_api)

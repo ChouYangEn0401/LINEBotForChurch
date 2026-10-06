@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import ValidationError
 
 from church_bot import __version__
-from church_bot.church import edit_ministry, hash_password, remove_ministry
+from church_bot.church import MIN_MINISTRY_PASSWORD, edit_ministry, hash_password, remove_ministry
 from church_bot.config import DEFAULT_TEMPLATE, SETTINGS_LOCK, Settings, load_settings, save_settings, update_settings
 from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
@@ -674,7 +674,7 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
             values = form_values(Settings()) if broken else form_values(load_settings(m.paths))
         return web.page(request, "settings.html", m, f=values, error=error, broken=broken,
                         default_template=DEFAULT_TEMPLATE, ministry=m.unit.ministry,
-                        can_delete=len(web.church.ministries()) > 1)
+                        can_delete=len(web.church.ministries()) > 1 and web.is_manager(request))
 
     @ui.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request, m: MinistryView = Depends(web.ministry)):
@@ -719,17 +719,17 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
             resp.delete_cookie(ministry_cookie(m.id))
             return resp
         password = password.strip()
-        if len(password) < 4:
-            return m.redirect("/settings#ministry", "牧區密碼至少 4 個字", "error")
+        if len(password) < MIN_MINISTRY_PASSWORD:
+            return m.redirect("/settings#ministry", f"牧區密碼至少 {MIN_MINISTRY_PASSWORD} 個字", "error")
         updated = edit_ministry(web.paths, m.id, password_hash=hash_password(password))
         resp = m.redirect("/settings#ministry", "已設定牧區密碼：其他人進這個牧區要先輸入（這個瀏覽器已經記住了）")
         resp.set_cookie(ministry_cookie(m.id), ministry_token(updated.password_hash), httponly=True, samesite="lax",
                         max_age=60 * 60 * 24 * 30)
         return resp
 
-    @ui.post("/ministry/delete")
+    @ui.post("/ministry/delete", dependencies=[Depends(web.require_manager)])
     async def ministry_delete(confirm: str = Form(""), m: MinistryView = Depends(web.ministry)):
-        """移除牧區：資料夾整包移到 config/_deleted/，發送紀錄留著；要打牧區名稱確認，避免手滑。"""
+        """移除牧區（只有伺服器管理員）：資料夾整包移到 config/_deleted/，發送紀錄留著；要打牧區名稱確認，避免手滑。"""
         if confirm.strip() != m.name:
             return m.redirect("/settings#danger", f"要移除請在框裡打「{m.name}」", "error")
         if len(web.church.ministries()) <= 1:

@@ -171,7 +171,8 @@ body.admin .admin-only { display: revert; }
 .brand-sub { font-weight: 700; font-size: 15px; color: var(--accent); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
 .top-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .role-badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--bg3); color: var(--dim); white-space: nowrap; }
-.role-badge.admin { background: var(--warn-soft); color: var(--warn); }
+.role-badge.manager { background: var(--violet-soft); color: var(--violet); }
+.role-badge.admin { background: var(--accent-soft); color: var(--accent); }
 .menu-toggle { display: none; }
 
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
