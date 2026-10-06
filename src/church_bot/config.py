@@ -22,7 +22,21 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 from church_bot.errors import ConfigError
 from church_bot.files import write_text
 
+# 預設的提醒訊息：用【中文標籤】寫，不懂程式的人也改得動（規則見 core/message_template.py）
 DEFAULT_TEMPLATE = """\
+📣 【標題】
+📅 【日期】・【聚會】
+
+▸ 【服事名單】
+
+📝 【備註】
+
+【結尾】
+"""
+
+# 舊版的預設（Jinja2 寫法）。設定檔裡還是這一份的，讀進來自動換成上面那一份——排出來的字一模一樣，
+# 防重複照樣認得是同一則，不會因為換寫法就多發一次。
+LEGACY_DEFAULT_TEMPLATE = """\
 📣 {{ title }}
 📅 {{ date_text }}{% if label %}・{{ label }}{% endif %}
 
@@ -137,6 +151,11 @@ class MessageSettings(_Base):
     name_separator: str = "、"
     # 空 = 照服事表的欄位順序；有填就照這個順序排，沒列到的排最後
     role_order: list[str] = []
+
+    @field_validator("template")
+    @classmethod
+    def _upgrade_template(cls, v: str) -> str:
+        return DEFAULT_TEMPLATE if v.replace("\r\n", "\n").strip() == LEGACY_DEFAULT_TEMPLATE.strip() else v
 
 
 class BehaviorSettings(_Base):

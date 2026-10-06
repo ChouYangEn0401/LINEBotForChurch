@@ -1,6 +1,10 @@
-"""把一天的服事安排排成訊息文字（Jinja2 模板，可在設定頁修改）。
+"""把一天的服事安排排成訊息文字（模板可在設定頁、每個群組修改）。
 
-模板可用的變數：
+模板有兩種寫法：
+* 【中文標籤】（預設、推薦）：不懂程式的人也改得動，規則見 core/message_template.py。
+* 舊的 Jinja2（有 {{ 或 {% 的）：照舊能用，可用的變數如下。
+
+Jinja2 模板可用的變數：
   title        標題（群組自己有填就用群組的，沒填用牧區設定頁的）
   date_text    排好格式的日期，例如「9/13（週日）」
   date         日期物件；weekday = 「週日」
@@ -28,6 +32,7 @@ from typing import Iterable
 import jinja2
 
 from church_bot.config import MessageSettings
+from church_bot.core import message_template
 from church_bot.core.dates import format_date, weekday_zh
 from church_bot.core.directory import Directory, normalize_name
 from church_bot.errors import ConfigError
@@ -98,9 +103,16 @@ class Renderer:
         self.cfg = cfg
         self._env = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)
         self._template = self._compile(cfg.template)
-        self._own: dict[str, jinja2.Template] = {}  # 群組自己的模板，同一份內容只編譯一次
+        self._own: dict[str, jinja2.Template | None] = {}  # 群組自己的模板，同一份內容只檢查／編譯一次
 
-    def _compile(self, source: str, owner: str = "") -> jinja2.Template:
+    def _compile(self, source: str, owner: str = "") -> jinja2.Template | None:
+        """中文標籤寫法：檢查標籤都認得，回傳 None；舊的 Jinja2 寫法：編譯。寫錯一律丟 ConfigError。"""
+        if message_template.is_simple(source):
+            if bad := message_template.unknown_tags(source):
+                where = f"「{owner}」自己的提醒訊息" if owner else "提醒訊息"
+                raise ConfigError(f"{where}裡有不認得的標籤：{'、'.join(f'【{t}】' for t in bad)}",
+                                  f"可以用的有：{message_template.tags_help()}。打錯字的話改掉，或點畫面上的按鈕插入。")
+            return None
         try:
             return self._env.from_string(source)
         except jinja2.TemplateSyntaxError as exc:
@@ -114,7 +126,7 @@ class Renderer:
                 "到「設定」頁按「恢復預設模板」，或檢查 {{ }} 和 {% %} 有沒有成對。",
             ) from exc
 
-    def _template_for(self, target: Target | None) -> jinja2.Template:
+    def _template_for(self, target: Target | None) -> jinja2.Template | None:
         if not (target and target.template):
             return self._template
         if target.template not in self._own:
@@ -201,10 +213,18 @@ class Renderer:
             ],
         }
         owner = target.name if target and target.template else ""
+        compiled = self._template_for(target)
+        if compiled is None:  # 中文標籤寫法
+            values = {"標題": context["title"], "日期": context["date_text"], "星期": context["weekday"],
+                      "聚會": context["label"], "備註": context["note"], "結尾": context["footer"],
+                      "群組名稱": context["target_name"]}
+            rows = [(a["role"], a["names"]) for a in context["assignments"]]
+            source = target.template if owner else self.cfg.template
+            return _tidy(message_template.fill(source, values, rows))
         where = f"「{owner}」自己的訊息模板" if owner else "訊息模板"
         fix = f"到「LINE 群組」頁編輯「{owner}」，或把它的模板清空改用牧區的設定。" if owner else "到「設定」頁按「恢復預設模板」。"
         try:
-            return _tidy(self._template_for(target).render(**context))
+            return _tidy(compiled.render(**context))
         except jinja2.UndefinedError as exc:
             raise ConfigError(
                 f"{where}用了不存在的變數：{exc.message}",
