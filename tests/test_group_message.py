@@ -57,3 +57,23 @@ def test_group_message_roundtrips_through_csv_with_newlines(paths):
     table.save([target])
     assert table.load().items == [target]
     assert target.has_own_message and not USHER.has_own_message
+
+
+# ------------------------------------------------------------------ 管理網頁「LINE 群組」頁
+
+
+def test_web_saves_group_message_and_shows_preview(client, paths):
+    r = client.post("/targets/save", data={"name": "敬拜團", "line_id": gid("1"), "enabled": "on",
+                                           "title": "敬拜團這週誰上場", "footer": "記得練團"}, follow_redirects=False)
+    assert r.status_code == 303 and "edit=" in r.headers["location"]
+    saved = next(t for t in TargetTable(paths.targets_file).load().items if t.name == "敬拜團")
+    assert (saved.title, saved.footer, saved.template) == ("敬拜團這週誰上場", "記得練團", "")
+    page = client.get(r.headers["location"]).text
+    assert "這個群組現在會收到" in page and "敬拜團這週誰上場" in page
+
+
+def test_web_keeps_typed_template_when_it_is_broken(client, paths):
+    r = client.post("/targets/save", data={"name": "壞群", "line_id": gid("4"), "enabled": "on",
+                                           "template": "我打了很久的內容 {{ title "})
+    assert r.status_code == 200 and "還沒儲存" in r.text and "我打了很久的內容" in r.text
+    assert all(t.name != "壞群" for t in TargetTable(paths.targets_file).load().items)

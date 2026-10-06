@@ -471,34 +471,56 @@ def create_app(paths: Paths) -> FastAPI:
 
     # ------------------------------------------------------------------ targets
 
-    @ui.get("/targets", response_class=HTMLResponse)
-    def targets_page(request: Request, edit: str = "", new: str = ""):
+    def targets_response(request: Request, editing: Target | None = None, new: bool = False,
+                         original_name: str | None = None, error: str = "") -> HTMLResponse:
         result = TargetTable(paths.targets_file).load()
         known = {t.line_id for t in result.items}
         chats = [c for c in service.history.chats()
                  if c["chat_id"] not in known and c["status"] == "active" and c["kind"] in ("group", "room")]
-        editing = next((t for t in result.items if t.name == edit), None)
-        show_form = bool(editing) or new == "1"  # 清單和表單分開兩個畫面：一次只看一件事
+        show_form = bool(editing) or new  # 清單和表單分開兩個畫面：一次只看一件事
+        try:
+            message = load_settings(paths).message
+        except ConfigError:
+            message = Settings().message
+        preview, preview_note = service.preview_target(editing) if editing and not error else ([], "")
+        extra = {"flash": error, "flash_level": "error"} if error else {}
         return page(request, "targets.html", targets=result.items, issues=result.issues, chats=chats, editing=editing,
-                    show_form=show_form, roles_in_sheet=service.roster_roles() if show_form else [])
+                    show_form=show_form, roles_in_sheet=service.roster_roles() if show_form else [],
+                    original_name=editing.name if original_name is None and editing else (original_name or ""),
+                    message_defaults=message, preview=preview, preview_note=preview_note, **extra)
+
+    @ui.get("/targets", response_class=HTMLResponse)
+    def targets_page(request: Request, edit: str = "", new: str = ""):
+        editing = next((t for t in TargetTable(paths.targets_file).load().items if t.name == edit), None)
+        return targets_response(request, editing, new == "1")
 
     @ui.post("/targets/save")
-    def targets_save(name: str = Form(""), line_id: str = Form(""), enabled: str = Form(""), roles: str = Form(""),
-                     labels: str = Form(""), mention: str = Form(""), note: str = Form(""),
+    def targets_save(request: Request, name: str = Form(""), line_id: str = Form(""), enabled: str = Form(""),
+                     roles: str = Form(""), labels: str = Form(""), mention: str = Form(""), note: str = Form(""),
+                     title: str = Form(""), footer: str = Form(""), template: str = Form(""),
                      original_name: str = Form("")):
         name, line_id = name.strip(), line_id.strip()
-        if not name:
-            return _redirect("/targets", "請填群組名稱", "error")
-        if line_id and not LINE_ID_RE.match(line_id):
-            return _redirect(f"/targets?edit={quote(original_name)}",
-                             f"LINE_ID 格式不對：「{line_id}」。要是 C 或 U 開頭再加 32 個英數字", "error")
         target = Target(name=name, line_id=line_id, enabled=enabled == "on", roles=parse_list(roles),
-                        labels=parse_list(labels), mention=mention == "on", note=note.strip())
+                        labels=parse_list(labels), mention=mention == "on", note=note.strip(), title=title.strip(),
+                        footer=footer.strip(), template=template.replace("\r\n", "\n").strip())
+        # 錯誤時直接把表單畫回去（不跳轉），剛打好的訊息模板才不會不見
+        if not name:
+            return targets_response(request, target, original_name=original_name, error="請填群組名稱")
+        if line_id and not LINE_ID_RE.match(line_id):
+            return targets_response(request, target, original_name=original_name,
+                                    error=f"LINE_ID 格式不對：「{line_id}」。要是 C 或 U 開頭再加 32 個英數字")
+        try:
+            Renderer(load_settings(paths).message).validate(target)
+        except ChurchBotError as exc:
+            return targets_response(request, target, original_name=original_name,
+                                    error=f"還沒儲存：{exc.message}。{exc.hint}")
         with TABLE_WRITE_LOCK:
             table = TargetTable(paths.targets_file)
             table.save(upsert(table.load().items, target, key=lambda t: t.name, original_key=original_name or None))
         if target.enabled and not line_id:
             return _redirect("/targets", f"已儲存「{name}」，但還沒填 LINE_ID，所以不會收到提醒", "warn")
+        if target.has_own_message:  # 改了訊息：留在編輯畫面，下面就是這個群組現在會收到的樣子
+            return _redirect(f"/targets?edit={quote(name)}#preview", f"已儲存「{name}」，下面是這個群組現在會收到的訊息")
         return _redirect("/targets", f"已儲存「{name}」")
 
     @ui.post("/targets/delete")

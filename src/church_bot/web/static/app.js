@@ -198,7 +198,8 @@ document.querySelectorAll("[data-pick-target]").forEach((chip) => {
 document.querySelectorAll("[data-reset-template]").forEach((button) => {
   button.addEventListener("click", () => {
     const textarea = document.getElementById("template");
-    if (textarea && window.confirm("要把訊息模板改回預設值嗎？按「儲存設定」後才會生效。")) {
+    const question = button.dataset.confirmText || "要把訊息模板改回預設值嗎？按「儲存設定」後才會生效。";
+    if (textarea && window.confirm(question)) {
       textarea.value = textarea.dataset.default;
     }
   });

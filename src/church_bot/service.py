@@ -398,6 +398,24 @@ class BotService:
         planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
         return planner.plan(roster, targets, today)
 
+    def preview_target(self, target: Target) -> tuple[list[str], str]:
+        """「LINE 群組」頁編輯一個群組時，旁邊顯示「這個群組現在會收到什麼」。
+
+        停用的、還沒填 ID 的群組也照樣試排（借一個假的 ID），這樣設定訊息時不用先啟用。
+        回傳 (訊息文字, 沒有訊息時的原因)；讀不到服事表也不丟例外，原因寫在第二個值。
+        """
+        trial = replace(target, enabled=True, line_id=target.line_id if LINE_ID_RE.match(target.line_id)
+                        else "C" + "0" * 32)
+        try:
+            ctx = self.load()
+            plan = self._plan_for(ctx, [trial], self.now(ctx.settings).date())
+        except ChurchBotError as exc:
+            return [], exc.message
+        if texts := [pm.message.text for pm in plan.messages]:
+            return texts, ""
+        reason = next((i.message for i in plan.issues if i.code in ("target_template", "target_nothing")), "")
+        return [], reason or "這幾天服事表沒有東西可以提醒。"
+
     def preview_for(self, day: dt.date, chat_id: str = "") -> tuple[list[OutgoingMessage], str]:
         """給 LINE 指令「/別周測試 10/04」用：試印「那一天起往後幾天」的提醒。
 

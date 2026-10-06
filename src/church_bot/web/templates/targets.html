@@ -52,7 +52,7 @@
     <table class="data">
       <thead><tr><th>群組名稱</th><th>狀態</th>
         <th>收到什麼 {{ ui.info("全部服事 = 整張服事表。有列項目就只收那幾項，例如敬拜團群只收「敬拜、司琴」。") }}</th>
-        <th>@ 人</th><th></th></tr></thead>
+        <th>@ 人</th><th>訊息 {{ ui.info("沒有自己的訊息 = 用「設定 → 訊息長什麼樣子」那一份。每個群組可以有自己的標題、結尾，或整則改寫。") }}</th><th></th></tr></thead>
       <tbody>
       {% for t in targets %}
         <tr class="{{ '' if t.enabled else 'off' }}">
@@ -64,6 +64,9 @@
           <td><div class="chips">{% for r in t.roles %}<span class="chip">{{ r }}</span>{% else %}全部服事{% endfor %}</div>
               {% if t.labels %}<div class="sub">只有 {{ fmt_list(t.labels) }}</div>{% endif %}</td>
           <td>{{ "會" if t.mention else "不會" }}</td>
+          <td>{% if t.template %}<span class="badge violet">整則改寫</span>
+              {% elif t.has_own_message %}<span class="badge violet">自己的{{ "標題" if t.title }}{{ "、" if t.title and t.footer }}{{ "結尾" if t.footer }}</span>
+              {% else %}<span class="muted">牧區設定</span>{% endif %}</td>
           <td class="ops">
             <a class="btn btn-sm" href="/targets?edit={{ t.name | urlencode }}">編輯</a>
             {% if t.line_id %}
@@ -111,7 +114,7 @@
       <a class="icon-btn" href="/targets" title="關閉（Esc）" aria-label="關閉">✕</a>
     </div>
     <div class="drawer-body">
-      <input type="hidden" name="original_name" value="{{ t.name if t else '' }}">
+      <input type="hidden" name="original_name" value="{{ original_name }}">
       <div class="ffield">
         <label for="name"><span class="req">*</span>群組名稱</label>
         <input type="text" id="name" name="name" required value="{{ t.name if t else '' }}" placeholder="主日服事同工群" autofocus>
@@ -149,6 +152,36 @@
         <label for="note">備註</label>
         <input type="text" id="note" name="note" value="{{ t.note if t else '' }}">
       </div>
+
+      <div class="drawer-sec">
+        <span class="ffield-lab">這個群組的提醒訊息</span>
+        <span class="help">每個群組可以有自己的罐頭訊息。留空的部分就用「設定 → 訊息長什麼樣子」那一份。</span>
+      </div>
+      <div class="ffield">
+        <label for="title">標題</label>
+        <input type="text" id="title" name="title" value="{{ t.title if t else '' }}" placeholder="{{ message_defaults.title }}">
+        <span class="help">留空 = 用設定頁的標題（框裡淡淡的那一行）。</span>
+      </div>
+      <div class="ffield">
+        <label for="footer">結尾文字</label>
+        <input type="text" id="footer" name="footer" value="{{ t.footer if t else '' }}" placeholder="{{ message_defaults.footer or '（設定頁沒有結尾文字）' }}">
+        <span class="help">留空 = 用設定頁的結尾。可以寫這一群才需要知道的事，例如「週六 7 點練團」。</span>
+      </div>
+      <details class="sub-details" {{ "open" if t and t.template }}>
+        <summary>整則改寫（進階）</summary>
+        <div class="ffield">
+          <textarea id="template" name="template" class="code" data-default="{{ message_defaults.template }}">{{ t.template if t else '' }}</textarea>
+          <span class="help">留空 = 用設定頁的訊息模板。可用的變數跟設定頁一樣，另外 {{ "{{ target_name }}" }} 是這個群組的名稱。
+            <button type="button" class="link-btn" data-reset-template data-confirm-text="要把設定頁的訊息模板複製到這裡來改嗎？目前框裡的內容會被蓋掉。">從設定頁複製一份來改</button></span>
+        </div>
+      </details>
+      {% if editing and (preview or preview_note) %}
+      <div class="ffield" id="preview">
+        <span class="ffield-lab">這個群組現在會收到</span>
+        {% for text in preview %}<pre class="msg">{{ text }}</pre>{% else %}<span class="note">{{ preview_note }}</span>{% endfor %}
+        <span class="help">照已經儲存的設定、服事表現在的內容排出來的；改完按「儲存」就會更新。不會真的送出。</span>
+      </div>
+      {% endif %}
     </div>
     <div class="drawer-foot">
       <button type="submit" class="btn btn-primary">儲存</button>
