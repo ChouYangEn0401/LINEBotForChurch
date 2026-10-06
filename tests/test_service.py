@@ -10,6 +10,7 @@ from church_bot.errors import ConfigError, MessengerError
 from church_bot.core.quota import SETTLE, QuotaSnapshot
 from church_bot.messengers.base import Quota
 from church_bot.models import DeliveryStatus, Member, Target, Team
+from church_bot.ministries import Church
 from church_bot.service import BotService
 from church_bot.tables import MemberTable, TargetTable, TeamTable
 from tests.conftest import FakeMessenger, gid, uid, write
@@ -41,7 +42,7 @@ def service(paths, fake) -> BotService:
     TargetTable(paths.targets_file).save([Target("同工群", gid()), Target("敬拜團", gid("c"), roles=("司琴",))])
     MemberTable(paths.members_file).save([Member("王大衛牧師", ("王牧師",)), Member("李傳道"), Member("陳小明", ("小明",)),
                                           Member("林美華", ("美華",))])
-    svc = BotService(paths)
+    svc = Church(paths.church).service("m1")  # 跟實際一樣：牧區共用教會那一份資料庫（用量、網址）
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     return svc
 
@@ -247,7 +248,7 @@ def test_personal_user_id_works_as_a_target_for_safe_testing(paths, fake):
     me = uid("9")
     TargetTable(paths.targets_file).save([Target("我自己", me, enabled=True)])
 
-    svc = BotService(paths)
+    svc = Church(paths.church).service("m1")  # 跟實際一樣：牧區共用教會那一份資料庫（用量、網址）
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     report, _ = svc.run("cli")
     assert statuses(report) == [("我自己", DeliveryStatus.SENT)]
@@ -284,7 +285,7 @@ def test_team_name_on_the_roster_lists_the_whole_team(paths, fake):
                                           Member("林美華", ("美華",))])
     TeamTable(paths.teams_file).save([Team("晨光實體團", ("晨光團",), ("晨光", "小明", "美華"))])
 
-    svc = BotService(paths)
+    svc = Church(paths.church).service("m1")  # 跟實際一樣：牧區共用教會那一份資料庫（用量、網址）
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     report, plan = svc.run("cli")
     assert "晨光實體團（張晨光、陳小明、林美華）" in fake.texts_to(gid())[0]
@@ -304,7 +305,7 @@ def test_inactive_team_and_inactive_member_inside_it_are_both_reported(paths, fa
     MemberTable(paths.members_file).save([Member("周以琳", ("以琳",), active=False), Member("陳小明", ("小明",))])
     TeamTable(paths.teams_file).save([Team("休息小團", (), ("以琳", "小明"), active=False)])
 
-    svc = BotService(paths)
+    svc = Church(paths.church).service("m1")  # 跟實際一樣：牧區共用教會那一份資料庫（用量、網址）
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=ZoneInfo("Asia/Taipei"))
     report, _ = svc.run("cli")
     codes = {i.code for i in report.issues}

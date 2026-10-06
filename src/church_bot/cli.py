@@ -1,7 +1,9 @@
 """指令列入口：``python -m church_bot <指令>``。
 
 一般使用者不用記這些：雙擊 scripts 資料夾裡的檔案就好。
-每週提醒由 Telegram 機器人排程：時間到了呼叫 scripts/windows/cli.bat send --retries 3 --retry-wait 300 --popup。
+每週提醒：管理網頁開著的時候，每個牧區照自己的時間自動發（scheduler.py）。
+Telegram 機器人可以當備援：每週呼叫 scripts/windows/cli.bat send --retries 3 --retry-wait 300 --popup，
+沒指定牧區就發「今天輪到的牧區」；--牧區 青年牧區 只發那一個。
 cli.bat 不會問問題、不會停下來等按鍵，跑完就結束，結束代碼 0 = 正常、1 = 有錯誤、2 = 設定有問題。
 """
 
@@ -17,6 +19,7 @@ import threading
 import time
 import webbrowser
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from church_bot import __version__
 from church_bot.config import Paths, load_settings
@@ -25,6 +28,9 @@ from church_bot.errors import ChurchBotError
 from church_bot.logging_setup import setup_logging
 from church_bot.models import DeliveryStatus, RunReport, Severity
 from church_bot.tables import MemberTable, TargetTable, TeamTable, write_csv
+
+if TYPE_CHECKING:
+    from church_bot.ministries import Church, Unit
 
 DEMO_HEADER = ["日期", "聚會", "講員", "司會", "敬拜主領", "司琴", "音控", "投影", "招待", "備註"]
 DEMO_ROWS = [
@@ -143,53 +149,112 @@ def print_report(report: RunReport, plan: Plan | None = None, show_messages: boo
             _print(issue.one_line())
 
 
-def cmd_check(paths: Paths, _: argparse.Namespace) -> int:
-    from church_bot.service import BotService
+def _units(paths: Paths, args: argparse.Namespace, *, due_today: bool = False) -> tuple[Church, list[Unit]]:
+    """這次要處理哪些牧區。
 
-    service = BotService(paths)
-    _print("教會服事提醒機器人 — 健康檢查\n")
-    items = service.health()
-    for item in items:
-        _print(f"{item.icon} {item.name}：{item.detail}")
-        if item.hint and item.ok is not True:
-            _print(f"   → {item.hint}")
-    _print("\n──────── 這次會發的內容（預覽，不會真的送出）────────")
-    report, plan = service.preview()
-    print_report(report, plan)
-    return 1 if any(i.ok is False for i in items) or report.has_errors else 0
+    * 指定了牧區（``--牧區 青年牧區``，或 ``paths`` 本身就是某個牧區）→ 只有那一個。
+    * ``due_today``（``send`` 沒指定牧區）→ 今天輪到的牧區：自動發送開著、今天是它的發送日、是發送週。
+      Telegram 每週固定呼叫一次 ``cli.bat send`` 就會照各牧區自己的發送日發；``--all`` = 全部都發。
+    * 其他（``preview``、``check``）→ 全部牧區。
+    """
+    from church_bot.config import load_settings
+    from church_bot.ministries import Church
+    from church_bot.scheduler import due_on
+
+    church = Church(paths)
+    key = getattr(args, "ministry", "") or paths.ministry
+    if key:
+        return church, [church.require(key)]
+    units = church.units()
+    if not units:
+        raise ChurchBotError("還沒有任何牧區", "打開管理網頁（2-start）新增第一個牧區，或執行 init。")
+    if not due_today or getattr(args, "all", False):
+        return church, units
+    due = []
+    for unit in units:
+        try:
+            settings = load_settings(unit.service.paths)
+        except ChurchBotError as exc:
+            _print(f"⚠️ 「{unit.name}」的設定檔有錯，這次跳過：{exc.message}")
+            continue
+        if due_on(settings.schedule, unit.service.now(settings).date()):
+            due.append(unit)
+        else:
+            _print(f"➖ 「{unit.name}」今天不是發送日（{settings.schedule.describe()}）")
+    return church, due
 
 
-def cmd_preview(paths: Paths, _: argparse.Namespace) -> int:
-    from church_bot.service import BotService
+def _heading(unit: Unit, units: list[Unit]) -> None:
+    if len(units) > 1 or unit.id != "m1":
+        _print(f"\n════════ {unit.name}（{unit.id}）════════")
 
-    report, plan = BotService(paths).preview()
-    print_report(report, plan)
-    return 1 if report.has_errors else 0
+
+def cmd_check(paths: Paths, args: argparse.Namespace) -> int:
+    _church, units = _units(paths, args)
+    _print("教會服事提醒機器人 — 健康檢查")
+    worst = 0
+    for unit in units:
+        _heading(unit, units)
+        _print()
+        items = unit.service.health()
+        for item in items:
+            _print(f"{item.icon} {item.name}：{item.detail}")
+            if item.hint and item.ok is not True:
+                _print(f"   → {item.hint}")
+        _print("\n──────── 這次會發的內容（預覽，不會真的送出）────────")
+        report, plan = unit.service.preview()
+        print_report(report, plan)
+        if any(i.ok is False for i in items) or report.has_errors:
+            worst = 1
+    return worst
+
+
+def cmd_preview(paths: Paths, args: argparse.Namespace) -> int:
+    _church, units = _units(paths, args)
+    worst = 0
+    for unit in units:
+        _heading(unit, units)
+        report, plan = unit.service.preview()
+        print_report(report, plan)
+        worst = max(worst, 1 if report.has_errors else 0)
+    return worst
 
 
 def cmd_send(paths: Paths, args: argparse.Namespace) -> int:
     """發送一次（已經送過、內容沒變的會自動略過）。Telegram 排程就是呼叫這個。
 
+    沒指定牧區 = 今天輪到的牧區（見 _units）。
     --retries：讀不到服事表、LINE 暫時連不上這種「等一下可能就好」的問題，等 --retry-wait 秒再試。
     --popup：最後還是有錯誤，就在這台電腦跳出小視窗通知。
     """
-    from church_bot.service import RETRYABLE_CODES, BotService, worth_retrying
+    from church_bot.service import RETRYABLE_CODES, worth_retrying
 
-    service = BotService(paths)
-    attempts = max(args.retries, 0) + 1
-    for attempt in range(1, attempts + 1):
-        left = attempts - attempt
-        report, plan = service.run("cli", force=args.force, will_retry=left > 0)
-        if left == 0 or not worth_retrying(report):
-            break
-        reason = next(i.message for i in report.issues if i.is_error and i.code in RETRYABLE_CODES)
-        _print(f"⚠️ 第 {attempt} 次沒成功：{reason}")
-        _print(f"   {args.retry_wait:g} 秒後再試（還會再試 {left} 次）")
-        time.sleep(args.retry_wait)
-    print_report(report, plan)
-    if report.has_errors and args.popup:
-        _popup("服事提醒機器人：提醒沒有順利送出", _popup_text(report))
-    return 1 if report.has_errors else 0
+    _church, units = _units(paths, args, due_today=True)
+    if not units:
+        _print("今天沒有輪到任何牧區，這次什麼都沒發。")
+        return 0
+    failed: list[tuple[Unit, RunReport]] = []
+    for unit in units:
+        _heading(unit, units)
+        attempts = max(args.retries, 0) + 1
+        for attempt in range(1, attempts + 1):
+            left = attempts - attempt
+            report, plan = unit.service.run("cli", force=args.force, will_retry=left > 0)
+            if left == 0 or not worth_retrying(report):
+                break
+            reason = next(i.message for i in report.issues if i.is_error and i.code in RETRYABLE_CODES)
+            _print(f"⚠️ 第 {attempt} 次沒成功：{reason}")
+            _print(f"   {args.retry_wait:g} 秒後再試（還會再試 {left} 次）")
+            time.sleep(args.retry_wait)
+        print_report(report, plan)
+        if report.has_errors:
+            failed.append((unit, report))
+    if failed and args.popup:
+        title = "服事提醒機器人：提醒沒有順利送出"
+        text = "\n\n".join((f"【{unit.name}】\n" if len(units) > 1 else "") + _popup_text(report)
+                           for unit, report in failed)
+        _popup(title, text)
+    return 1 if failed else 0
 
 
 def cmd_quota(paths: Paths, args: argparse.Namespace) -> int:
@@ -198,17 +263,55 @@ def cmd_quota(paths: Paths, args: argparse.Namespace) -> int:
     給 Telegram 當「發完之後的回頭確認」用：排在 send 之後約 5 分鐘呼叫一次
     （LINE 的用量統計會延遲幾分鐘，發送當下問到的數字通常還沒算進這一次），
     管理網頁下次打開看到的就是發送後的真實用量。管理網頁開著的話它自己會更新，不用這個指令。
+    用量是整個 LINE 帳號一份，所有牧區共用。
     """
-    from church_bot.service import BotService
+    from church_bot.ministries import Church
 
-    service = BotService(paths)
-    snapshot = service.refresh_quota(force=args.force)
+    snapshot = Church(paths).refresh_quota(force=args.force)
     if snapshot is None:
-        _print("➖ 目前不檢查 LINE 額度（測試模式，或設定裡關掉了額度檢查）")
+        _print("➖ 目前不檢查 LINE 額度（每個牧區都是測試模式，或設定裡關掉了額度檢查）")
         return 0
     _print(f"📊 {snapshot.describe()}")
     _print(f"   {snapshot.status_text(dt.datetime.now().astimezone())}")
     return 1 if snapshot.error else 0
+
+
+def cmd_ministries(paths: Paths, args: argparse.Namespace) -> int:
+    """牧區清單：列出、新增、改名、清掉第二層密碼（忘記密碼時用，只有在這台電腦上才能做）。"""
+    from church_bot.church import add_ministry, edit_ministry
+    from church_bot.config import load_settings
+    from church_bot.ministries import Church
+
+    church = Church(paths)
+    action = getattr(args, "action", "") or "list"
+    if action == "add":
+        ministry = add_ministry(church.paths, args.name, getattr(args, "note", "") or "")
+        _print(f"✅ 已新增「{ministry.name}」（編號 {ministry.id}）。打開管理網頁就看得到。")
+        return 0
+    if action == "rename":
+        unit = church.require(args.ministry)
+        renamed = edit_ministry(church.paths, unit.id, name=args.name)
+        _print(f"✅ 「{unit.name}」改名成「{renamed.name}」（編號不變：{unit.id}）")
+        return 0
+    if action == "clear-password":
+        unit = church.require(args.ministry)
+        edit_ministry(church.paths, unit.id, password_hash="")
+        _print(f"✅ 已清掉「{unit.name}」的牧區密碼，現在只要網站密碼就進得去。")
+        return 0
+    units = church.units()
+    if not units:
+        _print("還沒有任何牧區。打開管理網頁（2-start）新增第一個，或執行 init。")
+        return 0
+    for unit in units:
+        try:
+            schedule = load_settings(unit.service.paths).schedule.describe()
+        except ChurchBotError as exc:
+            schedule = f"設定檔有錯：{exc.message}"
+        lock = "🔒 " if unit.ministry.has_password else ""
+        groups = sum(1 for t in unit.targets() if t.enabled)
+        _print(f"{unit.id}\t{lock}{unit.name}\t{groups} 個群組會收到提醒\t{schedule}")
+    _print("\nTelegram 可以呼叫：cli.bat send（今天輪到的牧區）、cli.bat send --牧區 名稱（只發那一個）")
+    return 0
 
 
 def _popup_text(report: RunReport, limit: int = 5) -> str:
@@ -288,9 +391,7 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
 
     _print(f"✅ 管理網頁：{url}")
     _print("   要關掉請按 Ctrl + C。")
-    if settings.schedule.enabled:
-        _print(f"   設定裡的「自動發送」開著：這個視窗開著的時候，{settings.schedule.describe()} 會自動發"
-               "（用 Telegram 排程的話可以到設定關掉，重複觸發也不會發兩次）。")
+    _print("   這個視窗開著的時候，「自動發送」開著的牧區會照各自的時間發（Telegram 再呼叫一次也不會發兩次）。")
     if not args.no_browser:
         threading.Timer(1.5, webbrowser.open, args=(url,)).start()
     uvicorn.run(create_app(paths), host=host, port=port, log_level="warning")
@@ -311,15 +412,31 @@ def build_parser() -> argparse.ArgumentParser:
     web.add_argument("--host", help="覆蓋設定檔的 host")
     web.add_argument("--port", type=int, help="覆蓋設定檔的 port")
     web.add_argument("--no-browser", action="store_true", help="不要自動打開瀏覽器")
-    sub.add_parser("check", help="健康檢查：設定、服事表、LINE 是否都正常")
-    sub.add_parser("preview", help="預覽這次會發的訊息（不會真的送出）")
-    send = sub.add_parser("send", help="立刻發送一次")
+    ministry_help = "只處理這個牧區（名稱或編號，例如 青年牧區 或 m1）"
+    check = sub.add_parser("check", help="健康檢查：設定、服事表、LINE 是否都正常（預設每個牧區）")
+    check.add_argument("--牧區", "--ministry", "-m", dest="ministry", default="", help=ministry_help)
+    preview = sub.add_parser("preview", help="預覽這次會發的訊息（不會真的送出；預設每個牧區）")
+    preview.add_argument("--牧區", "--ministry", "-m", dest="ministry", default="", help=ministry_help)
+    send = sub.add_parser("send", help="立刻發送一次（預設：今天輪到的牧區）")
+    send.add_argument("--牧區", "--ministry", "-m", dest="ministry", default="", help=ministry_help)
+    send.add_argument("--all", action="store_true", help="不管今天是不是發送日，每個牧區都發")
     send.add_argument("--force", action="store_true", help="已經送過的也再送一次")
     send.add_argument("--retries", type=int, default=0, help="讀不到服事表、LINE 暫時連不上時，最多再試幾次（預設 0）")
     send.add_argument("--retry-wait", type=float, default=300, help="每次重試前等幾秒（預設 300 = 5 分鐘）")
     send.add_argument("--popup", action="store_true", help="最後還是失敗的話，在這台電腦跳出小視窗通知")
     quota = sub.add_parser("quota", help="查本月 LINE 用量（發送後約 5 分鐘呼叫一次，用量就會是發送後的數字）")
     quota.add_argument("--force", action="store_true", help="不管上次查多久以前，一定重新問 LINE")
+    ministries = sub.add_parser("牧區", aliases=["ministries"], help="牧區清單：列出、新增、改名、清掉牧區密碼")
+    actions = ministries.add_subparsers(dest="action", metavar="動作")
+    actions.add_parser("list", help="列出所有牧區（預設）")
+    add = actions.add_parser("add", help="新增牧區")
+    add.add_argument("name", help="牧區名稱")
+    add.add_argument("--note", default="", help="備註，例如負責人")
+    rename = actions.add_parser("rename", help="改名（編號不變）")
+    rename.add_argument("ministry", help="現在的名稱或編號")
+    rename.add_argument("name", help="新的名稱")
+    clear = actions.add_parser("clear-password", help="清掉牧區密碼（忘記密碼時，在這台電腦上執行）")
+    clear.add_argument("ministry", help="名稱或編號")
     hook = sub.add_parser("set-webhook", help="把臨時網址登記成 LINE 的 Webhook URL，並請 LINE 測試連線")
     hook.add_argument("url", help="https:// 開頭的網址（沒加 /line/webhook 會自動補上）")
     hook.add_argument("--tries", type=int, default=12, help=argparse.SUPPRESS)
@@ -331,7 +448,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
-            "quota": cmd_quota, "set-webhook": cmd_set_webhook, "tunnel": cmd_tunnel}
+            "quota": cmd_quota, "牧區": cmd_ministries, "ministries": cmd_ministries, "set-webhook": cmd_set_webhook,
+            "tunnel": cmd_tunnel}
 
 
 def main(argv: list[str] | None = None) -> int:
