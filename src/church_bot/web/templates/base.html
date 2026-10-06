@@ -65,6 +65,11 @@
       <button type="submit" class="btn btn-sm"
               title="{{ '收起進階頁面：選單只留平常會用到的頁面' if admin_mode else '打開進階頁面：選單多出設定、系統檢查、變更紀錄，畫面多出 LINE ID 這類細節。這不是權限，權限看左邊的身分' }}">{{ "收起進階" if admin_mode else "進階頁面" }}</button>
     </form>
+    {% if is_manager and manager_set %}
+      <form method="post" action="/manager/logout"><button type="submit" class="btn btn-sm btn-ghost" title="回到一般身分（牧區密碼照樣記得）">登出管理員</button></form>
+    {% elif not is_manager %}
+      <a class="btn btn-sm btn-ghost" href="/manager/login?next={{ current_path | urlencode }}" title="伺服器管理員：所有牧區、全教會設定都能管">管理員登入</a>
+    {% endif %}
     <button type="button" class="icon-btn" id="btn-theme" title="切換深色 / 淺色">◐</button>
     {% if has_password %}
       <form method="post" action="/logout"><button type="submit" class="btn btn-sm btn-ghost">登出</button></form>

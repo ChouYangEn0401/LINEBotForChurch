@@ -190,8 +190,12 @@ class Web:
 
     # ------------------------------------------------------------------ 第一層：整個網站的密碼
 
+    def env(self, key: str) -> str:
+        """.env 的值（系統環境變數優先）；每次重新讀檔，網頁上改完不用重開。"""
+        return (os.environ.get(key) or read_env_file(self.paths.env_file).get(key, "")).strip()
+
     def current_password(self) -> str:
-        return os.environ.get("UI_PASSWORD") or read_env_file(self.paths.env_file).get("UI_PASSWORD", "")
+        return self.env("UI_PASSWORD")
 
     @staticmethod
     def session_token(password: str) -> str:
@@ -205,13 +209,16 @@ class Web:
             return
         if hmac.compare_digest(request.cookies.get(SESSION_COOKIE, ""), self.session_token(password)):
             return
+        if self.manager_password() and self.is_manager(request):
+            # 用管理者密碼登入過的人一定進得了網站（例如網站密碼剛換）。還沒設管理者密碼時「本機 = 管理者」
+            # 只是第一次設定用，不能拿來跳過網站密碼
+            return
         raise LoginRequired()
 
     # ------------------------------------------------------------------ 伺服器管理員（server_manager）
 
     def manager_password(self) -> str:
-        return (os.environ.get("SERVER_MANAGER_PASSWORD")
-                or read_env_file(self.paths.env_file).get("SERVER_MANAGER_PASSWORD", ""))
+        return self.env("SERVER_MANAGER_PASSWORD")
 
     def _secret(self) -> bytes:
         """簽 cookie 用的金鑰：第一次用時隨機產生、存在教會共用的資料庫，重開程式（例如按「重新啟動」）也不會登出。"""
@@ -323,5 +330,6 @@ class Web:
                 "admin_mode": request.cookies.get(ADMIN_COOKIE) == "1", "current_path": request.url.path,
                 "today_text": f"{today.isoformat()} · 週{'一二三四五六日'[today.weekday()]}",
                 "m": m, "mb": m.base if m else "", "ministries": self.church.ministries(),
-                "role": self.role(request, m), "is_manager": self.is_manager(request)}
+                "role": self.role(request, m), "is_manager": self.is_manager(request),
+                "manager_set": bool(self.manager_password())}
         return self.templates.TemplateResponse(request, name, {**base, **ctx})

@@ -7,7 +7,7 @@
 
 版面跟 Workflow Helper / pyDMS 同一套：側欄每一項底下是它「現在的狀況」（/m/<編號>/api/nav），
 每一頁開頭是「小標 → 標題 → 一句話」，內容用帶標題列的面板，新增／編輯用右邊的抽屜。
-「切換身分」只是把進階的東西收起來（cookie），不是權限；要限制誰能開網頁請設密碼（兩層，見 web/common.py）。
+「進階頁面」只是把進階的東西收起來（cookie），不是權限；權限是三種身分（訪客、牧區管理員、伺服器管理員，見 web/common.py）。
 JSON API：/api/*、/m/<編號>/api/*（自動產生的文件在 /docs）。LINE Webhook：/line/webhook（選用）。
 """
 
@@ -38,6 +38,7 @@ from church_bot.web.common import (
     ADMIN_COOKIE, HERE, MANAGER_COOKIE, SESSION_COOKIE, LoginRequired, ManagerRequired, MinistryLocked, Web,
     is_local, mask, ministry_cookie, ministry_token, quota_json, redirect, safe_next,
 )
+from church_bot.web.manager import manager_routes
 from church_bot.web.ministry import ministry_routes
 from church_bot.webhook import SignatureError
 
@@ -130,7 +131,7 @@ def create_app(paths: Paths) -> FastAPI:
         if "/api/" in request.url.path:
             return JSONResponse({"detail": "只有伺服器管理員可以"}, status_code=403)
         response = web.page(request, "error.html", None, message="這裡只有伺服器管理員可以進來",
-                            hint="請用伺服器管理員的密碼登入（右上角「伺服器管理員」）。")
+                            hint="請用伺服器管理員的密碼登入（右上角「管理員登入」）。", manager_next=exc.next_url)
         response.status_code = 403
         return response
 
@@ -353,6 +354,7 @@ def create_app(paths: Paths) -> FastAPI:
         return {"ok": True, "events": count}
 
     ministry_ui, ministry_api = ministry_routes(web)
+    app.include_router(manager_routes(web))  # 伺服器管理員登入：不用先過網站密碼（登入成功兩層一起給）
     app.include_router(ui)
     app.include_router(manager)
     app.include_router(api)
