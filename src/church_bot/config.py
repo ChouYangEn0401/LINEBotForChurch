@@ -257,10 +257,6 @@ class Paths:
         return self.config_dir / "teams.csv"
 
     @property
-    def org_file(self) -> Path:
-        return self.config_dir / "org.csv"
-
-    @property
     def env_file(self) -> Path:
         return self.root / ".env"
 

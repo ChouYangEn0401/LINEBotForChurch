@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}所有牧區・服事提醒機器人{% endblock %}
+{% block content %}
+{% set groups = rows | sum(attribute="groups") %}
+{% if rows %}
+  {% set lede = rows | length ~ " 個牧區。點進一個牧區，裡面就是它自己的服事表、同工名單、LINE 群組和設定。" %}
+{% else %}
+  {% set lede = "還沒有任何牧區。先新增一個，例如「青年牧區」，再到裡面接服事表、加 LINE 群組。" %}
+{% endif %}
+{% call ui.page_head(today_text, "⛪ 所有牧區", lede) %}
+  <a class="btn btn-primary" href="/?new=1">＋ 新增牧區</a>
+{% endcall %}
+
+<div class="meta">
+  <span>牧區 <b>{{ rows | length }} 個</b></span>
+  <span class="{{ 'bad' if rows and not groups }}">會收到提醒的群組 <b>{{ groups }} 個</b></span>
+  <span>自動發送 <b>{{ schedule_status }}</b></span>
+  {% if unassigned %}<span class="warn">還沒分配的群組 <b>{{ unassigned | length }} 個</b></span>{% endif %}
+</div>
+
+<div class="metrics">
+  <div class="metric">
+    <span class="k">下次自動發送</span>
+    {% if next_run and next_run != '（沒有排程）' %}
+      <span class="v">{{ next_run }}</span><span class="d">後台開著就會照各牧區自己的時間發</span>
+    {% else %}
+      <span class="v">—</span><span class="d">每個牧區的自動發送都關著（可以手動發，或由 Telegram 呼叫）</span>
+    {% endif %}
+  </div>
+  {% if quota %}
+  <div class="metric" data-quota>
+    <span class="k">本月 LINE 額度 {{ ui.info("整個 LINE 官方帳號共用，所有牧區加起來算。送到群組是按群組人數算則數；免費方案每月 200 則。") }}
+      <button class="btn btn-sm btn-ghost refresh" type="button" data-quota-refresh title="現在向 LINE 重新查一次">⟳</button>
+    </span>
+    <span class="v {{ 'warn' if quota.low }}{{ ' muted' if quota.stale }}" data-quota-value>{{ quota.value }}</span>
+    <span class="d" data-quota-detail>{{ quota.detail }}</span>
+  </div>
+  {% endif %}
+  <a class="metric" href="{{ '#unassigned' if unassigned else '/help#ministries' }}">
+    <span class="k">還沒分配的群組</span>
+    <span class="v {{ 'warn' if unassigned }}">{{ unassigned | length }} 個</span>
+    <span class="d">{{ "機器人被邀進去了，還不知道屬於哪個牧區" if unassigned else "機器人在的每個群組都有牧區了" }}</span>
+  </a>
+</div>
+
+<section class="panel">
+  <div class="panel-head">牧區 <span class="badge">{{ rows | length }}</span><span class="hint">每個牧區的資料各自分開，互相看不到名單</span>
+    <span class="tools"><a class="btn btn-sm" href="/?new=1">＋ 新增牧區</a></span></div>
+  {% if rows %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>牧區</th><th>現在的狀況 {{ ui.info("跟那個牧區主控台「要處理的事」一樣；要讀服事表，所以晚一點才出來。") }}</th>
+        <th>LINE 群組</th><th>自動發送</th><th>上次發送</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="clickable" data-href="/m/{{ r.id }}/">
+          <td><b>{{ "🔒 " if r.locked }}{{ r.name }}</b>{% if r.note %}<div class="sub">{{ r.note }}</div>{% endif %}
+            <div class="id admin-only">{{ r.id }}</div></td>
+          <td>{% if r.locked %}<span class="muted">要輸入牧區密碼才看得到</span>
+              {% else %}<span class="unit-status muted" data-unit-status="{{ r.id }}">讀取中…</span>{% endif %}</td>
+          <td class="nowrap"><b>{{ r.groups }}</b> 個會收到提醒{% if r.groups_total != r.groups %}<div class="sub">共 {{ r.groups_total }} 個</div>{% endif %}
+            <div class="sub">同工 {{ r.members }} 位</div></td>
+          <td>{{ r.schedule }}{% if r.next_run %}<div class="sub">下次 {{ r.next_run }}</div>{% endif %}</td>
+          <td class="nowrap">{% if r.last %}
+              <span class="badge {{ {'error': 'bad', 'warning': 'warn', 'ok': 'ok'}[r.last.status] }}">{{ r.last.status_zh }}</span>
+              <div class="sub">{{ r.last.started_at[5:16] | replace("T", " ") | replace("-", "/") }} · 送出 {{ r.last.sent }} 則</div>
+            {% else %}<span class="muted">還沒有發送過</span>{% endif %}</td>
+          <td class="ops"><a class="btn btn-sm btn-primary" href="/m/{{ r.id }}/">打開 →</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+    {% call ui.empty("還沒有任何牧區", "新增第一個牧區，例如「青年牧區」。之後要幫別的牧區建，回到這一頁再按一次「新增牧區」。") %}
+      <a class="btn btn-primary" href="/?new=1">＋ 新增牧區</a>
+    {% endcall %}
+  {% endif %}
+</section>
+
+{% if unassigned %}
+<section class="panel warn" id="unassigned">
+  <div class="panel-head">還沒分配的群組 <span class="badge warn">{{ unassigned | length }}</span>
+    <span class="hint">機器人被邀進這些群組了，選它屬於哪個牧區；分過去之後在那個牧區的「LINE 群組」打開提醒</span></div>
+  <div class="table-wrap">
+  <table class="data">
+    <thead><tr><th>群組名稱</th><th>最後看到</th><th>分到哪個牧區</th><th></th></tr></thead>
+    <tbody>
+    {% for c in unassigned %}
+      <tr>
+        <td><b>{{ c.name or "（抓不到名稱）" }}</b><div class="id admin-only">{{ c.chat_id }}</div></td>
+        <td class="nowrap">{{ c.last_seen[5:16] | replace("T", " ") | replace("-", "/") }}</td>
+        <td>{% if rows %}
+          <form method="post" action="/unassigned/assign" class="row">
+            <input type="hidden" name="chat_id" value="{{ c.chat_id }}"><input type="hidden" name="name" value="{{ c.name }}">
+            <select name="ministry_id" required style="max-width:200px">
+              <option value="">選牧區…</option>
+              {% for r in rows %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+            </select>
+            <button type="submit" class="btn btn-sm btn-primary">分配</button>
+          </form>
+          {% else %}<span class="muted">先新增牧區</span>{% endif %}</td>
+        <td class="ops"><form method="post" action="/unassigned/forget" data-confirm="從清單拿掉「{{ c.name or c.chat_id }}」？機器人之後在那個群組被叫到時會再出現。">
+          <input type="hidden" name="chat_id" value="{{ c.chat_id }}"><button type="submit" class="btn btn-sm btn-ghost">不需要</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</section>
+{% endif %}
+
+<details class="panel" id="how">
+  <summary>牧區、群組、人是怎麼分的<span class="hint">第一次用先看一下</span></summary>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td>牧區</td><td>例如青年牧區、壯年牧區。每個牧區有自己的服事表、同工名單、小團、LINE 群組、發送時間和訊息，互相不影響。</td></tr>
+      <tr><td>LINE 群組</td><td>一個群組只屬於一個牧區。每個群組可以只收某幾項服事，也可以有自己的提醒訊息。</td></tr>
+      <tr><td>同工</td><td>名單跟著牧區走；同一個人在兩個牧區服事，兩邊各登記一次。</td></tr>
+      <tr><td>整個教會共用</td><td>同一個 LINE 官方帳號（金鑰、每月額度）、這個網站的密碼。在「全教會設定」。</td></tr>
+      <tr><td>新的牧區怎麼開始</td><td>新增牧區 → 點進去 → 照主控台的運作流程：接服事表、建同工名單、加 LINE 群組、打開自動發送。</td></tr>
+    </table>
+  </div>
+</details>
+
+{% if show_form %}
+<aside class="drawer" data-drawer data-close="/" aria-label="新增牧區">
+  <form method="post" action="/ministries/add">
+    <div class="drawer-head">
+      <h3>新增牧區</h3>
+      <a class="icon-btn" href="/" title="關閉（Esc）" aria-label="關閉">✕</a>
+    </div>
+    <div class="drawer-body">
+      <div class="ffield">
+        <label for="name"><span class="req">*</span>牧區名稱</label>
+        <input type="text" id="name" name="name" required maxlength="30" placeholder="青年牧區" autofocus>
+        <span class="help">之後隨時可以改名。</span>
+      </div>
+      <div class="ffield">
+        <label for="note">備註</label>
+        <input type="text" id="note" name="note" placeholder="例如負責人：王小明、林美華">
+        <span class="help">留空 = 首頁不顯示。</span>
+      </div>
+      <p class="note">建好之後是一個空的牧區：服事表還沒接、沒有群組，自動發送先關著，不會亂發。</p>
+    </div>
+    <div class="drawer-foot">
+      <button type="submit" class="btn btn-primary">建立並打開</button>
+      <a class="btn btn-ghost" href="/">取消</a>
+    </div>
+  </form>
+</aside>
+{% endif %}
+{% endblock %}

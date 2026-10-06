@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}LINE 帳號・服事提醒機器人{% endblock %}
 {% block content %}
 {% set pending = accounts | selectattr("needs_review") | list %}
@@ -12,7 +12,7 @@
     <span class="tt"><b>名字登記</b>
       <span class="sub">{% if collect_names %}大家現在可以在群組或私訊機器人打 <span class="kbd">/我的名字 王小明</span>。收集完記得關掉，避免有人亂填。
         {% else %}打開後，大家打 <span class="kbd">/我的名字 王小明</span> 就會排在下面等你確認。{% endif %}</span></span>
-    <form method="post" action="/members/collect">
+    <form method="post" action="{{ mb }}/members/collect">
       <input type="hidden" name="enabled" value="{{ '0' if collect_names else '1' }}">
       <button type="submit" class="btn {{ '' if collect_names else 'btn-primary' }}">{{ "關閉登記" if collect_names else "開放登記" }}</button>
     </form>
@@ -40,10 +40,10 @@
             {% for nick in a.pending_nicknames %}
               <div class="chips">
                 <span class="chip">暱稱 {{ nick }}</span>
-                <form method="post" action="/members/accounts/nickname">
+                <form method="post" action="{{ mb }}/members/accounts/nickname">
                   <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
                   <button type="submit" class="btn btn-sm btn-primary">加成其他寫法</button></form>
-                <form method="post" action="/members/accounts/nickname/drop">
+                <form method="post" action="{{ mb }}/members/accounts/nickname/drop">
                   <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="nickname" value="{{ nick }}">
                   <button type="submit" class="btn btn-sm btn-ghost">不要</button></form>
               </div>
@@ -55,31 +55,31 @@
         <td class="ops">
           {% if a.action == "linked" %}
             <span class="badge ok">已對應</span>
-            <form method="post" action="/members/admin">
-              <input type="hidden" name="name" value="{{ a.member.name }}"><input type="hidden" name="next" value="/members/accounts">
+            <form method="post" action="{{ mb }}/members/admin">
+              <input type="hidden" name="name" value="{{ a.member.name }}"><input type="hidden" name="next" value="{{ mb }}/members/accounts">
               <input type="hidden" name="enabled" value="{{ '0' if a.member.admin else '1' }}">
               <button type="submit" class="btn btn-sm {{ 'btn-ghost' if a.member.admin }}"
                       title="{{ '取消後就不能用只有管理員能用的 LINE 指令' if a.member.admin else '勾成管理員：可以用 /別周測試、拿得到 /設定 的驗證碼、出問題會收到通知' }}">
                 {{ "取消管理員" if a.member.admin else "設為管理員" }}</button></form>
           {% elif a.action == "rename" %}
-            <form method="post" action="/members/accounts/rename">
+            <form method="post" action="{{ mb }}/members/accounts/rename">
               <input type="hidden" name="user_id" value="{{ a.user_id }}">
               <button type="submit" class="btn btn-sm btn-primary">改名成「{{ a.real_name }}」</button></form>
           {% elif a.action == "link" %}
-            <form method="post" action="/members/accounts/link">
+            <form method="post" action="{{ mb }}/members/accounts/link">
               <input type="hidden" name="user_id" value="{{ a.user_id }}"><input type="hidden" name="member_name" value="{{ a.match.name }}">
               <button type="submit" class="btn btn-sm btn-primary"
                 {% if a.matched_by == "display_name" %}title="只是 LINE 名稱一樣，確認是同一個人再按"{% endif %}>對應到「{{ a.match.name }}」</button></form>
           {% elif a.action == "conflict" %}
-            <a class="btn btn-sm" href="/members?edit={{ a.match.name | urlencode }}"
+            <a class="btn btn-sm" href="{{ mb }}/members?edit={{ a.match.name | urlencode }}"
                title="「{{ a.match.name }}」已經對應到另一個 LINE 帳號。同一個人換了帳號的話，到名單把 ID 換掉">要確認</a>
           {% else %}
-            <form method="post" action="/members/accounts/add">
+            <form method="post" action="{{ mb }}/members/accounts/add">
               <input type="hidden" name="user_id" value="{{ a.user_id }}">
               <button type="submit" class="btn btn-sm {{ 'btn-primary' if a.real_name }}">加入「{{ a.proposed_name or "新朋友" }}」</button></form>
           {% endif %}
           {% if a.action != "linked" or a.real_name %}
-            <form method="post" action="/members/accounts/ignore">
+            <form method="post" action="{{ mb }}/members/accounts/ignore">
               <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm btn-ghost">忽略</button></form>
           {% endif %}
         </td>
@@ -105,9 +105,9 @@
       <td>{{ a.display_name or "（抓不到名稱）" }}<div class="id copy admin-only">{{ a.user_id }}</div></td>
       <td><span class="sub">{{ a.chat_names or "—" }}</span></td>
       <td class="ops">
-        <form method="post" action="/members/accounts/unignore">
+        <form method="post" action="{{ mb }}/members/accounts/unignore">
           <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm">取消忽略</button></form>
-        <form method="post" action="/members/accounts/forget" data-confirm="確定刪除這個帳號的紀錄嗎？">
+        <form method="post" action="{{ mb }}/members/accounts/forget" data-confirm="確定刪除這個帳號的紀錄嗎？">
           <input type="hidden" name="user_id" value="{{ a.user_id }}"><button type="submit" class="btn btn-sm btn-danger">刪除紀錄</button></form>
       </td>
     </tr>

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}{{ locked.name }}・服事提醒機器人{% endblock %}
+{% block content %}
+{{ ui.page_head("牧區密碼", "🔒 " ~ locked.name, "這個牧區另外設了密碼。輸入一次，這個瀏覽器 30 天內都會記住。") }}
+{% if error %}<div class="banner error"><b>✕</b><span>{{ error }}</span></div>{% endif %}
+<section class="panel" style="max-width:520px">
+  <form method="post" action="/m/{{ locked.id }}/unlock" class="panel-body stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="ffield">
+      <label for="password">「{{ locked.name }}」的牧區密碼</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+      <span class="help">不知道的話請問這個牧區的負責人{{ "（" ~ locked.note ~ "）" if locked.note }}。</span>
+    </div>
+    <div class="row"><button type="submit" class="btn btn-primary">進入</button><a class="btn btn-ghost" href="/">回所有牧區</a></div>
+  </form>
+  <div class="panel-foot">
+    {% if local %}
+      <form method="post" action="/m/{{ locked.id }}/forgot-password" class="row" data-confirm="清掉「{{ locked.name }}」的牧區密碼？清掉之後只要網站密碼就進得去。">
+        <span class="note">你在執行機器人的這台電腦上，忘記密碼可以直接清掉。</span>
+        <button type="submit" class="btn btn-sm btn-danger">忘記了，清掉密碼</button>
+      </form>
+    {% else %}
+      忘記密碼的話，只能在執行機器人的那台電腦上清掉（那台電腦打開管理網頁，或執行 <code>cli.bat 牧區 clear-password {{ locked.id }}</code>）。
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

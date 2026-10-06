@@ -14,31 +14,46 @@
     } catch (_) { document.documentElement.dataset.theme = "light"; }
   </script>
 </head>
-<body class="{{ 'admin' if admin_mode }}">
-{#- 側欄每一項的小字一開始是「這一頁做什麼」，載入後換成「現在的狀況」（/api/nav，見 app.js）。
+<body class="{{ 'admin' if admin_mode }}" data-nav-api="{{ (mb ~ '/api/nav') if m else '' }}">
+{#- 兩種側欄：
+    * 教會這一層（m 是空的）：所有牧區、說明；管理員多一個「全教會設定」。
+    * 某個牧區裡（m 有值）：上面是「← 所有牧區」和牧區名稱，下面就是原本那一整套，網址前面多了 /m/<編號>（mb）。
+    每一項的小字一開始是「這一頁做什麼」，載入後換成「現在的狀況」（mb/api/nav，見 app.js）。
     管理員才需要的頁面只在切到管理員身分時出現。 -#}
+{% if m %}
 {% set nav_groups = [
   ("", [
-    ("/", "🎯", "主控台", "現在的狀況、要處理的事", "index", ["index"]),
+    (mb ~ "/", "🎯", "主控台", "現在的狀況、要處理的事", "index", ["index"]),
   ]),
   ("每週提醒", [
-    ("/roster", "📄", "服事表", "Google Sheet 的內容", "roster", ["roster"]),
-    ("/members", "🙋", "同工名單", "名字、LINE 帳號、小團", "members", ["members", "members_accounts", "members_teams"]),
-    ("/targets", "👥", "LINE 群組", "提醒送到哪些群組", "targets", ["targets"]),
+    (mb ~ "/roster", "📄", "服事表", "Google Sheet 的內容", "roster", ["roster"]),
+    (mb ~ "/members", "🙋", "同工名單", "名字、LINE 帳號、小團", "members", ["members", "members_accounts", "members_teams"]),
+    (mb ~ "/targets", "👥", "LINE 群組", "提醒送到哪些群組、各群組的訊息", "targets", ["targets"]),
   ]),
   ("紀錄", [
-    ("/runs", "📜", "發送紀錄", "以前發了什麼", "runs", ["runs", "run_detail"]),
+    (mb ~ "/runs", "📜", "發送紀錄", "以前發了什麼", "runs", ["runs", "run_detail"]),
+    (mb ~ "/help", "❓", "說明", "怎麼用、常見狀況", "help", ["help"]),
+  ]),
+] %}
+{% set admin_group = ("管理員", [
+    (mb ~ "/settings", "⚙", "設定", "發送時間、訊息、這個牧區", "settings", ["settings"]),
+    (mb ~ "/check", "🩺", "系統檢查", "一次檢查全部設定", "check", ["check"]),
+]) %}
+{% else %}
+{% set nav_groups = [
+  ("", [
+    ("/", "⛪", "所有牧區", "每個牧區的狀況、新增牧區", "church_home", ["church_home"]),
     ("/help", "❓", "說明", "怎麼用、常見狀況", "help", ["help"]),
   ]),
 ] %}
 {% set admin_group = ("管理員", [
-    ("/settings", "⚙", "設定", "發送時間、訊息、金鑰", "settings", ["settings"]),
-    ("/check", "🩺", "系統檢查", "一次檢查全部設定", "check", ["check"]),
-    ("/lab/org", "🧪", "大教會（實驗）", "牧區 → 小組的估算", "lab_org", ["lab_org"]),
+    ("/settings", "⚙", "全教會設定", "LINE 金鑰、網站密碼", "church_settings", ["church_settings"]),
 ]) %}
+{% endif %}
 <header class="topbar">
   <button type="button" class="icon-btn menu-toggle" aria-label="選單" aria-controls="sidebar">☰</button>
-  <a class="brand" href="/" title="服事提醒機器人">⛪ <span>服事提醒機器人</span></a>
+  <a class="brand" href="/" title="回到所有牧區">⛪ <span>服事提醒機器人</span></a>
+  {% if m %}<span class="crumb">/</span><a class="brand-sub" href="{{ mb }}/" title="這個牧區的主控台">{{ m.name }}</a>{% endif %}
   <span class="top-status" title="每週提醒什麼時候發">{{ schedule_text }}{% if next_run and next_run != '（沒有排程）' %} · 下次 {{ next_run }}{% endif %}</span>
   <div class="top-actions">
     <span class="role-badge {{ 'admin' if admin_mode }}">{{ "管理員" if admin_mode else "一般" }}</span>
@@ -57,6 +72,10 @@
 <main class="layout">
   <aside id="sidebar" class="sidebar">
     <nav class="side" aria-label="主選單">
+      {% if m %}
+      <a class="side-back" href="/">← 所有牧區</a>
+      <div class="side-unit"><b>{{ m.name }}</b>{% if m.unit.ministry.note %}<span>{{ m.unit.ministry.note }}</span>{% endif %}</div>
+      {% endif %}
       {% for title, items in nav_groups + ([admin_group] if admin_mode else []) %}
         {% if title %}<div class="group-title">{{ title }}</div>{% endif %}
         {% for href, icon, label, hint, key, pages in items %}
@@ -67,6 +86,15 @@
           </a>
         {% endfor %}
       {% endfor %}
+      {% if not m and ministries %}
+        <div class="group-title">牧區</div>
+        {% for x in ministries %}
+          <a href="/m/{{ x.id }}/" class="side-item" data-unit="{{ x.id }}">
+            <span class="top"><span class="ic" aria-hidden="true">{{ "🔒" if x.has_password else "📁" }}</span><span class="nm">{{ x.name }}</span><span class="count" data-count></span></span>
+            <span class="sub" data-sub>{{ x.note or "點進去看這個牧區" }}</span>
+          </a>
+        {% endfor %}
+      {% endif %}
       <div class="side-foot">v{{ version }}{% if admin_mode %} · <a href="/docs" target="_blank" rel="noopener">API</a>{% endif %}</div>
     </nav>
   </aside>
@@ -78,11 +106,13 @@
     {% if pending_change %}
       <div class="banner warn">
         <b>等驗證</b>
-        <span>{{ pending_change.requester or "（沒有名稱）" }}（{{ pending_change.chat_label }}）要把「{{ pending_change.option.key }}」改成「{{ pending_change.value_text }}」・還有 {{ pending_minutes }} 分鐘</span>
+        <span>{{ pending_change.requester or "（沒有名稱）" }}（{{ pending_change.ministry_name ~ "・" if pending_change.ministry_name }}{{ pending_change.chat_label }}）要把「{{ pending_change.option.key }}」改成「{{ pending_change.value_text }}」・還有 {{ pending_minutes }} 分鐘</span>
         <span class="spacer"></span>
-        <form method="post" action="/remote-config/approve" data-confirm="確定核准：{{ pending_change.option.key }} → {{ pending_change.value_text }}？">
+        <form method="post" action="/remote-config/approve" data-confirm="確定核准：{{ pending_change.ministry_name }} {{ pending_change.option.key }} → {{ pending_change.value_text }}？">
+          <input type="hidden" name="next" value="{{ current_path }}">
           <button type="submit" class="btn btn-sm btn-primary">核准</button></form>
-        <form method="post" action="/remote-config/reject"><button type="submit" class="btn btn-sm btn-danger">拒絕</button></form>
+        <form method="post" action="/remote-config/reject"><input type="hidden" name="next" value="{{ current_path }}">
+          <button type="submit" class="btn btn-sm btn-danger">拒絕</button></form>
       </div>
     {% endif %}
     <div class="page {% block page_class %}{% endblock %}">

@@ -8,7 +8,7 @@ from church_bot.core.renderer import Renderer
 from church_bot.errors import ConfigError
 from church_bot.models import Target
 from church_bot.tables import TargetTable
-from tests.conftest import gid
+from tests.conftest import CHURCH, gid
 from tests.test_planner import D13, codes, day, plan
 
 SETTINGS = MessageSettings(title="本週服事提醒", footer="謝謝大家 🙏")
@@ -68,7 +68,7 @@ def test_web_saves_group_message_and_shows_preview(client, paths):
     assert r.status_code == 303 and "edit=" in r.headers["location"]
     saved = next(t for t in TargetTable(paths.targets_file).load().items if t.name == "敬拜團")
     assert (saved.title, saved.footer, saved.template) == ("敬拜團這週誰上場", "記得練團", "")
-    page = client.get(r.headers["location"]).text
+    page = client.get(CHURCH + r.headers["location"]).text
     assert "這個群組現在會收到" in page and "敬拜團這週誰上場" in page
 
 

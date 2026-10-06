@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}發送紀錄・服事提醒機器人{% endblock %}
 {% block content %}
 {{ ui.page_head("紀錄", "📜 發送紀錄", "每一次發送的結果，最新的在上面。點一列看當時送出的訊息。") }}
@@ -12,8 +12,8 @@
       <th>略過 {{ ui.info("之前已經送過、內容也沒變，就不重複送。") }}</th><th>問題</th></tr></thead>
     <tbody>
     {% for r in runs %}
-      <tr class="clickable {{ 'bad' if r.status == 'error' }}" data-href="/runs/{{ r.id }}">
-        <td class="nowrap mono"><a href="/runs/{{ r.id }}">{{ r.started_at[:16] | replace("T", " ") }}</a></td>
+      <tr class="clickable {{ 'bad' if r.status == 'error' }}" data-href="{{ mb }}/runs/{{ r.id }}">
+        <td class="nowrap mono"><a href="{{ mb }}/runs/{{ r.id }}">{{ r.started_at[:16] | replace("T", " ") }}</a></td>
         <td>{{ r.trigger_zh }}</td>
         <td><span class="badge {{ r.status }}">{{ r.status_zh }}</span></td>
         <td class="mono">{{ r.sent }}</td>

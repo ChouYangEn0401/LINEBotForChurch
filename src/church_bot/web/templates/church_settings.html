@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}全教會設定・服事提醒機器人{% endblock %}
+{% block content %}
+{{ ui.page_head("管理員", "⚙ 全教會設定", "整個教會共用的東西：LINE 官方帳號的金鑰、這個網站的密碼。發送時間、訊息這些在各牧區自己的「設定」裡。") }}
+
+{% macro card_head(name, sub, count) -%}
+<button type="button" class="fcard-h" data-fcard-toggle>
+  <span class="fcard-nm">{{ name }}</span>
+  <span class="fcard-sub">{{ sub }}</span>
+  <span class="fcard-count">{{ count }} 項</span>
+  <span class="fcard-chev">▾</span>
+</button>
+{%- endmacro %}
+
+<section class="fcard" id="secrets" data-fcard>
+  {{ card_head("金鑰與密碼", "LINE 的金鑰和這個網站的密碼（第一層）。已經設定過的留空就不會變。", 3) }}
+  <form method="post" action="/settings/secrets">
+    <div class="fcard-body">
+      <div class="ffield">
+        <label for="token">Channel access token</label>
+        <input type="password" id="token" name="token" autocomplete="off" placeholder="{{ token_status or '還沒設定' }}">
+        <span class="help">沒設定就送不出任何訊息。LINE Developers → Messaging API 分頁最下面 → Issue。所有牧區共用這一組。</span>
+      </div>
+      <div class="ffield">
+        <label for="secret">Channel secret</label>
+        <input type="password" id="secret" name="secret" autocomplete="off" placeholder="{{ secret_status or '還沒設定' }}">
+        <span class="help">沒設定 = LINE 聊天室指令沒有反應；每週提醒不受影響。</span>
+      </div>
+      <div class="ffield">
+        <label for="password">網站密碼</label>
+        <input type="password" id="password" name="password" autocomplete="new-password" placeholder="{{ password_status or '沒有密碼' }}">
+        <span class="help">沒有密碼 = 只有這台電腦打得開。改了以後所有人都要重新登入。牧區還可以各自再設一層（在牧區的「設定 → 這個牧區」）。</span>
+      </div>
+      <div class="ffield ffield-chk">
+        <label><input type="checkbox" name="clear_password">
+          <span><b>取消網站密碼</b><span class="help"><br>勾了按儲存，就不用再登入。</span></span></label>
+      </div>
+      <div class="ffield" style="--span:12">
+        <div class="row"><button type="submit" class="btn btn-primary">儲存金鑰</button>
+          <span class="note">只存在這台電腦的 <code>.env</code>，不會上傳。</span></div>
+      </div>
+    </div>
+  </form>
+</section>
+
+<section class="fcard" id="ministry-passwords" data-fcard>
+  {{ card_head("牧區密碼", "哪些牧區另外設了第二層密碼。密碼本身由各牧區自己在裡面設。", rows | length) }}
+  <div class="fcard-body">
+    <div class="table-wrap" style="grid-column: 1 / -1">
+      <table class="data">
+        <thead><tr><th>牧區</th><th>牧區密碼</th><th></th></tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr>
+            <td><b>{{ r.name }}</b><div class="id admin-only">{{ r.id }}</div></td>
+            <td>{% if r.locked %}<span class="badge">🔒 有設</span>{% else %}<span class="muted">沒有設</span>{% endif %}</td>
+            <td class="ops">{% if r.locked %}
+              {% if local %}
+              <form method="post" action="/m/{{ r.id }}/forgot-password" data-confirm="清掉「{{ r.name }}」的牧區密碼？清掉之後只要網站密碼就進得去。">
+                <button type="submit" class="btn btn-sm btn-danger">忘記了，清掉密碼</button></form>
+              {% else %}<span class="note">忘記密碼只能在執行機器人的那台電腦上清</span>{% endif %}
+            {% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="fcard closed" id="web" data-fcard>
+  {{ card_head("網站位址", "管理網頁開在哪個位址。很少需要改。", 2) }}
+  <div class="fcard-body">
+    <div class="ffield" style="--span:6">
+      <span class="ffield-lab">位址</span>
+      <code>{{ web_settings.host if web_settings else "127.0.0.1" }}:{{ web_settings.port if web_settings else 8787 }}</code>
+      <span class="help">127.0.0.1 = 只有這台電腦打得開；要讓區網其他電腦也能開，改 <code>config/church.yaml</code> 的 web.host，而且一定要設網站密碼。改完要重開 2-start。</span>
+    </div>
+  </div>
+</section>
+{% endblock %}

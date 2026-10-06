@@ -23,7 +23,7 @@
 {% for i in list %}
   {% set sev = i.severity.value if i.severity.value is defined else i.severity %}
   {% set href, label = issue_link(i.code) if link else ("", "") %}
-  <{{ 'a href="' ~ href ~ '"' if href else 'div' }} class="item">
+  <{{ 'a href="' ~ mb ~ href ~ '"' if href else 'div' }} class="item">
     <span class="badge {{ {'error': 'bad', 'warning': 'warn'}.get(sev, '') }}">{{ {"error": "要修", "warning": "注意", "info": "參考"}[sev] }}</span>
     <span class="tt">
       <span class="nm">{{ i.message }}</span>
@@ -37,9 +37,9 @@
 {#- 同工名單底下三個分頁 -#}
 {% macro members_seg(active, members=none, pending=0, teams=none) -%}
 <nav class="seg" aria-label="同工名單的分頁">
-  <a href="/members" class="{{ 'on' if active == 'list' }}">名單{% if members is not none %} <span class="n">{{ members }}</span>{% endif %}</a>
-  <a href="/members/accounts" class="{{ 'on' if active == 'accounts' }}">LINE 帳號{% if pending %} <span class="n warn">{{ pending }} 待確認</span>{% endif %}</a>
-  <a href="/members/teams" class="{{ 'on' if active == 'teams' }}">小團{% if teams is not none %} <span class="n">{{ teams }}</span>{% endif %}</a>
+  <a href="{{ mb }}/members" class="{{ 'on' if active == 'list' }}">名單{% if members is not none %} <span class="n">{{ members }}</span>{% endif %}</a>
+  <a href="{{ mb }}/members/accounts" class="{{ 'on' if active == 'accounts' }}">LINE 帳號{% if pending %} <span class="n warn">{{ pending }} 待確認</span>{% endif %}</a>
+  <a href="{{ mb }}/members/teams" class="{{ 'on' if active == 'teams' }}">小團{% if teams is not none %} <span class="n">{{ teams }}</span>{% endif %}</a>
 </nav>
 {%- endmacro %}
 

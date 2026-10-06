@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}系統檢查・服事提醒機器人{% endblock %}
 {% block content %}
 {% set bad = items | selectattr("ok", "equalto", false) | list %}
 {% call ui.page_head("管理員", "🩺 系統檢查", "設定、群組、名單、服事表、LINE 連線與額度一次檢查。" ~ ("有 " ~ (bad | length) ~ " 項沒過。" if bad else "全部通過。")) %}
-  <a class="btn btn-primary" href="/check">重新檢查</a>
+  <a class="btn btn-primary" href="{{ mb }}/check">重新檢查</a>
 {% endcall %}
 <div class="table-wrap">
   <table class="data">

@@ -1,5 +1,5 @@
 // 「服事表」頁：把 Google Sheet（或 CSV）的格子原封不動畫成像試算表的表格。
-// 資料來自 /api/roster/sheet，順便標出：表頭那一列、日期格、這次會發的那幾列（或欄）、名單找不到的名字。
+// 資料來自 /m/<編號>/api/roster/sheet，順便標出：表頭那一列、日期格、這次會發的那幾列（或欄）、名單找不到的名字。
 
 (async () => {
   const root = document.getElementById("sheet");
@@ -102,7 +102,8 @@
   }
 
   try {
-    const response = await fetch("/api/roster/sheet", { credentials: "same-origin" });
+    const base = document.body.dataset.navApi.replace(/\/nav$/, "");  // /m/<編號>/api
+    const response = await fetch(base + "/roster/sheet", { credentials: "same-origin" });
     const data = await response.json();
     if (!data.ok) {
       status.classList.add("error");

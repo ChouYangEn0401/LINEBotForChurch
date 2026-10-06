@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}LINE 群組・服事提醒機器人{% endblock %}
 {% block content %}
 {% set t = editing %}
 {% set active = targets | selectattr("enabled") | selectattr("line_id") | list %}
 {% call ui.page_head("每週提醒", "👥 LINE 群組", "每個「會收到提醒」的群組各收一則。可以同時發給很多群組，每個群組只收自己要的服事。") %}
-  <a class="btn btn-primary" href="/targets?new=1">＋ 新增群組</a>
+  <a class="btn btn-primary" href="{{ mb }}/targets?new=1">＋ 新增群組</a>
 {% endcall %}
 
 <div class="meta">
@@ -33,7 +33,7 @@
       <tr>
         <td><b>{{ c.name or "（抓不到名稱）" }}</b><div class="id admin-only">{{ c.chat_id }}</div></td>
         <td class="nowrap">{{ c.last_seen[5:16] | replace("T", " ") | replace("-", "/") }}</td>
-        <td class="ops"><form method="post" action="/targets/add-chat">
+        <td class="ops"><form method="post" action="{{ mb }}/targets/add-chat">
           <input type="hidden" name="chat_id" value="{{ c.chat_id }}"><input type="hidden" name="name" value="{{ c.name }}">
           <button type="submit" class="btn btn-sm btn-primary">加入</button></form></td>
       </tr>
@@ -46,7 +46,7 @@
 
 <section class="panel">
   <div class="panel-head">群組 <span class="badge">{{ targets | length }}</span>
-    <span class="tools"><a class="btn btn-sm btn-ghost admin-only" href="/download/targets.csv">下載 CSV</a></span></div>
+    <span class="tools"><a class="btn btn-sm btn-ghost admin-only" href="{{ mb }}/download/targets.csv">下載 CSV</a></span></div>
   {% if targets %}
   <div class="table-wrap">
     <table class="data">
@@ -68,14 +68,14 @@
               {% elif t.has_own_message %}<span class="badge violet">自己的{{ "標題" if t.title }}{{ "、" if t.title and t.footer }}{{ "結尾" if t.footer }}</span>
               {% else %}<span class="muted">牧區設定</span>{% endif %}</td>
           <td class="ops">
-            <a class="btn btn-sm" href="/targets?edit={{ t.name | urlencode }}">編輯</a>
+            <a class="btn btn-sm" href="{{ mb }}/targets?edit={{ t.name | urlencode }}">編輯</a>
             {% if t.line_id %}
-            <form method="post" action="/targets/test"
+            <form method="post" action="{{ mb }}/targets/test"
                   data-confirm="會送一則測試訊息到「{{ t.name }}」，按群組人數扣 LINE 額度。確定嗎？">
               <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="btn btn-sm">送測試訊息</button>
             </form>
             {% endif %}
-            <form method="post" action="/targets/delete" data-confirm="確定刪除「{{ t.name }}」嗎？">
+            <form method="post" action="{{ mb }}/targets/delete" data-confirm="確定刪除「{{ t.name }}」嗎？">
               <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="btn btn-sm btn-danger">刪除</button>
             </form>
           </td>
@@ -86,7 +86,7 @@
   </div>
   {% else %}
     {% call ui.empty("還沒有任何群組", "把機器人邀進 LINE 群組，再把群組加進來。") %}
-      <a class="btn btn-primary" href="/targets?new=1">＋ 新增群組</a>
+      <a class="btn btn-primary" href="{{ mb }}/targets?new=1">＋ 新增群組</a>
     {% endcall %}
   {% endif %}
 </section>
@@ -107,11 +107,11 @@
 </details>
 
 {% if show_form %}
-<aside class="drawer" data-drawer data-close="/targets" aria-label="{{ '編輯群組' if t else '新增群組' }}">
-  <form method="post" action="/targets/save">
+<aside class="drawer" data-drawer data-close="{{ mb }}/targets" aria-label="{{ '編輯群組' if t else '新增群組' }}">
+  <form method="post" action="{{ mb }}/targets/save">
     <div class="drawer-head">
       <h3>{{ ("編輯「" ~ t.name ~ "」") if t else "新增群組" }}</h3>
-      <a class="icon-btn" href="/targets" title="關閉（Esc）" aria-label="關閉">✕</a>
+      <a class="icon-btn" href="{{ mb }}/targets" title="關閉（Esc）" aria-label="關閉">✕</a>
     </div>
     <div class="drawer-body">
       <input type="hidden" name="original_name" value="{{ original_name }}">
@@ -185,7 +185,7 @@
     </div>
     <div class="drawer-foot">
       <button type="submit" class="btn btn-primary">儲存</button>
-      <a class="btn btn-ghost" href="/targets">取消</a>
+      <a class="btn btn-ghost" href="{{ mb }}/targets">取消</a>
     </div>
   </form>
 </aside>

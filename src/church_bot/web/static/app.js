@@ -47,10 +47,12 @@ window.addEventListener("pageshow", () => {
 })();
 
 // ---------- 側欄每一項「現在的狀況」 ----------
-// 先用上次記下來的（換頁時不會閃），再去問 /api/nav 拿最新的。
+// 牧區裡面才有（body 的 data-nav-api = /m/<編號>/api/nav）。先用上次記下來的（換頁時不會閃），再去問最新的。
 (() => {
+  const api = document.body.dataset.navApi;
   const items = Array.from(document.querySelectorAll("[data-nav]"));
-  if (!items.length) return;
+  if (!api || !items.length) return;
+  const cacheKey = "bot.nav:" + api;
   const paint = (status) => {
     items.forEach((item) => {
       const info = status && status[item.dataset.nav];
@@ -68,16 +70,33 @@ window.addEventListener("pageshow", () => {
       }
     });
   };
-  try { paint(JSON.parse(sessionStorage.getItem("bot.nav") || "null")); } catch (_) { /* 壞掉的暫存就不用 */ }
-  fetch("/api/nav", { credentials: "same-origin" })
+  try { paint(JSON.parse(sessionStorage.getItem(cacheKey) || "null")); } catch (_) { /* 壞掉的暫存就不用 */ }
+  fetch(api, { credentials: "same-origin" })
     .then((response) => (response.ok ? response.json() : null))
     .then((status) => {
       if (!status) return;
       paint(status);
-      try { sessionStorage.setItem("bot.nav", JSON.stringify(status)); } catch (_) { /* 同上 */ }
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(status)); } catch (_) { /* 同上 */ }
     })
     .catch(() => { /* 問不到就留著原本那行說明 */ });
 })();
+
+// ---------- 首頁：每個牧區「現在的狀況」 ----------
+// 要讀那個牧區的服事表才知道，所以首頁先畫出來，再一個一個去問 /m/<編號>/api/nav（跟牧區側欄同一支）。
+document.querySelectorAll("[data-unit-status]").forEach((cell) => {
+  const id = cell.dataset.unitStatus;
+  fetch("/m/" + encodeURIComponent(id) + "/api/nav", { credentials: "same-origin" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((status) => {
+      const info = status && status.index;
+      if (!info) { cell.textContent = "看不到（可能要輸入牧區密碼）"; return; }
+      cell.textContent = info.sub;
+      cell.className = "unit-status " + (info.tone === "bad" ? "bad" : info.tone === "warn" ? "warn" : "good");
+      const count = document.querySelector('[data-unit="' + id + '"] [data-count]');
+      if (count && info.count) { count.textContent = String(info.count); count.className = "count " + info.tone; }
+    })
+    .catch(() => { cell.textContent = "讀不到"; });
+});
 
 // ---------- 主控台「本月 LINE 額度」：頁面畫出來之後去問最新的，⟳ 可以立刻重問 ----------
 // 頁面上的數字是存下來的快照（所以一定馬上有東西看），這裡再問 /api/quota 換成最新的。

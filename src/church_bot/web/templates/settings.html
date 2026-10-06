@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}設定・服事提醒機器人{% endblock %}
 {% block content %}
-{% call ui.page_head("管理員", "⚙ 設定", "一張卡片決定一件事。常改的開著，很少改的收起來（點標題展開）；改完按最下面的「儲存設定」。") %}
-  <a class="btn" href="/check">系統檢查</a>
+{% call ui.page_head(m.name ~ " · 管理員", "⚙ 設定", "這個牧區自己的設定，一張卡片決定一件事。常改的開著，很少改的收起來（點標題展開）；改完按「儲存設定」。") %}
+  <a class="btn" href="{{ mb }}/check">系統檢查</a>
 {% endcall %}
 
 {% if broken %}
@@ -26,13 +26,13 @@
 </button>
 {%- endmacro %}
 
-<form method="post" action="/settings" id="settings-form">
+<form method="post" action="{{ mb }}/settings" id="settings-form">
   <section class="fcard" id="schedule" data-fcard>
     {{ card_head("什麼時候發", "這一段決定每週哪一天、幾點發提醒。", 5) }}
     <div class="fcard-body">
       <div class="ffield ffield-chk" style="--span:12">
         <label><input type="checkbox" id="schedule_enabled" name="schedule_enabled" {{ "checked" if f.schedule_enabled }}>
-          <span><b>由這台程式自己定時發</b><span class="help"><br>不勾 = 由 Telegram 機器人排程呼叫 cli.bat send。勾了就要讓「2-start」一直開著；兩邊都開也不會發兩次。目前：{{ schedule_status }}</span></span></label>
+          <span><b>自動發送</b><span class="help"><br>勾了 = 後台（2-start 或免費模式）開著的時候，照下面的時間自動發。不勾 = 只有按「立刻發送」、有人打 /提醒，或 Telegram 呼叫 <code>cli.bat send --牧區 {{ m.name }}</code> 才會發。兩邊都觸發也不會發兩次。目前：{{ schedule_status }}</span></span></label>
       </div>
       <div class="ffield" style="--span:4">
         <label for="day_of_week">星期幾</label>
@@ -204,45 +204,55 @@
 
   <div class="factions">
     <button type="submit" class="btn btn-primary">儲存設定</button>
-    <span class="note">上面六張卡片一起存。<span class="admin-only">存在 <code>config/settings.yaml</code>。</span></span>
+    <span class="note">上面六張卡片一起存，只影響「{{ m.name }}」。<span class="admin-only">存在 <code>config/ministries/{{ m.id }}/settings.yaml</code>。</span></span>
   </div>
 </form>
 
-<section class="fcard" id="secrets" data-fcard>
-  {{ card_head("金鑰與密碼", "LINE 的金鑰和這個網頁的密碼。已經設定過的留空就不會變。", 3) }}
-  <form method="post" action="/settings/secrets">
-    <div class="fcard-body">
-      <div class="ffield">
-        <label for="token">Channel access token</label>
-        <input type="password" id="token" name="token" autocomplete="off" placeholder="{{ token_status or '還沒設定' }}">
-        <span class="help">沒設定就送不出任何訊息。LINE Developers → Messaging API 分頁最下面 → Issue。</span>
+<section class="fcard" id="ministry" data-fcard>
+  {{ card_head("這個牧區", "名稱、備註，以及要不要另外設一組牧區密碼。", 3) }}
+  <div class="fcard-body">
+    <form method="post" action="{{ mb }}/ministry/save" class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:5">
+        <label for="ministry_name"><span class="req">*</span>牧區名稱</label>
+        <input type="text" id="ministry_name" name="name" required maxlength="30" value="{{ ministry.name }}">
+        <span class="help">首頁、LINE 訊息裡看到的名字。改名不影響網址和資料（編號 <code>{{ ministry.id }}</code> 不變）。</span>
       </div>
-      <div class="ffield">
-        <label for="secret">Channel secret</label>
-        <input type="password" id="secret" name="secret" autocomplete="off" placeholder="{{ secret_status or '還沒設定' }}">
-        <span class="help">沒設定 = LINE 聊天室指令沒有反應；每週提醒不受影響。</span>
+      <div class="ffield" style="--span:5">
+        <label for="ministry_note">備註</label>
+        <input type="text" id="ministry_note" name="note" value="{{ ministry.note }}" placeholder="例如負責人：王小明、林美華">
+        <span class="help">留空 = 首頁不顯示。</span>
       </div>
-      <div class="ffield">
-        <label for="password">網頁密碼</label>
-        <input type="password" id="password" name="password" autocomplete="new-password" placeholder="{{ password_status or '沒有密碼' }}">
-        <span class="help">沒有密碼 = 只有這台電腦打得開。改了以後所有人都要重新登入。</span>
+      <div class="ffield" style="--span:2"><label>&nbsp;</label><button type="submit" class="btn">儲存名稱</button></div>
+    </form>
+    <form method="post" action="{{ mb }}/ministry/password" class="fgrid-sub" style="--span:12">
+      <div class="ffield" style="--span:5">
+        <label for="ministry_password">牧區密碼 {{ ui.info("第二層密碼：進網站之後，要進這個牧區還要再輸入一次。防君子不防小人：網站密碼不小心外流，別的牧區的人也改不到這裡。") }}</label>
+        <input type="password" id="ministry_password" name="password" autocomplete="new-password" minlength="4"
+               placeholder="{{ '已設定（輸入新的就會換掉）' if ministry.has_password else '沒有設（只要網站密碼就進得來）' }}">
+        <span class="help">至少 4 個字。忘記了只能在執行機器人的那台電腦上清掉。</span>
       </div>
-      <div class="ffield ffield-chk">
-        <label><input type="checkbox" name="clear_password">
-          <span><b>取消網頁密碼</b><span class="help"><br>勾了按儲存，就不用再登入。</span></span></label>
+      <div class="ffield ffield-chk" style="--span:5">
+        {% if ministry.has_password %}
+        <label><input type="checkbox" name="clear">
+          <span><b>取消牧區密碼</b><span class="help"><br>勾了按儲存，只要網站密碼就進得來。</span></span></label>
+        {% endif %}
       </div>
-      <div class="ffield" style="--span:12">
-        <div class="row"><button type="submit" class="btn btn-primary">儲存金鑰</button>
-          <span class="note">只存在這台電腦的 <code>.env</code>，不會上傳。</span></div>
-      </div>
-    </div>
-  </form>
+      <div class="ffield" style="--span:2"><label>&nbsp;</label><button type="submit" class="btn">儲存密碼</button></div>
+    </form>
+  </div>
 </section>
 
-<details class="panel">
-  <summary>實驗功能<span class="hint">不影響實際發送</span></summary>
-  <a class="item" href="/lab/org"><span class="badge violet">實驗</span>
-    <span class="tt"><span class="nm">大教會架構</span><span class="sub">牧區 → 區 → 小組畫成一棵樹，估算每個單位用掉多少 LINE 則數。</span></span>
-    <span class="side">打開 →</span></a>
+<p class="note">LINE 金鑰、網站密碼是整個教會一份，在<a href="/settings">「全教會設定」</a>。</p>
+
+{% if can_delete %}
+<details class="panel" id="danger">
+  <summary>移除這個牧區<span class="hint">不會刪資料，整個資料夾移到 config/_deleted/</span></summary>
+  <form method="post" action="{{ mb }}/ministry/delete" class="panel-body row"
+        data-confirm="確定要移除「{{ ministry.name }}」嗎？它的群組以後不會再收到提醒。">
+    <input type="text" name="confirm" placeholder="打「{{ ministry.name }}」確認" style="max-width:260px">
+    <button type="submit" class="btn btn-danger">移除牧區</button>
+    <span class="note">移除後，這個牧區的群組不會再收到提醒（機器人還留在群組裡）。資料夾搬回來就能復原。</span>
+  </form>
 </details>
+{% endif %}
 {% endblock %}

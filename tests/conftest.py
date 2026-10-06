@@ -105,7 +105,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def client(paths: Paths):
-    """管理網頁（測試模式發送、關掉排程），資料用 cmd_init 建出來的範例。"""
+    """管理網頁（測試模式發送、關掉排程），資料用 cmd_init 建出來的範例。
+
+    網址預設在 m1「測試牧區」裡面（base_url = /m/m1/）：client.get("/targets") 就是那個牧區的 LINE 群組頁。
+    要測整個教會那一層（首頁、登入、全教會設定）用完整網址，例如 client.get(CHURCH + "/")。
+    """
     from fastapi.testclient import TestClient
 
     from church_bot.cli import cmd_init
@@ -120,5 +124,8 @@ def client(paths: Paths):
     settings.messenger.kind = "console"
     settings.schedule.enabled = False
     save_settings(paths, settings)
-    with TestClient(create_app(paths)) as c:
+    with TestClient(create_app(paths), base_url="http://testserver/m/m1/") as c:
         yield c
+
+
+CHURCH = "http://testserver"  # 整個教會那一層的網址（client 預設在 /m/m1/ 裡面）
