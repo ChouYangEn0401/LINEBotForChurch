@@ -54,6 +54,7 @@ def test_legacy_single_ministry_is_migrated(root):
     settings = load_settings(root)
     settings.web.port = 9001
     settings.message.title = "青年崇拜服事提醒"
+    settings.schedule.enabled = False  # 舊版由 Telegram 呼叫 cli.bat send 時的設定
     save_settings(root, settings)
     History(root.db_file).remember_person(uid(), "小明", gid())
 
@@ -62,6 +63,7 @@ def test_legacy_single_ministry_is_migrated(root):
     m1 = root.for_ministry("m1")
     assert [t.name for t in TargetTable(m1.targets_file).load().items] == ["同工群"]
     assert load_settings(m1).message.title == "青年崇拜服事提醒"
+    assert load_settings(m1).schedule.enabled  # 打開：不然 Telegram 不帶牧區的 send 會什麼都不發
     assert load_settings(m1).web.port == 9001 and load_settings(root).web.port == 9001  # host/port 搬到 church.yaml
     assert "web" not in yaml.safe_load(m1.settings_file.read_text(encoding="utf-8"))
     assert not root.targets_file.exists()

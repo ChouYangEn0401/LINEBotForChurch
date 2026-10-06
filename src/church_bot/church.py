@@ -275,7 +275,12 @@ def migrate_legacy(paths: Paths, name: str = DEFAULT_FIRST_NAME) -> Ministry | N
             shutil.copy2(db, target.db_file)
             _keep_only_shared(db)
         try:  # 重存一次：web（host/port）已經搬到 church.yaml，牧區的設定檔裡不再留一份
-            save_settings(target, load_settings(target))
+            settings = load_settings(target)
+            # 舊版「自動發送關著」通常代表「由 Telegram 呼叫 cli.bat send」；新版不帶牧區的 send 只發
+            # 「自動發送開著、今天是發送日」的牧區，不打開的話 Telegram 那一條會什麼都不發。
+            # 打開之後後台開著也會照時間發；兩邊都觸發也只發一次（防重複），所以打開是安全的。
+            settings.schedule.enabled = True
+            save_settings(target, settings)
         except ConfigError:
             pass  # 設定檔本來就有錯：原封不動，畫面上會照常提示怎麼修
         save_church(church, ChurchConfig([ministry], web))

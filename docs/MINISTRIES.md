@@ -115,7 +115,9 @@ data/
 `config/ministries/m1/`，資料庫複製一份給它（發送紀錄、防重複、收集到的 LINE 帳號都跟著走），
 原檔另外留一份在 `config/_before_ministries/`、`data/_before_ministries/`。
 牧區名稱先叫「第一個牧區」，到「設定 → 這個牧區」改名（或 `cli.bat 牧區 rename m1 青年牧區`）。
-網頁的 host/port 搬到 `church.yaml`。什麼都不用重新設定，Telegram 的排程也不用改。
+網頁的 host/port 搬到 `church.yaml`。**自動發送會被打開**：舊版關著通常代表「由 Telegram 發」，
+新版 `cli.bat send` 不帶牧區只發自動發送開著的牧區，不打開 Telegram 那一條就什麼都不發；
+打開之後後台開著也會照時間發，兩邊都觸發也只發一次。什麼都不用重新設定，Telegram 的排程也不用改。
 
 ## 之後可以做的（還沒做）
 
