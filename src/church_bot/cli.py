@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from church_bot import __version__
 from church_bot.config import Paths, load_settings
+from church_bot.core import versions
 from church_bot.core.planner import Plan
 from church_bot.errors import ChurchBotError
 from church_bot.logging_setup import setup_logging
@@ -465,7 +466,8 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(paths, verbose=args.verbose)
     command = COMMANDS.get(args.command or "web")
     try:
-        return command(paths, args)  # type: ignore[misc]
+        with versions.source("指令列"):
+            return command(paths, args)  # type: ignore[misc]
     except ChurchBotError as exc:
         _print(f"❌ {exc.message}")
         if exc.hint:

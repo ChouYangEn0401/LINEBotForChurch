@@ -48,6 +48,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from church_bot.config import Settings, load_settings
+from church_bot.core import versions
 from church_bot.core.dates import parse_user_date
 from church_bot.core.history import MAX_NICKNAMES, History, nicknames_of
 from church_bot.errors import ChurchBotError, ConfigError
@@ -292,11 +293,12 @@ class WebhookHandler:
             return 0  # LINE 後台按「Verify」時會送空的事件
         messenger = LineMessenger(settings.line.channel_access_token, settings.line.timeout_seconds)
         try:
-            for event in events:
-                try:
-                    self._handle_event(event, messenger)
-                except ChurchBotError as exc:
-                    log.error("處理 LINE 事件失敗：%s", exc)
+            with versions.source("LINE"):
+                for event in events:
+                    try:
+                        self._handle_event(event, messenger)
+                    except ChurchBotError as exc:
+                        log.error("處理 LINE 事件失敗：%s", exc)
         finally:
             messenger.close()
         return len(events)
@@ -387,7 +389,8 @@ class WebhookHandler:
             return f"這個群組已經在「{unit.name}」的「LINE 群組」頁裡了。"
         units = self.church.units()
         if len(units) == 1:
-            self.church.assign_chat(chat_id, units[0].id, name)
+            with versions.source("機器人（被邀進群組）"):
+                self.church.assign_chat(chat_id, units[0].id, name)
             return f"已自動加到「{units[0].name}」的「LINE 群組」頁（尚未啟用）。"
         return "請打開管理網頁，在首頁「還沒分配的群組」把這個群組分到它的牧區。"
 
@@ -512,7 +515,8 @@ class WebhookHandler:
         except VerifyError as exc:
             chat.reply(exc.message)
             return
-        self.apply(pending)
+        with versions.source("LINE /設定（驗證碼）"):
+            self.apply(pending)
         where = f"{pending.ministry_name}・" if pending.ministry_name else ""
         chat.reply(f"✅ 已更新：{where}{pending.option.key} → {pending.value_text}")
 

@@ -31,6 +31,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from church_bot import __version__
 from church_bot.church import add_ministry, check_password, edit_ministry
 from church_bot.config import Paths, load_settings, read_env_file, update_env_file
+from church_bot.core import versions
 from church_bot.core.public_url import public_base
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.web.common import (
@@ -62,6 +63,15 @@ def create_app(paths: Paths) -> FastAPI:
 
     ui = APIRouter(dependencies=[Depends(web.require_login)])
     api = APIRouter(prefix="/api", tags=["API"], dependencies=[Depends(web.require_login)])
+
+    @app.middleware("http")
+    async def change_source(request: Request, call_next):
+        """變更紀錄的「來源」：從網頁存的寫「管理網頁」，LINE Webhook 進來的寫「LINE」（見 core/versions.py）。"""
+        token = versions.set_source("LINE" if request.url.path == "/line/webhook" else "管理網頁")
+        try:
+            return await call_next(request)
+        finally:
+            versions.reset_source(token)
 
     # ------------------------------------------------------------------ 登入（第一層）與錯誤畫面
 
@@ -238,6 +248,15 @@ def create_app(paths: Paths) -> FastAPI:
         update_env_file(web.paths.env_file, updates)
         return redirect("/settings", "LINE 金鑰 / 密碼已更新（存在 .env，不會上傳到 git）")
 
+    @ui.get("/history", response_class=HTMLResponse)
+    def history_page(request: Request):
+        return web.history_page(request, None)
+
+    @ui.post("/history/{change_id}/restore")
+    async def history_restore(change_id: int):
+        msg, level = await run_in_threadpool(web.restore, change_id, "")
+        return redirect("/history", msg, level)
+
     @ui.get("/help", response_class=HTMLResponse)
     def help_page(request: Request):
         first = next(iter(church.ministries()), None)
@@ -250,7 +269,8 @@ def create_app(paths: Paths) -> FastAPI:
         pending = webhook.verifier.take("管理網頁核准")
         if pending is None:
             return redirect(safe_next(next), "這個修改已經過期或被處理掉了", "warn")
-        webhook.apply(pending)
+        with versions.source("管理網頁（核准 LINE /設定）"):
+            webhook.apply(pending)
         where = f"{pending.ministry_name}・" if pending.ministry_name else ""
         return redirect(safe_next(next), f"已核准：{where}{pending.option.key} → {pending.value_text}（LINE 那邊不會另外通知）")
 

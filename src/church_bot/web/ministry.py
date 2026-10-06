@@ -738,6 +738,17 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         await run_in_threadpool(web.scheduler.reload)
         return redirect("/", f"已移除「{m.name}」。資料沒有刪掉，搬到 {moved.relative_to(web.paths.root).as_posix()}")
 
+    # ------------------------------------------------------------------ 變更紀錄（見 core/versions.py）
+
+    @ui.get("/history", response_class=HTMLResponse)
+    def history_page(request: Request, m: MinistryView = Depends(web.ministry)):
+        return web.history_page(request, m)
+
+    @ui.post("/history/{change_id}/restore")
+    async def history_restore(change_id: int, m: MinistryView = Depends(web.ministry)):
+        msg, level = await run_in_threadpool(web.restore, change_id, m.id)
+        return m.redirect("/history", msg, level)
+
     # ------------------------------------------------------------------ history & help
 
     @ui.get("/runs", response_class=HTMLResponse)

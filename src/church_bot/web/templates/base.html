@@ -38,6 +38,7 @@
 {% set admin_group = ("管理員", [
     (mb ~ "/settings", "⚙", "設定", "發送時間、訊息、這個牧區", "settings", ["settings"]),
     (mb ~ "/check", "🩺", "系統檢查", "一次檢查全部設定", "check", ["check"]),
+    (mb ~ "/history", "🕘", "變更紀錄", "誰改了什麼都看得到、可以還原", "history", ["history"]),
 ]) %}
 {% else %}
 {% set nav_groups = [
@@ -48,6 +49,7 @@
 ] %}
 {% set admin_group = ("管理員", [
     ("/settings", "⚙", "全教會設定", "LINE 金鑰、網站密碼", "church_settings", ["church_settings"]),
+    ("/history", "🕘", "變更紀錄", "牧區清單改了什麼、可以還原", "history", ["history"]),
 ]) %}
 {% endif %}
 <header class="topbar">

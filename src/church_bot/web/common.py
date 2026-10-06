@@ -151,6 +151,9 @@ def ministry_token(password_hash: str) -> str:
     return hashlib.sha256(f"ministry:{password_hash}".encode()).hexdigest()
 
 
+HISTORY_LIMIT = 150
+
+
 class Web:
     """整個網頁一份：教會、排程、Webhook、畫面模板。各頁的程式都從這裡拿東西。"""
 
@@ -202,6 +205,34 @@ class Web:
             next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
             raise MinistryLocked(view.unit, next_url if request.method == "GET" else view.base + "/")
         return view
+
+    # ------------------------------------------------------------------ 變更紀錄（見 core/versions.py）
+
+    def history_page(self, request: Request, m: MinistryView | None) -> HTMLResponse:
+        store = self.church.versions
+        changes = store.changes(m.id if m else "", HISTORY_LIMIT)
+        return self.page(request, "history.html", m, changes=changes, limit=HISTORY_LIMIT,
+                         diffs={c.id: store.diff(c) for c in changes})
+
+    def restore(self, change_id: int, scope: str) -> tuple[str, str]:
+        """把某一筆修改的檔案還原成「這次修改之前」；回傳 (訊息, 顏色)。還原本身也會留一筆紀錄。"""
+        from church_bot.core import versions
+        from church_bot.files import write_bytes
+
+        store = self.church.versions
+        change = store.change(change_id)
+        if change is None or change.scope != scope:
+            return "找不到這筆紀錄", "error"
+        content = store.content(change.before)
+        if content is None:
+            return "這一筆沒有「修改之前」的內容可以還原", "warn"
+        path = (self.paths.root / change.file).resolve()
+        if store.where(path) != (scope, change.file):
+            return "這個檔案不在可以還原的範圍", "error"
+        with versions.source(f"還原（第 {change.id} 筆之前）"):
+            write_bytes(path, content)
+        self.scheduler.reload()  # 還原的可能是發送時間、牧區清單
+        return f"已把「{change.label}」還原成 {change.when} 修改之前的樣子", "ok"
 
     # ------------------------------------------------------------------ 畫面
 

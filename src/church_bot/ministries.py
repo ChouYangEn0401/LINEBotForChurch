@@ -17,6 +17,7 @@ from dataclasses import dataclass, replace
 
 from church_bot.church import ChurchConfig, Ministry, load_church, migrate_legacy
 from church_bot.config import Paths
+from church_bot.core import versions
 from church_bot.core.history import History
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.models import Member, Target
@@ -59,8 +60,10 @@ class Unit:
 class Church:
     def __init__(self, paths: Paths, *, migrate: bool = True) -> None:
         self.paths = paths.church
+        self.versions = versions.track(self.paths.root, self.paths.shared_db_file)  # 之後每次存檔都留紀錄
         if migrate:
-            migrate_legacy(self.paths)  # 舊版單一牧區：第一次開新版時自動搬家
+            with versions.source("升級成多牧區"):
+                migrate_legacy(self.paths)  # 舊版單一牧區：第一次開新版時自動搬家
         self.root = BotService(self.paths)
         self._services: dict[str, BotService] = {}
         self._lock = threading.Lock()
