@@ -94,8 +94,9 @@ def register_hint(rows: list[_Row]) -> str:
     names = list(dict.fromkeys(names))
     if not names:
         return ""
-    return (f"🙋 {'、'.join(names)}：還沒辦法 @ 到你，請在這個群組打「/我的ID」，"
-            "再打「/我的名字 你的名字」登記，之後提醒就會直接 @ 你 🙏")
+    # 一步就好：「/我的名字」那一則訊息本身就帶著是誰打的（LINE 帳號），不用先打「/我的ID」
+    return (f"🙋 {'、'.join(names)}：還沒辦法 @ 到你，請在這個群組打「/我的名字 你的名字」登記，"
+            "管理員確認後提醒就會直接 @ 你 🙏")
 
 
 def sample_day() -> tuple[ServiceDay, Directory]:

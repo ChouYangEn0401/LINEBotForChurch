@@ -1,6 +1,6 @@
 """免費模式：開一個 Cloudflare 臨時網址，自動登記成 LINE 的 Webhook URL。
 
-開著的時候，群組打 /提醒、/我的ID、/我的名字 機器人都會回（Reply 免費）；關掉就停。
+開著的時候，群組打 /提醒、/我的名字、/點名 機器人都會回（Reply 免費）；關掉就停。
 網址每次重開都不一樣，所以登記的同時也記在資料庫：誰要進管理網頁，在 LINE 打「/服務網址」
 機器人就回最新的那一個（見 core/public_url.py）。
 以前是「cloudflared 的輸出 → PowerShell 過濾 → 呼叫 Python」，PowerShell 讀管線會一次攢一大段才處理、
@@ -156,7 +156,7 @@ def _announce(webhook: str, ok: bool, out: Callable[[str], None]) -> None:
     if ok:
         out(" ✅ 免費模式開好了！（網址已自動登記到 LINE，不用手動貼）")
         out("")
-        out(" 現在可以在群組打：/提醒、/我的ID、/我的名字 你的名字")
+        out(" 現在可以在群組打：/提醒、/我的名字 你的名字；管理員打 /點名 看誰還沒登記")
         out(" 其他管理員想進管理網頁，打「/服務網址」機器人就會回這次的網址（不用貼給他們）")
     else:
         copy_to_clipboard(webhook)
