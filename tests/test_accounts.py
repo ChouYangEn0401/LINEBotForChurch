@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 from church_bot.config import load_settings
 from church_bot.core.accounts import build_accounts
 from church_bot.core.history import History, nicknames_of
@@ -244,3 +246,35 @@ def test_targets_page_still_works_when_the_roster_cannot_be_read(client, paths, 
 
     monkeypatch.setattr(BotService, "fetch_roster", broken)
     assert client.get("/targets").status_code == 200
+
+
+# ------------------------------------------------------------------ 「/點名」之後：名字對得上的一次全部對應
+
+
+def test_exact_links_skip_guesses_and_two_people_claiming_the_same_name():
+    from church_bot.core.accounts import exact_links
+
+    names = [Member("陳小明"), Member("林美華"), Member("黃喜樂", line_user_id=uid("9"))]
+    accounts = build_accounts([
+        person(uid("1"), real="陳小明"),
+        person(uid("2"), display="林美華"),  # 只是 LINE 名稱一樣：不算，要管理員看
+        person(uid("3"), real="黃喜樂"),  # 那位已經有帳號了：衝突
+        person(uid("4"), real="王大衛"), person(uid("5"), real="王大衛"),  # 名單上沒有
+    ], names)
+    assert [a.user_id for a in exact_links(accounts, names)] == [uid("1")]
+    one_member = [Member("陳小明", ("小明哥",))]
+    two = build_accounts([person(uid("1"), real="陳小明"), person(uid("6"), real="小明哥")], one_member)
+    assert exact_links(two, one_member) == []  # 兩個帳號都說自己是陳小明：一個一個判斷
+
+
+def test_link_all_button(client, paths):
+    seen(paths, uid("1"), "Ming", real="陳小明")
+    seen(paths, uid("2"), "美華", real="林美華")
+    page = client.get("/members/accounts").text
+    assert "名字對得上的 2 位全部對應" in page
+    r = client.post("/members/accounts/link-all", follow_redirects=False)
+    assert "已對應 2 位" in unquote(r.headers["location"])
+    found = members(paths)
+    assert found["陳小明"].line_user_id == uid("1") and found["林美華"].line_user_id == uid("2")
+    assert "全部對應" not in client.get("/members/accounts").text
+    assert "level=warn" in client.post("/members/accounts/link-all", follow_redirects=False).headers["location"]

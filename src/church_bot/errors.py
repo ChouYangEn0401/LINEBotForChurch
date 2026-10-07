@@ -31,6 +31,10 @@ class TableError(ChurchBotError):
     """對照表（CSV）讀不到 / 格式錯。"""
 
 
+class FileLockedError(TableError):
+    """存檔時檔案被別的程式打開（Windows 上通常是 Excel）鎖住了。"""
+
+
 class SourceError(ChurchBotError):
     """讀服事表失敗（Google Sheet 權限、網路、格式…）。"""
 

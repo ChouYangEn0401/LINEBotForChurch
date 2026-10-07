@@ -137,7 +137,8 @@ def test_people_who_cannot_be_tagged_are_told_how_to_register():
     message = Renderer(MessageSettings()).render(DAY, directory, Target("g", gid(), mention=True))
     assert message.has_mentions  # 陳小明有 userId → @ 他
     for text in (message.text, message.mention_text):
-        assert "王牧師：還沒辦法 @ 到你" in text and "/我的ID" in text and "/我的名字" in text
+        assert "王牧師：還沒辦法 @ 到你" in text and "/我的名字 你的名字" in text
+        assert "/我的ID" not in text  # 一步就好
     assert "陳小明：" not in message.text
 
 
