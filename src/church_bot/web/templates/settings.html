@@ -121,6 +121,10 @@
         <label><input type="checkbox" id="send_code_to_admin" name="send_code_to_admin" {{ "checked" if f.send_code_to_admin }}>
           <span><b>驗證碼私訊給管理員</b><span class="help"><br>不勾 = 驗證碼只顯示在執行程式的視窗。每次私訊算 1 則，每天最多 10 次。</span></span></label>
       </div>
+      <div class="ffield ffield-chk" style="--span:12">
+        <label><input type="checkbox" id="easter_egg" name="easter_egg" {{ "checked" if f.easter_egg }}>
+          <span><b>彩蛋模式</b><span class="help"><br>開玩笑用的，預設不勾。勾了之後，「/設定」要改成的值<b>本來就是那個值</b>時，機器人不會回「本來就是這樣，不用改」，而是順著說「好的，已經幫您改好了」（三句話輪著用）。設定不會被改到，其他指令也完全不受影響。</span></span></label>
+      </div>
     </div>
   </section>
 

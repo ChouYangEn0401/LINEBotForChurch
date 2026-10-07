@@ -50,7 +50,7 @@ from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from church_bot.config import Settings, load_settings
-from church_bot.core import versions
+from church_bot.core import easter_egg, versions
 from church_bot.core.dates import parse_user_date
 from church_bot.core.history import MAX_NICKNAMES, History, nicknames_of
 from church_bot.core.roll_call import RollCall
@@ -298,6 +298,7 @@ class WebhookHandler:
         self.church = church
         self.verifier = verifier or Verifier()
         self.on_settings_changed = on_settings_changed
+        self._easter_turn = 0  # 彩蛋那三句話輪著用（見 core/easter_egg.py）
 
     @property
     def shared(self) -> BotService:
@@ -494,7 +495,12 @@ class WebhookHandler:
             chat.reply(f"「{option.key}」的值看不懂：{exc}")
             return
         if option.show(value) == option.current(settings):
-            chat.reply(f"「{option.key}」本來就是「{option.show(value)}」，不用改。")
+            # 彩蛋開著就不糾正對方，順著說「好」；設定一樣不會被改到（本來就沒有要改）
+            if settings.chat.easter_egg:
+                chat.reply(easter_egg.flattery(self._easter_turn))
+                self._easter_turn += 1
+            else:
+                chat.reply(f"「{option.key}」本來就是「{option.show(value)}」，不用改。")
             return
         chat_info = chat.service.history.chat(chat.chat_id) or {}
         label = chat_info.get("name") or {"group": "群組", "room": "多人聊天室", "user": "私訊"}.get(chat.kind, "")
