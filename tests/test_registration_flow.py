@@ -190,3 +190,35 @@ def test_a_brief_lock_is_waited_out(paths, monkeypatch):
     MemberTable(paths.members_file).save([Member("陳小明")])
     assert read_env_file(paths.env_file)["UI_PASSWORD"] == "abcd1234" and refused["n"] == 3
     assert [m.name for m in MemberTable(paths.members_file).load().items] == ["陳小明"]
+
+
+def test_reading_and_saving_dot_env_at_the_same_time(paths):
+    """一邊有人存 .env（網頁存密碼），一邊很多請求在讀（每個請求都會讀）：兩邊都不能出錯。
+    Windows 上以前兩邊都會被拒絕（實測寫 300 次失敗 117 次，讀的那邊也會丟 PermissionError）。"""
+    import threading
+
+    from church_bot.config import read_env_file
+
+    update_env_file(paths.env_file, {"UI_PASSWORD": "start"})
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def reader():
+        while not stop.is_set():
+            try:
+                assert read_env_file(paths.env_file)["UI_PASSWORD"]
+            except BaseException as exc:  # noqa: BLE001 - 收集起來，最後一起檢查
+                errors.append(exc)
+                return
+
+    readers = [threading.Thread(target=reader) for _ in range(4)]
+    for t in readers:
+        t.start()
+    try:
+        for i in range(150):
+            update_env_file(paths.env_file, {"UI_PASSWORD": f"p{i}"})
+    finally:
+        stop.set()
+        for t in readers:
+            t.join()
+    assert errors == [] and read_env_file(paths.env_file)["UI_PASSWORD"] == "p149"

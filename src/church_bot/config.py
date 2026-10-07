@@ -20,7 +20,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from church_bot.errors import ConfigError
-from church_bot.files import swap, write_text
+from church_bot.files import read_text, swap, write_text
 
 # 預設的提醒訊息：用【中文標籤】寫，不懂程式的人也改得動（規則見 core/message_template.py）
 DEFAULT_TEMPLATE = """\
@@ -308,7 +308,7 @@ def read_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+    for raw in read_text(path).splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -323,7 +323,7 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 def update_env_file(path: Path, updates: dict[str, str]) -> None:
     """更新 .env 裡的某些 KEY，保留其他行與註解；沒有的 KEY 補在最後。"""
-    lines = path.read_text(encoding="utf-8-sig").splitlines() if path.exists() else []
+    lines = read_text(path).splitlines() if path.exists() else []
     remaining = dict(updates)
     out: list[str] = []
     for raw in lines:
@@ -353,7 +353,7 @@ def load_settings(paths: Paths) -> Settings:
     data: dict = {}
     if paths.settings_file.exists():
         try:
-            loaded = yaml.safe_load(paths.settings_file.read_text(encoding="utf-8-sig"))
+            loaded = yaml.safe_load(read_text(paths.settings_file))
         except yaml.YAMLError as exc:
             mark = getattr(exc, "problem_mark", None)
             where = f"第 {mark.line + 1} 行附近" if mark else ""
@@ -395,7 +395,7 @@ def read_church_section(paths: Paths, section: str) -> dict:
     if not paths.church_file.exists():
         return {}
     try:
-        loaded = yaml.safe_load(paths.church_file.read_text(encoding="utf-8-sig")) or {}
+        loaded = yaml.safe_load(read_text(paths.church_file)) or {}
     except yaml.YAMLError:
         return {}  # church.yaml 壞掉由 church.py 讀牧區清單時報錯，這裡不重複
     value = loaded.get(section) if isinstance(loaded, dict) else None
