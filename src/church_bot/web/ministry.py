@@ -22,7 +22,7 @@ from pydantic import ValidationError
 from church_bot import __version__
 from church_bot.church import MIN_MINISTRY_PASSWORD, edit_ministry, hash_password, remove_ministry
 from church_bot.config import DEFAULT_TEMPLATE, SETTINGS_LOCK, Settings, load_settings, save_settings, update_settings
-from church_bot.core.accounts import build_accounts, exact_links
+from church_bot.core.accounts import build_accounts, duplicate_names, exact_links
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, normalize_name, validate_teams
 from church_bot.core.planner import DATE_FMT
@@ -401,7 +401,7 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         accounts = build_accounts(m.service.history.people(), result.items)
         return web.page(request, "members_accounts.html", m, members=result.items, collect_names=collect_names,
                     accounts=[a for a in accounts if not a.ignored],
-                    ignored_accounts=[a for a in accounts if a.ignored], linkable=exact_links(accounts))
+                    ignored_accounts=[a for a in accounts if a.ignored], linkable=exact_links(accounts, result.items))
 
     @ui.get("/members/teams", response_class=HTMLResponse)
     def members_teams_page(request: Request, edit_team: str = "", new: str = "", m: MinistryView = Depends(web.ministry)):
@@ -537,6 +537,9 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
                 return m.redirect("/members/accounts", "這個 LINE 帳號已經對應到同工了", "warn")
             if target is None:
                 return m.redirect("/members/accounts", f"同工名單裡找不到「{member_name}」", "error")
+            if normalize_name(member_name) in duplicate_names(items):
+                return m.redirect("/members/accounts", f"同工名單裡有兩列都叫「{member_name}」，分不出是哪一位；"
+                                                      "請先到「名單」把多的那一列刪掉或改名", "error")
             if target.line_user_id:
                 return m.redirect("/members/accounts", f"「{member_name}」已經對應到另一個 LINE 帳號，請先確認是不是同一個人",
                                  "error")
@@ -551,13 +554,15 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         with TABLE_WRITE_LOCK:
             table = MemberTable(m.paths.members_file)
             items = table.load().items
-            links = {a.match.name: a.user_id for a in exact_links(build_accounts(m.service.history.people(), items))}
+            # 用「哪一列」（物件本身）對應，不用名字：名單裡就算有同名的兩列也只會改到那一列
+            linkable = exact_links(build_accounts(m.service.history.people(), items), items)
+            links = {id(a.match): a.user_id for a in linkable}
             if not links:
                 return m.redirect("/members/accounts", "沒有可以一次對應的帳號（可能已經處理好了）", "warn")
-            table.save([replace(x, line_user_id=links[x.name]) if x.name in links else x for x in items])
-        for user_id in links.values():
-            m.service.history.clear_real_name(user_id)
-        names = "、".join(links)
+            table.save([replace(x, line_user_id=links[id(x)]) if id(x) in links else x for x in items])
+        for a in linkable:
+            m.service.history.clear_real_name(a.user_id)
+        names = "、".join(a.match.name for a in linkable)  # type: ignore[union-attr]
         return m.redirect("/members/accounts", f"已對應 {len(links)} 位：{names}。之後的提醒就 @ 得到他們了")
 
     @ui.post("/members/accounts/rename")

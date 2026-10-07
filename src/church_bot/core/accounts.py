@@ -91,13 +91,25 @@ def build_accounts(people: list[dict], members: list[Member]) -> list[LineAccoun
     return sorted(accounts, key=lambda a: (not a.needs_review, ACTION_ORDER[a.action]))
 
 
-def exact_links(accounts: list[LineAccount]) -> list[LineAccount]:
+def duplicate_names(members: list[Member]) -> set[str]:
+    """同工名單裡不只一列的名字（例如用 Excel 多貼了一列）。這種名字分不出是哪一位，不能自動對應。"""
+    counts: dict[str, int] = {}
+    for m in members:
+        counts[normalize_name(m.name)] = counts.get(normalize_name(m.name), 0) + 1
+    return {name for name, n in counts.items() if n > 1}
+
+
+def exact_links(accounts: list[LineAccount], members: list[Member]) -> list[LineAccount]:
     """可以一次全部「對應」的帳號：本人用「/我的名字」登記的名字，剛好是名單上一位還沒有 LINE 帳號的同工。
 
-    只看本人登記的名字（不看 LINE 名稱猜的）；兩個帳號登記成同一個人的，兩個都不算，要管理員一個一個判斷。
+    只看本人登記的名字（不看 LINE 名稱猜的）。以下都不算，要管理員一個一個判斷：
+    兩個帳號登記成同一個人、那個名字在名單上有兩列。
+    呼叫的人要用 ``a.match`` 這個物件本身（不是名字）去改名單，同名的兩列才不會一起被改到。
     """
-    candidates = [a for a in accounts if not a.ignored and a.action == "link" and a.matched_by == "real_name"]
-    claims: dict[str, int] = {}
+    duplicated = duplicate_names(members)
+    candidates = [a for a in accounts if not a.ignored and a.action == "link" and a.matched_by == "real_name"
+                  and normalize_name(a.match.name) not in duplicated]  # type: ignore[union-attr]
+    claims: dict[int, int] = {}
     for a in candidates:
-        claims[a.match.name] = claims.get(a.match.name, 0) + 1  # type: ignore[union-attr]
-    return [a for a in candidates if claims[a.match.name] == 1]  # type: ignore[union-attr]
+        claims[id(a.match)] = claims.get(id(a.match), 0) + 1
+    return [a for a in candidates if claims[id(a.match)] == 1]

@@ -261,10 +261,10 @@ def test_exact_links_skip_guesses_and_two_people_claiming_the_same_name():
         person(uid("3"), real="黃喜樂"),  # 那位已經有帳號了：衝突
         person(uid("4"), real="王大衛"), person(uid("5"), real="王大衛"),  # 名單上沒有
     ], names)
-    assert [a.user_id for a in exact_links(accounts)] == [uid("1")]
-    two = build_accounts([person(uid("1"), real="陳小明"), person(uid("6"), real="小明哥")],
-                         [Member("陳小明", ("小明哥",))])
-    assert exact_links(two) == []  # 兩個帳號都說自己是陳小明：一個一個判斷
+    assert [a.user_id for a in exact_links(accounts, names)] == [uid("1")]
+    one_member = [Member("陳小明", ("小明哥",))]
+    two = build_accounts([person(uid("1"), real="陳小明"), person(uid("6"), real="小明哥")], one_member)
+    assert exact_links(two, one_member) == []  # 兩個帳號都說自己是陳小明：一個一個判斷
 
 
 def test_link_all_button(client, paths):
