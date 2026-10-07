@@ -63,3 +63,15 @@ def test_only_the_server_manager_can_restart(client, paths):
     client.app.state.server = SimpleNamespace(should_exit=False)
     assert client.post(CHURCH + "/restart").status_code == 403
     assert not getattr(client.app.state, "restart_requested", False)
+
+
+def test_port_already_in_use_says_who_and_keeps_the_window_open(paths, monkeypatch, capsys):
+    """以前會打開瀏覽器、回傳 0，2-start 的視窗一閃就關掉，看起來像「開不起來」。"""
+    from church_bot.cli import PORT_IN_USE
+
+    monkeypatch.setattr("church_bot.cli._port_in_use", lambda host, port: True)
+    monkeypatch.setattr("church_bot.cli._port_owner", lambda port: "python.exe（PID 1234）")
+    monkeypatch.setattr("church_bot.cli.webbrowser.open", lambda url: None)
+    assert cmd_web(paths, build_parser().parse_args(["web", "--child", "--port", "9101"])) == PORT_IN_USE
+    out = capsys.readouterr().out
+    assert "python.exe（PID 1234）" in out and "3-open-webhook" in out

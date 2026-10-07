@@ -379,6 +379,28 @@ def _port_in_use(host: str, port: int) -> bool:
     return False
 
 
+def _port_owner(port: int) -> str:
+    """誰在用這個 port（只有 Windows 查得到；查不到就空字串）。給「已經有程式在用了」那一句話用。"""
+    if sys.platform != "win32":
+        return ""
+    def run(*command: str) -> str:  # 中文 Windows 的 netstat／tasklist 是 cp950；2-start 又開了 UTF-8 模式，所以自己解碼
+        out = subprocess.run(command, capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW).stdout
+        return out.decode("mbcs", errors="replace")
+
+    try:
+        pid = next((line.split()[-1] for line in run("netstat", "-ano", "-p", "TCP").splitlines()
+                    if len(line.split()) >= 5 and line.split()[1].endswith(f":{port}") and line.split()[-1] != "0"
+                    and line.split()[2].endswith((":0", ":*"))), "")
+        if not pid:
+            return ""
+        task = run("tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH")
+    except (OSError, subprocess.SubprocessError, IndexError):
+        return ""
+    name = task.strip().split(",")[0].strip('"') if task.strip().startswith('"') else ""
+    return f"{name or '某個程式'}（PID {pid}）"
+
+
+PORT_IN_USE = 4  # 已經有程式在用這個 port：讓 2-start 停下來把原因顯示出來，不要一閃就關掉
 RESTART_CODE = 3  # 管理網頁按「重新啟動」：網頁那個子程式用這個代碼結束，外面那一層就再開一次
 RESTART_LIMIT = 5  # 一分鐘內重開超過這麼多次就停下來（一直壞的話不要無限重開）
 
@@ -434,11 +456,14 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
                 break
             time.sleep(0.5)
     if _port_in_use(host, port):
-        _print(f"⚠️ {url} 已經有程式在用了 —— 很可能管理網頁本來就開著。")
-        _print("   直接幫你打開瀏覽器；如果打不開，請把設定裡的 port 改成別的數字（例如 8788）。")
+        owner = _port_owner(port)
+        _print(f"⚠️ {url} 已經有程式在用了{('：' + owner) if owner else ''}")
+        _print("   很可能是管理網頁本來就開著——免費模式（3-open-webhook）也會順便開一個。已經幫你打開瀏覽器。")
+        _print("   想換成這一次開的（例如更新過程式）：先關掉原本那個視窗，再雙擊一次 2-start；")
+        _print("   或在網頁右上角按「重新啟動」（伺服器管理員）。")
         if not args.no_browser:
             webbrowser.open(url)
-        return 0
+        return PORT_IN_USE  # 不是 0：2-start 會停下來（按任意鍵才關），不會一閃就不見
     if host not in ("127.0.0.1", "localhost") and not settings.web.password:
         _print("⚠️ 管理網頁開放給其他電腦連線，但沒有設定密碼！請在 .env 設定 UI_PASSWORD。")
 
