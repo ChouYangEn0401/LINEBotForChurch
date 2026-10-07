@@ -17,6 +17,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from church_bot.config import MessageSettings, Paths, Settings, load_settings
+from church_bot.core import calendar
 from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
@@ -49,6 +50,10 @@ RETRYABLE_CODES = frozenset({"SourceError", "unexpected", "send_failed_temporari
 REPLY_TAG = "🙋 手動發送・免費"  # 讓群組裡看得出這則是用 /提醒（Reply，免費）送的，跟排程 Push 分開
 TEST_TAG = "🧪 測試預覽・沒有真的發送"  # /別周測試：管理員試看別一週的內容
 NOT_A_TARGET = "這個聊天室目前不是設定好的提醒群組，要先到管理網頁「LINE 群組」頁新增、啟用才能用這個指令。"
+CALENDAR_NOT_SET = (
+    "還沒設定哪一欄是服飾 🙏\n"
+    "請管理員到管理網頁「設定 → 服事表來源 → 照原樣顯示的欄位」填上服事表的欄位名稱（例如「服飾」），"
+    "之後大家打「/行事曆」就看得到上兩週、下四週的穿著。")
 
 
 @dataclass(slots=True)
@@ -515,6 +520,32 @@ class BotService:
         self._record(report)
         log.info("已用「/提醒」免費送出 %d 則提醒到「%s」（Reply，不計入 LINE 額度）", len(batch), target.name)
         return messages, note
+
+    def calendar_now(self) -> tuple[list[calendar.Entry], str, dt.date, str]:
+        """給 LINE 指令「/行事曆」用：上兩週＋下四週的服飾（或其他「照原樣顯示的欄位」）。
+
+        回傳 (每一場的內容, 欄位名稱, 今天, 沒東西時給使用者看的說明)。
+        跟「/提醒」一樣是免費的 Reply，所以誰都可以打，也不寫發送紀錄（沒有發送這回事）。
+        """
+        ctx = self.load()
+        today = self.now(ctx.settings).date()
+        wanted = ctx.settings.source.columns.text
+        if not wanted:
+            return [], "", today, CALENDAR_NOT_SET
+        roster = self.fetch_roster(ctx.settings, today, use_cache=True)
+        column = calendar.resolve_column(roster.days)
+        if not column:
+            return [], "", today, (
+                f"服事表裡找不到「{'、'.join(wanted)}」這一欄的內容 🤔\n"
+                "確認服事表的表頭有這一欄、而且底下有填東西；"
+                "或到管理網頁「設定 → 服事表來源 → 照原樣顯示的欄位」改成表頭實際的寫法。")
+        entries = calendar.collect(roster.days, column, today)
+        if not entries:
+            start, end = calendar.window(today)
+            return [], column, today, (
+                f"{start.month}/{start.day} ～ {end.month}/{end.day} 這幾週，服事表的「{column}」欄都是空的 🤔\n"
+                "排好之後再打一次就看得到了。")
+        return entries, column, today, ""
 
     def health(self) -> list[CheckItem]:
         items: list[CheckItem] = []

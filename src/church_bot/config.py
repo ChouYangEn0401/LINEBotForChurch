@@ -72,6 +72,9 @@ class ColumnAliases(_Base):
     label: list[str] = ["聚會", "場次", "label"]
     note: list[str] = ["備註", "說明", "note"]
     ignore: list[str] = []  # 這些欄位不要出現在訊息裡（例如「經文」「詩歌」）
+    # 這些欄位照原樣顯示、不當成人名（例如「服飾」寫「深色西裝＋領帶」）。「/行事曆」顯示的就是這些欄位。
+    # 預設空的：填了之後那一欄就不再出現在每週提醒的服事清單裡，提醒內容會變（排程會因此多送一次）。
+    text: list[str] = []
 
 
 class SourceSettings(_Base):

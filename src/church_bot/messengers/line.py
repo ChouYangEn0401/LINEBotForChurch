@@ -111,6 +111,11 @@ class LineMessenger:
             log.warning("@ 標記被 LINE 拒絕，改用純文字回覆：%s", exc.message)
             post(plain)
 
+    def reply_messages(self, reply_token: str, messages: list[dict]) -> None:
+        """直接回覆 LINE 訊息物件（Flex…）。跟文字回覆一樣是 Reply，不計入每月額度；一次最多 5 則。"""
+        self._request("POST", "/v2/bot/message/reply",
+                      json={"replyToken": reply_token, "messages": messages[:5]})
+
     @staticmethod
     def _text_v2(message: OutgoingMessage) -> dict:
         return {

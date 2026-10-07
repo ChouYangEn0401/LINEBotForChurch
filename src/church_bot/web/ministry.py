@@ -47,6 +47,7 @@ def form_values(s: Settings) -> dict[str, Any]:
         "source_kind": s.source.kind, "spreadsheet_url": s.source.spreadsheet_url, "worksheet": s.source.worksheet,
         "csv_path": s.source.csv_path, "credentials_file": s.source.credentials_file, "layout": s.source.layout,
         "ignore_columns": fmt_list(s.source.columns.ignore),
+        "text_columns": fmt_list(s.source.columns.text),
         "messenger_kind": s.messenger.kind, "check_quota": s.messenger.check_quota,
         "schedule_enabled": s.schedule.enabled, "day_of_week": s.schedule.day_of_week, "time": s.schedule.time,
         "timezone": s.schedule.timezone, "every_n_weeks": s.schedule.every_n_weeks,
@@ -78,6 +79,7 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
         layout=f.get("layout", "auto"),
     )
     data["source"]["columns"]["ignore"] = list(parse_list(f.get("ignore_columns", "")))
+    data["source"]["columns"]["text"] = list(parse_list(f.get("text_columns", "")))
     data["messenger"].update(kind=f.get("messenger_kind", "line"), check_quota=on("check_quota"))
     data["schedule"].update(enabled=on("schedule_enabled"), day_of_week=f.get("day_of_week", "sat"),
                             time=f.get("time", "20:00"), timezone=f.get("timezone", "Asia/Taipei").strip(),
