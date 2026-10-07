@@ -4,7 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "church-bot"
-version = "0.1.0"
+# 版本只寫在 src/church_bot/__init__.py 一個地方（要發新版就改那裡）：
+# 機器人的「/說明」、管理網頁左下角、cli.bat --version 讀的都是同一個值。
+dynamic = ["version"]
 description = "教會服事表 LINE 自動提醒機器人"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -29,6 +31,9 @@ dev = ["pytest>=8.0"]
 [project.scripts]
 church-bot = "church_bot.cli:main"
 
+[tool.setuptools.dynamic]
+version = {attr = "church_bot.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -41,4 +46,6 @@ pythonpath = ["src"]
 filterwarnings = [
     "ignore:Using .httpx. with .starlette.testclient.",
     "ignore:The anyio.abc.BlockingPortal alias is deprecated",
+    # 只有「版本只寫在一個地方」那個測試會讀 pyproject，setuptools 說這段設定還是 beta
+    "ignore:Support for ..tool.setuptools",
 ]
