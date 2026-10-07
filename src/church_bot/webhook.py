@@ -753,7 +753,11 @@ class WebhookHandler:
         except ChurchBotError as exc:
             chat.reply(f"讀不到服事表，沒辦法點名：{exc.message}")
             return
-        chat.reply(roll_call_text(result, target.name if target else "這個群組"))
+        text = roll_call_text(result, target.name if target else "這個群組")
+        if result.missing and not chat.settings.chat.collect_names:
+            text = ("⚠️ 名字登記現在是關的：大家打「/我的名字」會被拒絕。\n"
+                    "管理員先到管理網頁「同工名單 → LINE 帳號」按「開放登記」，或打「/設定 收集名單=開」。\n\n" + text)
+        chat.reply(text)
         log.info("「%s」點名：還沒登記 %d、等確認 %d、已經 @ 得到 %d", chat.unit.name, len(result.missing),
                  len(result.pending), len(result.linked))
 
