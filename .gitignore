@@ -5,6 +5,11 @@ config/settings.yaml
 config/*.csv
 config/*.json
 !config/*.example.*
+# 多牧區：牧區清單（含牧區密碼的雜湊）、每個牧區的資料夾、升級前的舊檔、移除的牧區
+config/church.yaml
+config/ministries/
+config/_before_ministries/
+config/_deleted/
 credentials*.json
 service-account*.json
 
