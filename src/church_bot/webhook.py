@@ -15,6 +15,8 @@
 * /提醒（或 /現在提醒）→ 在設定好的提醒群組裡，誰都可以打；立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度）。
   排程時間前 2 天內打過、內容也一樣，排程就略過（見 History.skip_reason），服事表改過才會再送
 * /別周測試 1004 → **只有管理員**：試印別一週的提醒，不記錄、不影響排程（見 service.preview_for）
+* /點名 → **只有管理員**，在群組裡打：列出服事表上「這個群組會提醒到的人」誰還沒登記、誰在等確認
+  （見 core/roll_call.py），並教大家打「/我的名字」。免費的 Reply
 * /權限 → 誰是管理員、每個指令誰能用
 * /我的權限 → 打的人自己的狀況（對應到哪位同工、能不能被 @、是不是管理員）
 * /說明（也可以打 /help、/?）→ 列出指令
@@ -51,6 +53,7 @@ from church_bot.config import Settings, load_settings
 from church_bot.core import versions
 from church_bot.core.dates import parse_user_date
 from church_bot.core.history import MAX_NICKNAMES, History, nicknames_of
+from church_bot.core.roll_call import RollCall
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.messengers.line import LineMessenger
 from church_bot.ministries import Church, Unit
@@ -78,8 +81,10 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "my_permissions": ("我的權限", "我的資料", "myperms", "whoami"),
     "test_week": ("別周測試", "別週測試", "測試提醒", "測試", "testweek", "test"),
     "service_url": ("服務網址", "管理網址", "管理網頁", "網址", "網站", "後台", "serviceurl", "url", "site", "web"),
+    "roll_call": ("點名", "登記檢查", "誰還沒登記", "rollcall"),
 }
-NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions", "service_url"}
+NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions", "service_url",
+               "roll_call"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -109,13 +114,14 @@ HELP_TEXT = (
     "\n"
     "👑 只有管理員\n"
     "・/別周測試 1004　→ 試印 10/4 那一週，不會真的發出去\n"
+    "・/點名　→ 列出服事表上這個群組還沒登記的人，請大家登記\n"
     "\n"
     "打錯或不認得的指令我不會回，直接再打一次就好 🙏"
 )
 
 
 EVERYONE_COMMANDS = "/提醒、/我的名字、/我的暱稱、/我的ID、/群組ID、/服務網址、/說明、/權限、/我的權限"
-ADMIN_COMMANDS = "/別周測試"
+ADMIN_COMMANDS = "/別周測試、/點名"
 TEST_WEEK_USAGE = ("用法：/別周測試 1004\n（10/04、10-4、10月4日、2026/10/4 都可以）\n"
                    "會在你打指令的這個聊天室試印那一天起這一週的提醒：不會發到其他群組、不會 @ 別的群組的人、"
                    "也不影響每週的自動提醒。想測得安靜一點就私訊機器人打。")
@@ -180,6 +186,28 @@ def permissions_text(settings: Settings, admin_name: str = "", admin_names: Iter
         f"・目前狀態：{switches}",
         "　要改：打「/設定」，或請管理員開管理網頁。",
     ])
+
+
+def roll_call_text(result: RollCall, group_name: str) -> str:
+    """「/點名」的回覆：還沒登記的人（教他們怎麼登記）、等管理員確認的人、已經 @ 得到幾位。"""
+    if not result.total:
+        return (f"📋 服事表從今天起，沒有「{group_name}」會提醒到的人。\n"
+                "（照這個群組在管理網頁設定的「只發這些服事／聚會」；服事表還沒排的話，排好再點一次。）")
+    span = f"{result.first.month}/{result.first.day} ～ {result.last.month}/{result.last.day}"
+    lines = [f"📋 點名：「{group_name}」會提醒到的人", f"（服事表 {span}，共 {result.total} 位）"]
+    if not result.missing and not result.pending:
+        return "\n".join([*lines, "", f"✅ 都 @ 得到了！{result.total} 位都登記好了 🙌"])
+    if result.missing:
+        lines += ["", f"🙋 還沒辦法 @ 到（{len(result.missing)} 位）：", "、".join(result.missing),
+                  "👉 請在這個群組打：/我的名字 你在服事表上的名字",
+                  f"例如：/我的名字 {result.missing[0]}",
+                  "管理員確認後，之後的提醒就會直接 @ 你 🙏"]
+    if result.pending:
+        lines += ["", f"⏳ 已經登記、等管理員確認（{len(result.pending)} 位）：{'、'.join(result.pending)}",
+                  "　管理員：到管理網頁「同工名單 → LINE 帳號」按「對應」"]
+    if result.linked:
+        lines += ["", f"✅ 已經 @ 得到：{len(result.linked)} 位"]
+    return "\n".join(lines)
 
 
 def parse_command(text: str) -> Command | None:
@@ -428,6 +456,8 @@ class WebhookHandler:
             self._notify_now(chat)
         elif command.name == "service_url":
             self._service_url(chat)
+        elif command.name == "roll_call":
+            self._roll_call(chat)
         elif command.name == "help":
             chat.reply(HELP_TEXT)
 
@@ -703,6 +733,29 @@ class WebhookHandler:
                   f"・你可以打：{EVERYONE_COMMANDS}" + (f"、{ADMIN_COMMANDS}" if admin else ""),
                   "・每個指令誰能用：打「/權限」"]
         chat.reply("\n".join(lines))
+
+    # ------------------------------------------------------------------ /點名（見 core/roll_call.py）
+
+    def _roll_call(self, chat: _Chat) -> None:
+        """只有管理員、只在群組裡：免費回覆「這個群組會提醒到的人」誰還沒登記，順便教大家怎麼登記。"""
+        if not chat.in_group:
+            chat.reply("請在要點名的那個 LINE 群組裡打「/點名」：會列出那個群組會提醒到、還沒登記的人。")
+            return
+        if chat.unit is None:
+            chat.reply(UNASSIGNED)
+            return
+        if not self._is_admin(chat):
+            chat.reply("「/點名」只有管理員可以用 🙏 想登記自己的話，打「/我的名字 你在服事表上的名字」就好。")
+            return
+        target = next((t for t in chat.unit.targets() if t.line_id == chat.chat_id), None)
+        try:
+            result = chat.service.roll_call(target)
+        except ChurchBotError as exc:
+            chat.reply(f"讀不到服事表，沒辦法點名：{exc.message}")
+            return
+        chat.reply(roll_call_text(result, target.name if target else "這個群組"))
+        log.info("「%s」點名：還沒登記 %d、等確認 %d、已經 @ 得到 %d", chat.unit.name, len(result.missing),
+                 len(result.pending), len(result.linked))
 
     # ------------------------------------------------------------------ /別周測試（純預覽，見 service.preview_for）
 
