@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}小團・服事提醒機器人{% endblock %}
 {% block content %}
 {% set t = editing_team %}
 {% call ui.page_head("同工名單", "🎸 小團", "服事表那一格寫團名 → 提醒自動列出團員。不用這個功能就空著，不影響發送。") %}
-  <a class="btn btn-primary" href="/members/teams?new=1">＋ 新增小團</a>
+  <a class="btn btn-primary" href="{{ mb }}/members/teams?new=1">＋ 新增小團</a>
 {% endcall %}
 {{ ui.members_seg("teams", members | length, 0, teams | length) }}
 
@@ -22,7 +22,7 @@
 
 <section class="panel">
   <div class="panel-head">小團 <span class="badge">{{ teams | length }}</span>
-    <span class="tools"><a class="btn btn-sm btn-ghost admin-only" href="/download/teams.csv">下載 CSV</a></span></div>
+    <span class="tools"><a class="btn btn-sm btn-ghost admin-only" href="{{ mb }}/download/teams.csv">下載 CSV</a></span></div>
   {% if teams %}
   <div class="table-wrap">
     <table class="data">
@@ -35,8 +35,8 @@
           <td>{{ fmt_list(t.members) or "（還沒填成員）" }}</td>
           <td>{% if t.active %}<span class="badge ok">使用中</span>{% else %}<span class="badge">停用</span>{% endif %}</td>
           <td class="ops">
-            <a class="btn btn-sm" href="/members/teams?edit_team={{ t.name | urlencode }}">編輯</a>
-            <form method="post" action="/teams/delete" data-confirm="確定刪除小團「{{ t.name }}」嗎？">
+            <a class="btn btn-sm" href="{{ mb }}/members/teams?edit_team={{ t.name | urlencode }}">編輯</a>
+            <form method="post" action="{{ mb }}/teams/delete" data-confirm="確定刪除小團「{{ t.name }}」嗎？">
               <input type="hidden" name="name" value="{{ t.name }}"><button type="submit" class="btn btn-sm btn-danger">刪除</button>
             </form>
           </td>
@@ -47,17 +47,17 @@
   </div>
   {% else %}
     {% call ui.empty("還沒有任何小團", "例如新增「晨光實體團」，成員填「張晨光、陳小明、許心怡」。") %}
-      <a class="btn btn-primary" href="/members/teams?new=1">＋ 新增小團</a>
+      <a class="btn btn-primary" href="{{ mb }}/members/teams?new=1">＋ 新增小團</a>
     {% endcall %}
   {% endif %}
 </section>
 
 {% if show_form %}
-<aside class="drawer" data-drawer data-close="/members/teams" aria-label="{{ '編輯小團' if t else '新增小團' }}">
-  <form method="post" action="/teams/save">
+<aside class="drawer" data-drawer data-close="{{ mb }}/members/teams" aria-label="{{ '編輯小團' if t else '新增小團' }}">
+  <form method="post" action="{{ mb }}/teams/save">
     <div class="drawer-head">
       <h3>{{ ("編輯小團「" ~ t.name ~ "」") if t else "新增小團" }}</h3>
-      <a class="icon-btn" href="/members/teams" title="關閉（Esc）" aria-label="關閉">✕</a>
+      <a class="icon-btn" href="{{ mb }}/members/teams" title="關閉（Esc）" aria-label="關閉">✕</a>
     </div>
     <div class="drawer-body">
       <input type="hidden" name="original_name" value="{{ t.name if t else '' }}">
@@ -95,7 +95,7 @@
     </div>
     <div class="drawer-foot">
       <button type="submit" class="btn btn-primary">儲存</button>
-      <a class="btn btn-ghost" href="/members/teams">取消</a>
+      <a class="btn btn-ghost" href="{{ mb }}/members/teams">取消</a>
     </div>
   </form>
 </aside>

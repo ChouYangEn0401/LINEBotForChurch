@@ -13,7 +13,7 @@ from church_bot.core.dates import format_date
 from church_bot.models import Issue, Member, Roster, Severity, Target
 from church_bot.tables import LINE_ID_RE
 
-ROSTER_ERRORS = {"roster_expired", "roster_gap", "roster_no_dates", "SourceError", "sheet_error"}
+ROSTER_ERRORS = {"roster_expired", "roster_gap", "roster_no_dates", "SourceError", "SourceNotSetError", "sheet_error"}
 ROSTER_WARNINGS = {"roster_low", "row_unreadable", "row_unreadable_more", "day_duplicate", "day_empty"}
 MEMBER_WARNINGS = {"unknown_name", "inactive_member", "member_dup_name", "member_bad_uid"}
 TARGET_ERRORS = {"no_active_target", "target_no_id", "target_bad_id", "table_error"}
@@ -24,6 +24,7 @@ _ISSUE_LINKS: tuple[tuple[tuple[str, ...], str, str], ...] = (
     (("unknown_name", "inactive_member", "member_"), "/members", "到同工名單處理"),
     (("inactive_team", "team_"), "/members/teams", "到小團處理"),
     (("target_", "no_active_target"), "/targets", "到 LINE 群組處理"),
+    (("SourceNotSetError",), "/roster#connect", "到服事表接上"),
     (("roster_", "row_unreadable", "SourceError", "sheet_error", "day_", "layout"), "/roster", "看服事表"),
     (("lookahead_too_short", "ConfigError", "table_error", "messenger_unavailable", "no_admin",
       "admin_alert_failed", "quota", "send_failed", "MessengerError"), "/settings", "到設定處理"),
@@ -94,8 +95,8 @@ def build_steps(*, issues: list[Issue], settings: Settings, roster: Roster | Non
         steps.append(Step("⏰", "自動發送", "/settings#advanced", "warning", "測試模式：不會真的送到 LINE",
                           schedule.describe()))
     elif not schedule.enabled:
-        steps.append(Step("⏰", "自動發送", "/settings#schedule", "off", "由 Telegram 排程",
-                          "時間到了由 Telegram 呼叫 cli.bat send；也可以按「立刻發送」"))
+        steps.append(Step("⏰", "自動發送", "/settings#schedule", "off", "自動發送關著",
+                          "要按「立刻發送」，或由 Telegram 呼叫 cli.bat send --牧區"))
     else:
         steps.append(Step("⏰", "自動發送", "/settings#schedule", "ok", schedule.describe(), f"下次：{next_run}"))
     return steps

@@ -20,8 +20,23 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from church_bot.errors import ConfigError
+from church_bot.files import write_text
 
+# 預設的提醒訊息：用【中文標籤】寫，不懂程式的人也改得動（規則見 core/message_template.py）
 DEFAULT_TEMPLATE = """\
+📣 【標題】
+📅 【日期】・【聚會】
+
+▸ 【服事名單】
+
+📝 【備註】
+
+【結尾】
+"""
+
+# 舊版的預設（Jinja2 寫法）。設定檔裡還是這一份的，讀進來自動換成上面那一份——排出來的字一模一樣，
+# 防重複照樣認得是同一則，不會因為換寫法就多發一次。
+LEGACY_DEFAULT_TEMPLATE = """\
 📣 {{ title }}
 📅 {{ date_text }}{% if label %}・{{ label }}{% endif %}
 
@@ -137,6 +152,11 @@ class MessageSettings(_Base):
     # 空 = 照服事表的欄位順序；有填就照這個順序排，沒列到的排最後
     role_order: list[str] = []
 
+    @field_validator("template")
+    @classmethod
+    def _upgrade_template(cls, v: str) -> str:
+        return DEFAULT_TEMPLATE if v.replace("\r\n", "\n").strip() == LEGACY_DEFAULT_TEMPLATE.strip() else v
+
 
 class BehaviorSettings(_Base):
     # 從「今天」往後看幾天內的聚會（含今天）。每週提醒一次的話 7 就夠了
@@ -202,19 +222,42 @@ def _default_root() -> Path:
 
 @dataclass(frozen=True, slots=True)
 class Paths:
+    """檔案放哪裡。``ministry`` 空白 = 整個教會（共用的東西）；有值 = 那個牧區自己的資料夾。
+
+    牧區的設定、三張表、資料庫都在自己的資料夾裡（見 docs/MINISTRIES.md）；
+    .env（LINE 金鑰、網頁密碼）、記錄檔、牧區清單 church.yaml 永遠在整個教會那一層。
+    """
+
     root: Path
+    ministry: str = ""
 
     @classmethod
     def discover(cls) -> "Paths":
         return cls(_default_root())
 
+    def for_ministry(self, ministry_id: str) -> "Paths":
+        return Paths(self.root, ministry_id)
+
+    @property
+    def church(self) -> "Paths":
+        return Paths(self.root)
+
     @property
     def config_dir(self) -> Path:
-        return self.root / "config"
+        return self.root / "config" / "ministries" / self.ministry if self.ministry else self.root / "config"
 
     @property
     def data_dir(self) -> Path:
-        return self.root / "data"
+        return self.root / "data" / "ministries" / self.ministry if self.ministry else self.root / "data"
+
+    @property
+    def church_file(self) -> Path:
+        return self.root / "config" / "church.yaml"
+
+    @property
+    def shared_db_file(self) -> Path:
+        """整個教會共用的資料庫：LINE 用量、對外網址、還沒分到牧區的群組、變更紀錄。"""
+        return self.root / "data" / "church_bot.db"
 
     @property
     def settings_file(self) -> Path:
@@ -233,10 +276,6 @@ class Paths:
         return self.config_dir / "teams.csv"
 
     @property
-    def org_file(self) -> Path:
-        return self.config_dir / "org.csv"
-
-    @property
     def env_file(self) -> Path:
         return self.root / ".env"
 
@@ -246,12 +285,19 @@ class Paths:
 
     @property
     def log_file(self) -> Path:
-        return self.data_dir / "church_bot.log"
+        return self.root / "data" / "church_bot.log"
 
     def resolve(self, p: str | Path) -> Path:
-        """設定檔裡的相對路徑一律相對於專案根目錄。"""
+        """設定檔裡的相對路徑：牧區資料夾裡有這個檔案就用它，否則相對於專案根目錄。
+
+        所以牧區可以把自己的服事表 CSV 放在自己的資料夾、只寫檔名；以前寫的 config/xxx.csv 也照樣找得到。
+        """
         path = Path(p).expanduser()
-        return path if path.is_absolute() else self.root / path
+        if path.is_absolute():
+            return path
+        if self.ministry and (own := self.config_dir / path).exists():
+            return own
+        return self.root / path
 
 
 # --------------------------------------------------------------------------- .env
@@ -322,6 +368,11 @@ def load_settings(paths: Paths) -> Settings:
             )
         data = loaded or {}
 
+    # 網頁設定（host、port）是整個教會一份，放在 church.yaml；牧區自己的 settings.yaml 不管這個
+    church_web = read_church_section(paths, "web")
+    if church_web:
+        data["web"] = {**(data.get("web") if isinstance(data.get("web"), dict) else {}), **church_web}
+
     # .env 的機密值覆蓋進去（系統環境變數優先於 .env 檔）
     env_values = {**read_env_file(paths.env_file), **os.environ}
     for section, key, env_name in SECRET_FIELDS:
@@ -339,10 +390,24 @@ def load_settings(paths: Paths) -> Settings:
         ) from exc
 
 
-def settings_to_yaml_dict(settings: Settings) -> dict:
+def read_church_section(paths: Paths, section: str) -> dict:
+    """church.yaml 裡的某一段（例如 web）。沒有檔案、壞掉、或那一段不是 dict 都回傳空 dict。"""
+    if not paths.church_file.exists():
+        return {}
+    try:
+        loaded = yaml.safe_load(paths.church_file.read_text(encoding="utf-8-sig")) or {}
+    except yaml.YAMLError:
+        return {}  # church.yaml 壞掉由 church.py 讀牧區清單時報錯，這裡不重複
+    value = loaded.get(section) if isinstance(loaded, dict) else None
+    return value if isinstance(value, dict) else {}
+
+
+def settings_to_yaml_dict(settings: Settings, paths: Paths | None = None) -> dict:
     data = settings.model_dump(mode="json")
     for section, key, _ in SECRET_FIELDS:
         data.get(section, {}).pop(key, None)
+    if paths is not None and paths.ministry:
+        data.pop("web", None)  # 整個教會一份，在 church.yaml
     return data
 
 
@@ -362,13 +427,11 @@ def save_settings(paths: Paths, settings: Settings) -> None:
     """寫回 settings.yaml（不含機密）。先寫暫存檔再改名，避免寫到一半斷電變成壞檔。"""
     paths.config_dir.mkdir(parents=True, exist_ok=True)
     body = yaml.safe_dump(
-        settings_to_yaml_dict(settings), allow_unicode=True, sort_keys=False, width=100
+        settings_to_yaml_dict(settings, paths), allow_unicode=True, sort_keys=False, width=100
     )
     header = (
         "# 教會服事提醒機器人 — 一般設定\n"
         "# 建議用網頁「設定」頁修改；手動改的話每個欄位的說明請看 settings.example.yaml\n"
         "# 機密（LINE token / 密碼）不在這裡，在 .env\n\n"
     )
-    tmp = paths.settings_file.with_name(paths.settings_file.name + ".tmp")
-    tmp.write_text(header + body, encoding="utf-8")
-    tmp.replace(paths.settings_file)
+    write_text(paths.settings_file, header + body)

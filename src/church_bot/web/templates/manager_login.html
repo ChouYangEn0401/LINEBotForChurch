@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>伺服器管理員登入・服事提醒機器人</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+  <script>
+    try {
+      const saved = localStorage.getItem("bot.theme");
+      const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    } catch (_) { document.documentElement.dataset.theme = "light"; }
+  </script>
+</head>
+<body class="login-body">
+<main class="login">
+  <div class="eyebrow">⛪ 服事提醒機器人</div>
+  <h1>伺服器管理員</h1>
+  {% if step == "password" %}
+    <p class="muted">所有牧區、全教會設定都能管。{{ "在這台電腦上只要管理者密碼。" if local else "從外面登入，密碼之後還要一個 6 位數（驗證器 App 或 Telegram）。" }}</p>
+  {% else %}
+    <p class="muted">密碼對了，還差一步：選一個方式輸入 6 位數。5 分鐘內要完成，錯 3 次就要重新輸入密碼。</p>
+  {% endif %}
+  {% if error %}<div class="banner error"><b>✕</b><span>{{ error }}</span></div>{% endif %}
+
+  {% if step == "password" %}
+  <form method="post" action="/manager/login" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="ffield">
+      <label for="password">管理者密碼</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+    </div>
+    <button type="submit" class="btn btn-primary">下一步</button>
+  </form>
+
+  {% elif step == "second" %}
+  {% if factors.totp %}
+  <form method="post" action="/manager/totp" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="ffield">
+      <label for="code">驗證器 App 的 6 位數</label>
+      <input type="text" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" autofocus required>
+      <span class="help">打開 Google Authenticator（或其他驗證器）上「服事提醒機器人」那一組。</span>
+    </div>
+    <button type="submit" class="btn btn-primary">登入</button>
+  </form>
+  {% endif %}
+  {% if factors.telegram %}
+  <form method="post" action="/manager/telegram/send" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    {% if factors.totp %}<p class="note">或</p>{% endif %}
+    <button type="submit" class="btn {{ 'btn-primary' if not factors.totp }}">傳 6 位數到我的 Telegram</button>
+  </form>
+  {% endif %}
+
+  {% elif step == "telegram" %}
+  <form method="post" action="/manager/telegram/verify" class="stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <input type="hidden" name="nonce" value="{{ nonce }}">
+    <div class="ffield">
+      <label for="code">Telegram 收到的 6 位數</label>
+      <input type="text" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" autofocus required>
+      <span class="help">90 秒內有效、只能用一次。只有在這一頁輸入才算數，別的頁面拿到這組數字也沒用。</span>
+    </div>
+    <button type="submit" class="btn btn-primary">登入</button>
+  </form>
+  <form method="post" action="/manager/telegram/send" class="row">
+    <input type="hidden" name="next" value="{{ next }}">
+    <button type="submit" class="btn btn-sm btn-ghost">沒收到，再傳一次</button>
+  </form>
+  {% endif %}
+
+  <p class="note"><a href="/">← 回所有牧區</a></p>
+</main>
+</body>
+</html>

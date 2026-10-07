@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}同工名單・服事提醒機器人{% endblock %}
 {% block content %}
 {% set m = editing %}
 {% call ui.page_head("每週提醒", "🙋 同工名單", "服事表上寫的名字 → 對到哪一位同工。不設定也能發送，名字會照服事表原樣顯示。") %}
-  <a class="btn btn-primary" href="/members?new=1">＋ 新增同工</a>
+  <a class="btn btn-primary" href="{{ mb }}/members?new=1">＋ 新增同工</a>
 {% endcall %}
 {{ ui.members_seg("list", members | length, pending_accounts) }}
 
@@ -16,7 +16,7 @@
 {% if unknown_error %}
 <div class="panel"><div class="item"><span class="badge warn">注意</span>
   <span class="tt"><span class="nm">讀不到服事表，所以沒辦法檢查名字對不對得到</span><span class="sub">{{ unknown_error }}</span></span>
-  <span class="side"><a href="/roster">看服事表 →</a></span></div></div>
+  <span class="side"><a href="{{ mb }}/roster">看服事表 →</a></span></div></div>
 {% endif %}
 
 {% if unknown %}
@@ -31,7 +31,7 @@
       <tr>
         <td><b>{{ raw }}</b>{% if suggestions %}<div class="sub">可能是 {{ fmt_list(suggestions) }}</div>{% endif %}</td>
         <td>
-          <form method="post" action="/members/alias" class="inline-form">
+          <form method="post" action="{{ mb }}/members/alias" class="inline-form">
             <input type="hidden" name="raw" value="{{ raw }}">
             <select name="member_name" aria-label="{{ raw }} 是誰">
               <option value="">新同工：新增「{{ raw }}」</option>
@@ -56,7 +56,7 @@
     <span class="hint">管理員 {{ admins | length }} 位{% if not admins %}，還沒有人能用只有管理員能用的 LINE 指令{% endif %}</span>
     <span class="tools">
       <input type="search" placeholder="找名字…" data-filter="#member-table" aria-label="搜尋同工">
-      <a class="btn btn-sm btn-ghost admin-only" href="/download/members.csv" title="用 Excel 打開也能改，改完不用重開程式">下載 CSV</a>
+      <a class="btn btn-sm btn-ghost admin-only" href="{{ mb }}/download/members.csv" title="用 Excel 打開也能改，改完不用重開程式">下載 CSV</a>
     </span>
   </div>
   {% if members %}
@@ -78,12 +78,12 @@
             <div class="chips">
             {% for alias in m.aliases %}
               <span class="chip">{{ alias }}
-                <form method="post" action="/members/aliases/remove">
+                <form method="post" action="{{ mb }}/members/aliases/remove">
                   <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="alias" value="{{ alias }}">
                   <button type="submit" class="x" title="移除「{{ alias }}」" aria-label="移除 {{ alias }}">✕</button></form>
               </span>
             {% endfor %}
-            <form method="post" action="/members/aliases/add" class="alias-add">
+            <form method="post" action="{{ mb }}/members/aliases/add" class="alias-add">
               <input type="hidden" name="name" value="{{ m.name }}">
               <input type="text" name="alias" placeholder="＋ 加一個" aria-label="{{ m.name }} 的其他寫法">
             </form>
@@ -93,16 +93,16 @@
               {% else %}<span class="muted">—</span>{% endif %}</td>
           <td>{% if m.active %}<span class="badge ok">服事中</span>{% else %}<span class="badge">停用</span>{% endif %}</td>
           <td>
-            <form method="post" action="/members/admin">
-              <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="next" value="/members">
+            <form method="post" action="{{ mb }}/members/admin">
+              <input type="hidden" name="name" value="{{ m.name }}"><input type="hidden" name="next" value="{{ mb }}/members">
               <input type="hidden" name="enabled" value="{{ '0' if m.admin else '1' }}">
               <button type="submit" class="btn btn-sm {{ 'btn-primary' if m.admin else 'btn-ghost' }}"
                       title="{{ '按一下取消' if m.admin else '按一下設為管理員' }}{{ '' if m.line_user_id else '（還沒對應 LINE 帳號，設了在 LINE 上也認不出他）' }}">{{ "開" if m.admin else "關" }}</button>
             </form>
           </td>
           <td class="ops">
-            <a class="btn btn-sm" href="/members?edit={{ m.name | urlencode }}">編輯</a>
-            <form method="post" action="/members/delete" data-confirm="確定刪除「{{ m.name }}」嗎？離開教會的話，改成「停用」比較好，之後被排到會提醒你。">
+            <a class="btn btn-sm" href="{{ mb }}/members?edit={{ m.name | urlencode }}">編輯</a>
+            <form method="post" action="{{ mb }}/members/delete" data-confirm="確定刪除「{{ m.name }}」嗎？離開教會的話，改成「停用」比較好，之後被排到會提醒你。">
               <input type="hidden" name="name" value="{{ m.name }}"><button type="submit" class="btn btn-sm btn-danger">刪除</button>
             </form>
           </td>
@@ -113,18 +113,18 @@
   </div>
   {% else %}
     {% call ui.empty("還沒有任何同工", "新增幾位，或到「LINE 帳號」分頁從大家的 LINE 帳號直接加入。") %}
-      <a class="btn btn-primary" href="/members?new=1">＋ 新增同工</a>
-      <a class="btn" href="/members/accounts">從 LINE 帳號加入</a>
+      <a class="btn btn-primary" href="{{ mb }}/members?new=1">＋ 新增同工</a>
+      <a class="btn" href="{{ mb }}/members/accounts">從 LINE 帳號加入</a>
     {% endcall %}
   {% endif %}
 </section>
 
 {% if show_form %}
-<aside class="drawer" data-drawer data-close="/members" aria-label="{{ '編輯同工' if m else '新增同工' }}">
-  <form method="post" action="/members/save">
+<aside class="drawer" data-drawer data-close="{{ mb }}/members" aria-label="{{ '編輯同工' if m else '新增同工' }}">
+  <form method="post" action="{{ mb }}/members/save">
     <div class="drawer-head">
       <h3>{{ ("編輯「" ~ m.name ~ "」") if m else "新增同工" }}</h3>
-      <a class="icon-btn" href="/members" title="關閉（Esc）" aria-label="關閉">✕</a>
+      <a class="icon-btn" href="{{ mb }}/members" title="關閉（Esc）" aria-label="關閉">✕</a>
     </div>
     <div class="drawer-body">
       <input type="hidden" name="original_name" value="{{ m.name if m else '' }}">
@@ -158,7 +158,7 @@
     </div>
     <div class="drawer-foot">
       <button type="submit" class="btn btn-primary">儲存</button>
-      <a class="btn btn-ghost" href="/members">取消</a>
+      <a class="btn btn-ghost" href="{{ mb }}/members">取消</a>
     </div>
   </form>
 </aside>

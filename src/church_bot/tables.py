@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Callable, Generic, Iterable, TypeVar
 
 from church_bot.errors import TableError
+from church_bot.files import write_text
 from church_bot.models import Issue, Member, Severity, Target, Team
 
 LINE_ID_RE = re.compile(r"^[CUR][0-9a-f]{32}$")
@@ -80,15 +81,12 @@ def read_csv_text(path: Path) -> tuple[str, str]:
 
 
 def write_csv(path: Path, header: list[str], rows: list[list[str]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     buf = io.StringIO()
     writer = csv.writer(buf, lineterminator="\n")
     writer.writerow(header)
     writer.writerows(rows)
-    tmp = path.with_name(path.name + ".tmp")
     # utf-8-sig：Windows 的 Excel 直接雙擊打開中文才不會亂碼
-    tmp.write_text(buf.getvalue(), encoding="utf-8-sig")
-    tmp.replace(path)
+    write_text(path, buf.getvalue(), encoding="utf-8-sig")
 
 
 # --------------------------------------------------------------------------- generic table
@@ -200,6 +198,9 @@ class TargetTable(CsvTable[Target]):
         Column("labels", "只發這些聚會", ("聚會", "labels", "只發聚會")),
         Column("mention", "標記人員", ("@人", "mention", "tag")),
         Column("note", "備註", ("note", "說明")),
+        Column("title", "訊息標題", ("標題", "title")),
+        Column("footer", "結尾文字", ("結尾", "footer")),
+        Column("template", "訊息模板", ("模板", "template")),
     )
 
     def from_row(self, row: dict[str, str], line_no: int, issues: list[Issue]) -> Target | None:
@@ -232,12 +233,13 @@ class TargetTable(CsvTable[Target]):
         return Target(
             name=name, line_id=line_id, enabled=enabled,
             roles=parse_list(row.get("roles", "")), labels=parse_list(row.get("labels", "")),
-            mention=mention, note=row.get("note", ""),
+            mention=mention, note=row.get("note", ""), title=row.get("title", ""),
+            footer=row.get("footer", ""), template=row.get("template", "").replace("\r\n", "\n"),
         )
 
     def to_row(self, t: Target) -> list[str]:
         return [t.name, t.line_id, fmt_bool(t.enabled), fmt_list(t.roles), fmt_list(t.labels),
-                fmt_bool(t.mention), t.note]
+                fmt_bool(t.mention), t.note, t.title, t.footer, t.template]
 
     def validate_all(self, items: list[Target], issues: list[Issue]) -> None:
         seen: dict[str, str] = {}

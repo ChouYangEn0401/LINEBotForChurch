@@ -58,23 +58,44 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture
-def paths(tmp_path: Path) -> Paths:
+def root(tmp_path: Path) -> Paths:
+    """整個教會那一層（還沒有任何牧區）。"""
     (tmp_path / "config").mkdir()
     (tmp_path / "data").mkdir()
     return Paths(tmp_path)
 
 
 @pytest.fixture
+def paths(root: Paths) -> Paths:
+    """一個教會只有一個牧區（m1「測試牧區」）的資料夾：大部分測試都在這裡面跑，跟實際使用的樣子一樣。"""
+    from church_bot.church import ChurchConfig, Ministry, save_church
+
+    save_church(root, ChurchConfig([Ministry("m1", "測試牧區")]))
+    m1 = root.for_ministry("m1")
+    m1.config_dir.mkdir(parents=True)
+    m1.data_dir.mkdir(parents=True)
+    return m1
+
+
+@pytest.fixture
 def handler(paths: Paths, monkeypatch: pytest.MonkeyPatch):
-    """LINE Webhook 處理器，LINE 換成 tests/line_fakes.py 的 FakeLine。"""
-    from church_bot.service import BotService
+    """LINE Webhook 處理器，LINE 換成 tests/line_fakes.py 的 FakeLine。
+
+    gid() 這個群組已經在 m1 的「LINE 群組」清單裡（先不啟用）：大部分指令測試都假設「在自己牧區的群組裡打」。
+    """
+    from church_bot.models import Target
+    from church_bot.tables import TargetTable
+    from tests.line_fakes import gid
+
+    TargetTable(paths.targets_file).save([Target("同工群", gid(), enabled=False)])
+    from church_bot.ministries import Church
     from church_bot.webhook import WebhookHandler
     from tests.line_fakes import SECRET, FakeLine
 
     write(paths.env_file, f"LINE_CHANNEL_SECRET={SECRET}\nLINE_CHANNEL_ACCESS_TOKEN=tok\n")
     FakeLine.reset()
     monkeypatch.setattr("church_bot.webhook.LineMessenger", FakeLine)
-    return WebhookHandler(BotService(paths))
+    return WebhookHandler(Church(paths.church))
 
 
 # --------------------------------------------------------------------------- web
@@ -84,7 +105,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.fixture
 def client(paths: Paths):
-    """管理網頁（測試模式發送、關掉排程），資料用 cmd_init 建出來的範例。"""
+    """管理網頁（測試模式發送、關掉排程），資料用 cmd_init 建出來的範例。
+
+    網址預設在 m1「測試牧區」裡面（base_url = /m/m1/）：client.get("/targets") 就是那個牧區的 LINE 群組頁。
+    要測整個教會那一層（首頁、登入、全教會設定）用完整網址，例如 client.get(CHURCH + "/")。
+    """
     from fastapi.testclient import TestClient
 
     from church_bot.cli import cmd_init
@@ -92,12 +117,15 @@ def client(paths: Paths):
     from church_bot.web.app import create_app
 
     for name in ("settings.example.yaml", "targets.example.csv", "members.example.csv", "teams.example.csv"):
-        (paths.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
+        (paths.church.config_dir / name).write_bytes((REPO_ROOT / "config" / name).read_bytes())
     (paths.root / ".env.example").write_bytes((REPO_ROOT / ".env.example").read_bytes())
     cmd_init(paths, None)
     settings = load_settings(paths)
     settings.messenger.kind = "console"
     settings.schedule.enabled = False
     save_settings(paths, settings)
-    with TestClient(create_app(paths)) as c:
+    with TestClient(create_app(paths), base_url="http://testserver/m/m1/") as c:
         yield c
+
+
+CHURCH = "http://testserver"  # 整個教會那一層的網址（client 預設在 /m/m1/ 裡面）

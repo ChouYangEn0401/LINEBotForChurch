@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}變更紀錄・服事提醒機器人{% endblock %}
+{% block content %}
+{% if m %}
+  {% set lede = "「" ~ m.name ~ "」的設定、LINE 群組、同工名單、小團，每一次修改都在這裡：什麼時候、從哪裡、改了什麼。改錯了可以還原。" %}
+{% else %}
+  {% set lede = "牧區清單（新增、改名、牧區密碼）每一次修改都在這裡。各牧區自己的修改在牧區裡的「變更紀錄」。" %}
+{% endif %}
+{{ ui.page_head((m.name ~ " · 管理員") if m else "管理員", "🕘 變更紀錄", lede) }}
+
+<div class="meta">
+  <span>紀錄 <b>{{ changes | length }} 筆</b>{% if changes | length >= limit %}（只列最近 {{ limit }} 筆）{% endif %}</span>
+  <span>不記是誰改的，只記<b>來源</b>：管理網頁、LINE、機器人、指令列、直接改檔案</span>
+</div>
+
+<section class="panel">
+  <div class="panel-head">最近的修改 <span class="badge">{{ changes | length }}</span><span class="hint">點一列看改了哪幾行；綠色是加上去的、紅色是拿掉的</span></div>
+  {% for c in changes %}
+  <details class="change">
+    <summary>
+      <span class="when mono">{{ c.when }}</span>
+      <span class="badge">{{ c.label }}</span>
+      <span class="what"><span class="nm">{{ c.summary }}</span><span class="sub">{{ c.source }}</span></span>
+    </summary>
+    <div class="change-body">
+      {% set lines = diffs[c.id] %}
+      {% if lines %}
+      <pre class="diff">{% for kind, line in lines %}<span class="{{ kind }}">{{ {"add": "+ ", "del": "- ", "ctx": "  ", "hunk": ""}[kind] }}{{ line if kind != "hunk" else "⋯" }}</span>
+{% endfor %}</pre>
+      {% else %}<p class="note">這一筆是記下原本的內容（開始記錄之前就存在），沒有前後可以比。</p>{% endif %}
+      <div class="row">
+        {% if c.before %}
+        <form method="post" action="{{ mb }}/history/{{ c.id }}/restore"
+              data-confirm="把「{{ c.label }}」還原成 {{ c.when }} 這次修改之前的樣子？在這之後對同一個檔案的修改也會一起回到那時候（還原本身也會留一筆紀錄，可以再改回來）。">
+          <button type="submit" class="btn btn-sm">還原成這次修改之前</button></form>
+        {% endif %}
+        <span class="note admin-only"><code>{{ c.file }}</code></span>
+      </div>
+    </div>
+  </details>
+  {% else %}
+    {{ ui.empty("還沒有任何修改紀錄", "從現在開始，每次在管理網頁或 LINE 改設定、名單、群組，都會記在這裡。") }}
+  {% endfor %}
+</section>
+{% endblock %}

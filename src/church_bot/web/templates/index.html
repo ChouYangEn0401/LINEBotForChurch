@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}主控台・服事提醒機器人{% endblock %}
 {% block content %}
 {% set errors = problems | selectattr("severity.value", "equalto", "error") | list %}
@@ -23,7 +23,7 @@
   <div class="sechead"><div class="eyebrow">運作流程</div><span class="hint">每次發送照這四步走，點一格去看那一步</span></div>
   <div class="stages">
     {% for s in steps %}
-    <a class="stage {{ s.status }}" href="{{ s.href }}">
+    <a class="stage {{ s.status }}" href="{{ mb ~ s.href }}">
       <span class="n">{{ "%02d" | format(loop.index) }}<span>{{ {"ok": "正常", "warning": "要看一下", "error": "有問題", "off": "沒有用到"}[s.status] }}</span></span>
       <span class="t">{{ s.icon }} {{ s.title }}</span>
       <span class="s">{{ s.summary }}</span>
@@ -35,15 +35,15 @@
 {% endif %}
 
 <div class="metrics">
-  <a class="metric" href="{{ '/settings#schedule' if admin_mode else '/help#daily' }}">
+  <a class="metric" href="{{ mb ~ ('/settings#schedule' if admin_mode else '/help#daily') }}">
     <span class="k">下次發送</span>
     {% if next_run and next_run != '（沒有排程）' %}
       <span class="v">{{ next_run }}</span><span class="d">{{ schedule_status }}</span>
     {% else %}
-      <span class="v">由 Telegram 排程</span><span class="d">時間到了由 Telegram 機器人來發</span>
+      <span class="v">自動發送關著</span><span class="d">按「立刻發送」，或由 Telegram 呼叫 cli.bat send --牧區 {{ m.name }}</span>
     {% endif %}
   </a>
-  <a class="metric" href="{{ '/runs/' ~ last.id if last else '/runs' }}">
+  <a class="metric" href="{{ mb ~ ('/runs/' ~ last.id if last else '/runs') }}">
     <span class="k">上次發送</span>
     {% if last %}
       <span class="v {{ {'error': 'bad', 'warning': 'warn', 'ok': 'good'}[last.status] }}">{{ last.started_at[5:16] | replace("T", " ") | replace("-", "/") }}</span>
@@ -97,11 +97,11 @@
     <span class="hint">預覽，不會真的送出；到排程時間就照這些內容發</span>
     <span class="spacer"></span>
     {% if report.deliveries %}
-    <form method="post" action="/send" data-confirm="確定現在就發送嗎？會真的送到 LINE 群組，並扣 LINE 額度。">
+    <form method="post" action="{{ mb }}/send" data-confirm="確定現在就發送嗎？會真的送到 LINE 群組，並扣 LINE 額度。">
       <input type="hidden" name="force" value="0">
       <button class="btn btn-sm" type="submit" title="不等排程時間，現在就發。已經送過、內容沒變的會略過">立刻發送</button>
     </form>
-    <form method="post" action="/send" data-confirm="已經送過的群組也會再收到一次，確定嗎？">
+    <form method="post" action="{{ mb }}/send" data-confirm="已經送過的群組也會再收到一次，確定嗎？">
       <input type="hidden" name="force" value="1">
       <button class="btn btn-sm btn-ghost" type="submit" title="已經送過的也再送一次">重新發送</button>
     </form>
@@ -121,7 +121,7 @@
   {% elif plan and plan.samples %}
     <div class="panel warn">
       <div class="panel-head">還沒有會收到提醒的群組<span class="hint">訊息會長這樣</span>
-        <span class="tools"><a class="btn btn-sm btn-primary" href="/targets?new=1">新增 LINE 群組</a></span></div>
+        <span class="tools"><a class="btn btn-sm btn-primary" href="{{ mb }}/targets?new=1">新增 LINE 群組</a></span></div>
       <div class="panel-body pcards">
         {% for day, msg in plan.samples %}<pre class="msg">{{ msg.text }}</pre>{% endfor %}
       </div>

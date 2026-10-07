@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}發生問題・服事提醒機器人{% endblock %}
 {% block content %}
 {{ ui.page_head("出錯了", "這一頁打不開") }}
@@ -8,10 +8,20 @@
     <span class="tt"><span class="nm">{{ message }}</span>{% if hint %}<span class="sub">{{ hint }}</span>{% endif %}</span>
     <span class="side"></span></div>
 </div>
+{% if manager_next is defined %}
+<div class="row"><a class="btn btn-primary" href="/manager/login?next={{ manager_next | urlencode }}">伺服器管理員登入</a>
+  <a class="btn btn-ghost" href="/">回所有牧區</a></div>
+{% else %}
 <div class="panel">
   <div class="panel-head">可以試試</div>
-  <a class="item" href="/"><span class="badge">1</span><span class="tt"><span class="nm">回主控台</span><span class="sub">看「要處理的事」有沒有寫原因。</span></span><span class="side">打開 →</span></a>
-  <a class="item" href="/check"><span class="badge">2</span><span class="tt"><span class="nm">系統檢查</span><span class="sub">一次檢查全部設定。</span></span><span class="side">打開 →</span></a>
+  {% if m %}
+  <a class="item" href="{{ mb }}/"><span class="badge">1</span><span class="tt"><span class="nm">回「{{ m.name }}」的主控台</span><span class="sub">看「要處理的事」有沒有寫原因。</span></span><span class="side">打開 →</span></a>
+  <a class="item" href="{{ mb }}/check"><span class="badge">2</span><span class="tt"><span class="nm">系統檢查</span><span class="sub">一次檢查這個牧區的全部設定。</span></span><span class="side">打開 →</span></a>
+  {% else %}
+  <a class="item" href="/"><span class="badge">1</span><span class="tt"><span class="nm">回所有牧區</span><span class="sub">從首頁點進要處理的牧區，看主控台「要處理的事」。</span></span><span class="side">打開 →</span></a>
+  <div class="item"><span class="badge">2</span><span class="tt"><span class="nm">系統檢查</span><span class="sub">點進牧區後，在側欄「管理員 → 系統檢查」（按右上角「進階頁面」才看得到）。</span></span><span class="side"></span></div>
+  {% endif %}
   <div class="item"><span class="badge">3</span><span class="tt"><span class="nm">還是不行</span><span class="sub">把 <code>data/church_bot.log</code> 這個檔案傳給維護的人。</span></span><span class="side"></span></div>
 </div>
+{% endif %}
 {% endblock %}

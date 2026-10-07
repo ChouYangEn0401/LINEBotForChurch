@@ -421,6 +421,31 @@ class History:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def hand_over_chat(self, chat_id: str, other: "History") -> int:
+        """把一個群組交給另一份資料庫（還沒分配的群組分到某個牧區時用）。
+
+        群組本身、在裡面講過話的人、他們登記的名字都跟著過去，這裡不再留（還在別的群組出現的人除外）；
+        對方已經認識的人以對方的為準，不覆蓋那邊已經確認過的資料。回傳交出去幾個人。
+        """
+        with self._conn() as conn:
+            chat = conn.execute("SELECT * FROM chats WHERE chat_id=?", (chat_id,)).fetchone()
+            members = conn.execute("SELECT * FROM memberships WHERE chat_id=?", (chat_id,)).fetchall()
+            people = conn.execute("SELECT p.* FROM people p JOIN memberships m ON m.user_id = p.user_id "
+                                  "WHERE m.chat_id=?", (chat_id,)).fetchall()
+        with other._conn() as conn:
+            for table, rows in (("chats", [chat] if chat else []), ("memberships", members), ("people", people)):
+                for row in rows:
+                    cols = list(row.keys())  # 欄位名稱來自資料庫本身，不是使用者輸入
+                    conn.execute(f"INSERT OR IGNORE INTO {table} ({','.join(cols)}) "  # noqa: S608
+                                 f"VALUES ({','.join('?' * len(cols))})", tuple(row))
+        with self._conn() as conn:
+            conn.execute("DELETE FROM memberships WHERE chat_id=?", (chat_id,))
+            conn.execute("DELETE FROM chats WHERE chat_id=?", (chat_id,))
+            for person in people:
+                conn.execute("DELETE FROM people WHERE user_id=? AND user_id NOT IN (SELECT user_id FROM memberships)",
+                             (person["user_id"],))
+        return len(people)
+
     def forget_person(self, user_id: str) -> None:
         with self._conn() as conn:
             conn.execute("DELETE FROM people WHERE user_id=?", (user_id,))

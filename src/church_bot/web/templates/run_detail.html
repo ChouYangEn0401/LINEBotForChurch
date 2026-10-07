@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}發送結果・服事提醒機器人{% endblock %}
 {% block content %}
 {% set problems = r.issues | rejectattr("severity", "equalto", "info") | list %}
@@ -8,7 +8,7 @@
 {% set failed = r.deliveries | selectattr("status", "equalto", "failed") | list %}
 {% set skipped = r.deliveries | selectattr("status", "equalto", "skipped") | list %}
 {% call ui.page_head("發送紀錄", "發送結果") %}
-  <a class="btn" href="/runs">← 回紀錄</a>
+  <a class="btn" href="{{ mb }}/runs">← 回紀錄</a>
 {% endcall %}
 <div class="meta">
   <span>時間 <b>{{ r.started_at[:19] | replace("T", " ") }}</b></span>

@@ -1,13 +1,14 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}說明・服事提醒機器人{% endblock %}
 {% block content %}
+{% set hb = mb or help_base or "" %}
 {% call ui.page_head("紀錄", "❓ 說明", "Google Sheet 的服事表 → 每週固定時間 → 發到 LINE 群組。平常只要照常更新服事表，其他都不用做。") %}
-  <a class="btn" href="/check">系統檢查</a>
+  <a class="btn" href="{{ hb }}/check">系統檢查</a>
 {% endcall %}
 
 <nav class="seg">
-  <a href="#pages">每一頁做什麼</a><a href="#daily">想做的事去哪裡</a><a href="#setup">第一次設定</a>
+  <a href="#ministries">牧區</a><a href="#pages">每一頁做什麼</a><a href="#daily">想做的事去哪裡</a><a href="#setup">第一次設定</a>
   <a href="#commands">LINE 指令</a><a href="#sheet">服事表怎麼排</a><a href="#faq">常見狀況</a>
 </nav>
 
@@ -24,33 +25,47 @@
   </div>
 </section>
 
+<section class="panel" id="ministries">
+  <div class="panel-head">牧區<span class="hint">一個程式、一個 LINE 官方帳號，管很多個牧區</span></div>
+  <div class="panel-body">
+    <table class="help-table">
+      <tr><td><a href="/">⛪ 首頁</a></td><td>所有牧區：每個牧區現在的狀況、什麼時候發、上次發送。按「新增牧區」幫別的牧區建一套；機器人被邀進還沒分配的群組，也在這裡選它屬於哪個牧區。</td></tr>
+      <tr><td>點進一個牧區</td><td>就是它自己的主控台、服事表、同工名單、LINE 群組、設定，跟別的牧區完全分開。左上角「← 所有牧區」回首頁。</td></tr>
+      <tr><td>每個群組自己的訊息</td><td>「LINE 群組」編輯一個群組 →「這個群組的提醒訊息」：標題、結尾，或整則改寫；留空就用牧區設定的。</td></tr>
+      <tr><td>什麼時候發</td><td>每個牧區在自己的「設定 → 什麼時候發」選星期幾、幾點。後台（2-start）開著就會照時間發；Telegram 呼叫 <code>cli.bat send</code> 會發「今天輪到的牧區」，兩邊都觸發也只發一次。</td></tr>
+      <tr><td>牧區密碼</td><td>網站密碼之外，牧區可以在「設定 → 這個牧區」再設一層。忘記了只能在執行機器人的那台電腦上清掉。</td></tr>
+      <tr><td>改錯了</td><td>牧區裡「管理員 → 變更紀錄」看得到每次改了什麼，一鍵還原。</td></tr>
+    </table>
+  </div>
+</section>
+
 <section class="panel" id="pages">
   <div class="panel-head">每一頁做什麼<span class="hint">側欄每一項底下的小字是它現在的狀況</span></div>
   <div class="panel-body">
     <table class="help-table">
-      <tr><td><a href="/">🎯 主控台</a></td><td>現在會不會發、發什麼、有哪些事要處理。</td></tr>
-      <tr><td><a href="/roster">📄 服事表</a></td><td>Google Sheet 現在的內容、程式讀到什麼、換一份服事表。</td></tr>
-      <tr><td><a href="/members">🙋 同工名單</a></td><td>服事表上的名字對到誰。分頁「LINE 帳號」確認大家登記的名字；「小團」登記整團一起上的成員。</td></tr>
-      <tr><td><a href="/targets">👥 LINE 群組</a></td><td>提醒送到哪些群組、每個群組收哪些服事。</td></tr>
-      <tr><td><a href="/runs">📜 發送紀錄</a></td><td>以前每一次發了什麼、有沒有失敗。</td></tr>
-      <tr><td>⚙ 設定 <span class="badge warn">管理員</span></td><td>發送時間、訊息樣子、通知誰、金鑰與密碼。按右上角「切換身分」才會出現在側欄。</td></tr>
+      <tr><td><a href="{{ hb }}/">🎯 主控台</a></td><td>現在會不會發、發什麼、有哪些事要處理。</td></tr>
+      <tr><td><a href="{{ hb }}/roster">📄 服事表</a></td><td>Google Sheet 現在的內容、程式讀到什麼、換一份服事表。</td></tr>
+      <tr><td><a href="{{ hb }}/members">🙋 同工名單</a></td><td>服事表上的名字對到誰。分頁「LINE 帳號」確認大家登記的名字；「小團」登記整團一起上的成員。</td></tr>
+      <tr><td><a href="{{ hb }}/targets">👥 LINE 群組</a></td><td>提醒送到哪些群組、每個群組收哪些服事。</td></tr>
+      <tr><td><a href="{{ hb }}/runs">📜 發送紀錄</a></td><td>以前每一次發了什麼、有沒有失敗。</td></tr>
+      <tr><td>⚙ 設定 <span class="badge warn">管理員</span></td><td>這個牧區的發送時間、訊息樣子、通知誰、牧區密碼。按右上角「進階頁面」才會出現在側欄；變更紀錄也在那裡。</td></tr>
     </table>
   </div>
-  <div class="panel-foot">「切換身分」只是把進階的頁面收起來，不是權限。要限制誰能開這個網頁，到「設定 → 金鑰與密碼」設網頁密碼。</div>
+  <div class="panel-foot">「進階頁面」只是把進階的頁面收起來，不是權限。權限看右上角的身分：<b>訪客</b>（網站密碼，只看得到首頁、可以新增牧區）、<b>牧區管理員</b>（輸入了那個牧區的密碼）、<b>伺服器管理員</b>（管理者密碼，所有牧區都能管）。</div>
 </section>
 
 <section class="panel" id="daily">
   <div class="panel-head">想做的事去哪裡</div>
   <div class="panel-body">
     <table class="help-table">
-      <tr><td>看這週會發什麼</td><td><a href="/#sending">主控台 → 這次會發送</a></td></tr>
-      <tr><td>臨時想提早發、想重發</td><td><a href="/#sending">主控台 → 立刻發送</a>；或在 LINE 群組打 <span class="kbd">/提醒</span>（免費）</td></tr>
-      <tr><td>新同工、有人離開、名字對不到</td><td><a href="/members">同工名單</a></td></tr>
-      <tr><td>有人在 LINE 登記了名字</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a></td></tr>
-      <tr><td>讓某人可以用管理員的 LINE 指令</td><td><a href="/members/accounts">同工名單 → LINE 帳號</a> → 那個人那一列按「設為管理員」</td></tr>
-      <tr><td>新群組、群組換了</td><td><a href="/targets">LINE 群組</a></td></tr>
-      <tr><td>服事表換了新分頁</td><td><a href="/roster#connect">服事表 → 換一份服事表</a></td></tr>
-      <tr><td>覺得怪怪的</td><td><a href="/check">系統檢查</a></td></tr>
+      <tr><td>看這週會發什麼</td><td><a href="{{ hb }}/#sending">主控台 → 這次會發送</a></td></tr>
+      <tr><td>臨時想提早發、想重發</td><td><a href="{{ hb }}/#sending">主控台 → 立刻發送</a>；或在 LINE 群組打 <span class="kbd">/提醒</span>（免費）</td></tr>
+      <tr><td>新同工、有人離開、名字對不到</td><td><a href="{{ hb }}/members">同工名單</a></td></tr>
+      <tr><td>有人在 LINE 登記了名字</td><td><a href="{{ hb }}/members/accounts">同工名單 → LINE 帳號</a></td></tr>
+      <tr><td>讓某人可以用管理員的 LINE 指令</td><td><a href="{{ hb }}/members/accounts">同工名單 → LINE 帳號</a> → 那個人那一列按「設為管理員」</td></tr>
+      <tr><td>新群組、群組換了</td><td><a href="{{ hb }}/targets">LINE 群組</a></td></tr>
+      <tr><td>服事表換了新分頁</td><td><a href="{{ hb }}/roster#connect">服事表 → 換一份服事表</a></td></tr>
+      <tr><td>覺得怪怪的</td><td><a href="{{ hb }}/check">系統檢查</a></td></tr>
     </table>
   </div>
 </section>
@@ -60,11 +75,11 @@
   <div class="panel-body">
     <ol class="steps">
       <li><b>申請 LINE 機器人</b>：照 <code>docs/SETUP_LINE.md</code> 拿到 Channel access token，貼到「設定 → 金鑰與密碼」。</li>
-      <li><b>接上服事表</b>：Google Sheet 開成「知道連結的使用者可以檢視」，到 <a href="/roster#connect">服事表 → 換一份服事表</a> 貼網址。</li>
-      <li><b>加群組</b>：把機器人邀進 LINE 群組，在群組打 <span class="kbd">/群組ID</span>，到 <a href="/targets?new=1">LINE 群組</a> 新增並貼上 ID，按「送測試訊息」。</li>
-      <li><b>設定管理員</b>：在群組打 <span class="kbd">/我的名字 你的名字</span>，到 <a href="/members/accounts">LINE 帳號</a> 按「對應到」，再按「設為管理員」。出問題就會通知你，也才能用 /別周測試。</li>
-      <li><b>排每週的發送</b>：在 Telegram 機器人加每週四 20:00 呼叫 <code>cli.bat send</code>（見 README）。</li>
-      <li><b>系統檢查</b>：<a href="/check">全部通過</a>就完成了。</li>
+      <li><b>接上服事表</b>：Google Sheet 開成「知道連結的使用者可以檢視」，到 <a href="{{ hb }}/roster#connect">服事表 → 換一份服事表</a> 貼網址。</li>
+      <li><b>加群組</b>：把機器人邀進 LINE 群組，在群組打 <span class="kbd">/群組ID</span>，到 <a href="{{ hb }}/targets?new=1">LINE 群組</a> 新增並貼上 ID，按「送測試訊息」。</li>
+      <li><b>設定管理員</b>：在群組打 <span class="kbd">/我的名字 你的名字</span>，到 <a href="{{ hb }}/members/accounts">LINE 帳號</a> 按「對應到」，再按「設為管理員」。出問題就會通知你，也才能用 /別周測試。</li>
+      <li><b>打開自動發送</b>：「設定 → 什麼時候發」勾「自動發送」、選星期幾和幾點。後台（2-start）開著就會照時間發；想多一層保險，可以讓 Telegram 每週呼叫 <code>cli.bat send</code>（今天輪到的牧區才會發，見 README）。</li>
+      <li><b>系統檢查</b>：<a href="{{ hb }}/check">全部通過</a>就完成了。</li>
     </ol>
   </div>
 </section>
@@ -110,32 +125,32 @@
       <tr><td>一天兩場</td><td>加一欄「聚會」，同一個日期寫兩列。</td></tr>
     </table>
   </div>
-  <div class="panel-foot">到 <a href="/roster">服事表</a> 可以直接看程式怎麼讀你現在這張表。</div>
+  <div class="panel-foot">到 <a href="{{ hb }}/roster">服事表</a> 可以直接看程式怎麼讀你現在這張表。</div>
 </section>
 
 <section class="panel" id="faq">
   <div class="panel-head">常見狀況</div>
   <div class="panel-body">
     <details class="faq"><summary>主控台說「某某在同工名單找不到」</summary>
-      <p>服事表出現了新名字或打錯字。訊息照原樣送出，不影響提醒。到 <a href="/members">同工名單</a> 最上面選他是誰。</p></details>
+      <p>服事表出現了新名字或打錯字。訊息照原樣送出，不影響提醒。到 <a href="{{ hb }}/members">同工名單</a> 最上面選他是誰。</p></details>
     <details class="faq"><summary>想一次收集大家的真實姓名和 LINE 帳號</summary>
-      <p>到 <a href="/members/accounts">LINE 帳號</a> 按「開放登記」，請大家在群組打「/我的名字 真實姓名」，再逐一確認。收集完按「關閉登記」。</p></details>
+      <p>到 <a href="{{ hb }}/members/accounts">LINE 帳號</a> 按「開放登記」，請大家在群組打「/我的名字 真實姓名」，再逐一確認。收集完按「關閉登記」。</p></details>
     <details class="faq"><summary>誰是管理員？怎麼多加一位</summary>
-      <p>管理員 = 同工名單裡勾了「管理員」而且對應好 LINE 帳號的人。到 <a href="/members/accounts">LINE 帳號</a> 找到那個人，按「設為管理員」；或在 <a href="/members">同工名單</a> 編輯他，勾「管理員」。管理員可以用 /別周測試、會拿到 /設定 的驗證碼、出問題會收到通知。能開這個網頁的人就能勾，所以要限制的話請設網頁密碼。</p></details>
+      <p>管理員 = 同工名單裡勾了「管理員」而且對應好 LINE 帳號的人。到 <a href="{{ hb }}/members/accounts">LINE 帳號</a> 找到那個人，按「設為管理員」；或在 <a href="{{ hb }}/members">同工名單</a> 編輯他，勾「管理員」。管理員可以用 /別周測試、會拿到 /設定 的驗證碼、出問題會收到通知。能開這個網頁的人就能勾，所以要限制的話請設網頁密碼。</p></details>
     <details class="faq"><summary>有人改了 LINE 名稱</summary>
       <p>不用處理。對應靠的是不會變的 LINE ID。</p></details>
     <details class="faq"><summary>有人離開教會、不再服事</summary>
       <p>到同工名單把他改成「停用」，比刪除好：之後服事表又排到他，會提醒管理員。</p></details>
     <details class="faq"><summary>新的群組、群組換了</summary>
-      <p>把機器人邀進新群組，它會出現在 <a href="/targets">LINE 群組</a> 最上面，按「加入」再勾「要收到提醒」。</p></details>
+      <p>把機器人邀進新群組，它會出現在 <a href="{{ hb }}/targets">LINE 群組</a> 最上面，按「加入」再勾「要收到提醒」。</p></details>
     <details class="faq"><summary>服事表排到下一季、開了新分頁</summary>
-      <p>直接在同一個分頁往下加最簡單。開了新分頁就到 <a href="/roster#connect">服事表 → 換一份服事表</a> 貼新分頁的網址。</p></details>
+      <p>直接在同一個分頁往下加最簡單。開了新分頁就到 <a href="{{ hb }}/roster#connect">服事表 → 換一份服事表</a> 貼新分頁的網址。</p></details>
     <details class="faq"><summary>這個月的 LINE 額度用完了</summary>
       <p>免費方案每月 200 則，送到群組按人數算。讓大家在群組打 <span class="kbd">/提醒</span>（免費），排程就會略過。詳見 <code>docs/LINE_PRICING.md</code>。</p></details>
     <details class="faq"><summary>在群組打指令，機器人沒反應</summary>
       <p>聊天指令要開著免費模式（雙擊 <code>3-open-webhook.bat</code>）。每週提醒不需要它。</p></details>
     <details class="faq"><summary>電腦關機會怎樣</summary>
-      <p>由 Telegram 排程的話，Telegram 機器人那台開著就會發。用內建排程的話，錯過時間後 12 小時內打開程式會補發。</p></details>
+      <p>自動發送要後台開著才會發；錯過時間後 12 小時內打開程式會補發。有設 Telegram 備援的話，Telegram 那台開著就會發（不會發兩次）。</p></details>
   </div>
 </section>
 {% endblock %}

@@ -47,10 +47,12 @@ window.addEventListener("pageshow", () => {
 })();
 
 // ---------- 側欄每一項「現在的狀況」 ----------
-// 先用上次記下來的（換頁時不會閃），再去問 /api/nav 拿最新的。
+// 牧區裡面才有（body 的 data-nav-api = /m/<編號>/api/nav）。先用上次記下來的（換頁時不會閃），再去問最新的。
 (() => {
+  const api = document.body.dataset.navApi;
   const items = Array.from(document.querySelectorAll("[data-nav]"));
-  if (!items.length) return;
+  if (!api || !items.length) return;
+  const cacheKey = "bot.nav:" + api;
   const paint = (status) => {
     items.forEach((item) => {
       const info = status && status[item.dataset.nav];
@@ -68,16 +70,33 @@ window.addEventListener("pageshow", () => {
       }
     });
   };
-  try { paint(JSON.parse(sessionStorage.getItem("bot.nav") || "null")); } catch (_) { /* 壞掉的暫存就不用 */ }
-  fetch("/api/nav", { credentials: "same-origin" })
+  try { paint(JSON.parse(sessionStorage.getItem(cacheKey) || "null")); } catch (_) { /* 壞掉的暫存就不用 */ }
+  fetch(api, { credentials: "same-origin" })
     .then((response) => (response.ok ? response.json() : null))
     .then((status) => {
       if (!status) return;
       paint(status);
-      try { sessionStorage.setItem("bot.nav", JSON.stringify(status)); } catch (_) { /* 同上 */ }
+      try { sessionStorage.setItem(cacheKey, JSON.stringify(status)); } catch (_) { /* 同上 */ }
     })
     .catch(() => { /* 問不到就留著原本那行說明 */ });
 })();
+
+// ---------- 首頁：每個牧區「現在的狀況」 ----------
+// 要讀那個牧區的服事表才知道，所以首頁先畫出來，再一個一個去問 /m/<編號>/api/nav（跟牧區側欄同一支）。
+document.querySelectorAll("[data-unit-status]").forEach((cell) => {
+  const id = cell.dataset.unitStatus;
+  fetch("/m/" + encodeURIComponent(id) + "/api/nav", { credentials: "same-origin" })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((status) => {
+      const info = status && status.index;
+      if (!info) { cell.textContent = "看不到（可能要輸入牧區密碼）"; return; }
+      cell.textContent = info.sub;
+      cell.className = "unit-status " + (info.tone === "bad" ? "bad" : info.tone === "warn" ? "warn" : "good");
+      const count = document.querySelector('[data-unit="' + id + '"] [data-count]');
+      if (count && info.count) { count.textContent = String(info.count); count.className = "count " + info.tone; }
+    })
+    .catch(() => { cell.textContent = "讀不到"; });
+});
 
 // ---------- 主控台「本月 LINE 額度」：頁面畫出來之後去問最新的，⟳ 可以立刻重問 ----------
 // 頁面上的數字是存下來的快照（所以一定馬上有東西看），這裡再問 /api/quota 換成最新的。
@@ -198,8 +217,10 @@ document.querySelectorAll("[data-pick-target]").forEach((chip) => {
 document.querySelectorAll("[data-reset-template]").forEach((button) => {
   button.addEventListener("click", () => {
     const textarea = document.getElementById("template");
-    if (textarea && window.confirm("要把訊息模板改回預設值嗎？按「儲存設定」後才會生效。")) {
+    const question = button.dataset.confirmText || "要把整則訊息改回預設嗎？按「儲存設定」後才會生效。";
+    if (textarea && window.confirm(question)) {
       textarea.value = textarea.dataset.default;
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));  // 預覽跟著換
     }
   });
 });
@@ -253,4 +274,43 @@ document.querySelectorAll("[data-picklist]").forEach((box) => {
   box.querySelector("[data-pick-add]").addEventListener("click", add);
   select.addEventListener("change", add);
   render();
+});
+
+// ---------- 提醒訊息編輯器：點按鈕插入【標籤】、打字時右邊即時預覽 ----------
+// 整張表單送到 data-preview（標題、結尾、群組的「只發這些服事」也算進去），回來的就是群組會收到的那一則。
+document.querySelectorAll("[data-msg-editor]").forEach((box) => {
+  const area = box.querySelector("textarea");
+  const form = box.closest("form");
+  const out = box.querySelector("[data-preview-text]");
+  const note = box.querySelector("[data-preview-note]");
+  const error = box.querySelector("[data-preview-error]");
+  let timer = null;
+  let seq = 0;
+  const ask = () => {
+    const mine = ++seq;
+    fetch(box.dataset.preview, { method: "POST", body: new FormData(form), credentials: "same-origin" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!data || mine !== seq) return;  // 打字很快時，只用最後一次的結果
+        error.hidden = !data.error;
+        error.querySelector("span").textContent = data.error || "";
+        if (!data.error) { out.textContent = data.text; note.textContent = data.note ? "・" + data.note : ""; }
+      })
+      .catch(() => { /* 問不到就留著上一次的預覽 */ });
+  };
+  const refresh = () => { clearTimeout(timer); timer = setTimeout(ask, 350); };
+  box.querySelectorAll("[data-insert-tag]").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      const tag = chip.dataset.insertTag;
+      const start = area.selectionStart ?? area.value.length;
+      const end = area.selectionEnd ?? start;
+      area.value = area.value.slice(0, start) + tag + area.value.slice(end);
+      area.focus();
+      area.selectionStart = area.selectionEnd = start + tag.length;
+      refresh();
+    });
+  });
+  form.addEventListener("input", refresh);
+  form.addEventListener("change", refresh);
+  ask();
 });

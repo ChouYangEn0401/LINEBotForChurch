@@ -167,9 +167,12 @@ body.admin .admin-only { display: revert; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; color: var(--text); white-space: nowrap; padding-right: 6px; }
 .brand:hover { text-decoration: none; }
 .top-status { min-width: 0; font: 12px var(--mono); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crumb { color: var(--muted); }
+.brand-sub { font-weight: 700; font-size: 15px; color: var(--accent); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; padding-right: 6px; }
 .top-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .role-badge { font-size: 12px; font-weight: 600; padding: 2px 10px; border-radius: 999px; background: var(--bg3); color: var(--dim); white-space: nowrap; }
-.role-badge.admin { background: var(--warn-soft); color: var(--warn); }
+.role-badge.manager { background: var(--violet-soft); color: var(--violet); }
+.role-badge.admin { background: var(--accent-soft); color: var(--accent); }
 .menu-toggle { display: none; }
 
 .layout { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); }
@@ -192,6 +195,12 @@ body.admin .admin-only { display: revert; }
 .side-item .sub.bad { color: var(--bad); }
 .side-item .sub.warn { color: var(--warn); }
 .side-foot { margin-top: auto; padding: 14px; font: 11.5px var(--mono); color: var(--muted); }
+/* 牧區裡面：側欄最上面「← 所有牧區」和牧區名稱 */
+.side-back { padding: 4px 14px 6px; font-size: 12.5px; color: var(--dim); }
+.side-back:hover { color: var(--accent); text-decoration: none; }
+.side-unit { display: flex; flex-direction: column; gap: 2px; margin: 2px 10px 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.side-unit b { font-size: 14px; }
+.side-unit span { font-size: 12px; color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .banner { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 16px; border-bottom: 1px solid var(--line); font-size: 13.5px; background: var(--bg3); }
 .banner.ok { background: var(--ok-soft); }
@@ -370,6 +379,8 @@ tr.clickable { cursor: pointer; }
 .fcard.closed .fcard-body { display: none; }
 .fcard.closed .fcard-h { border-bottom-color: transparent; }
 .fcard-body, .fgrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px 16px; padding: 16px; }
+.fgrid-sub { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+.fgrid-sub + .fgrid-sub { padding-top: 14px; border-top: 1px solid var(--line); }
 .ffield { grid-column: span var(--span, 6); min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .ffield > label, .ffield-lab { font-size: 12.5px; font-weight: 600; color: var(--text); }
 .ffield .help, .help { font-size: 12px; color: var(--muted); line-height: 1.5; }
@@ -398,6 +409,9 @@ tr.clickable { cursor: pointer; }
 .drawer-body .ffield { grid-column: auto; }
 .drawer-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); }
 .drawer form { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.drawer-sec { display: flex; flex-direction: column; gap: 2px; padding-top: 12px; border-top: 1px solid var(--line); }
+details.sub-details > summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--dim); }
+details.sub-details[open] > summary { margin-bottom: 6px; }
 
 /* ---------- 服事表：原封不動的格子 ---------- */
 .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--dim); }
@@ -458,3 +472,40 @@ body.login-body { display: grid; place-items: center; overflow: auto; background
 .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 6px; }
 .checks label { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); font-weight: 400; font-size: 13px; cursor: pointer; }
 .checks label:hover { border-color: var(--accent); }
+
+/* ---------- 首頁：每個牧區現在的狀況 ---------- */
+.unit-status.good { color: var(--ok); }
+.unit-status.warn { color: var(--warn); }
+.unit-status.bad { color: var(--bad); }
+
+/* ---------- 變更紀錄 ---------- */
+details.change { border-top: 1px solid var(--line); }
+details.change > summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: auto 92px minmax(0, 1fr); gap: 12px; align-items: start; padding: 9px 14px; }
+details.change > summary::-webkit-details-marker { display: none; }
+details.change > summary:hover { background: var(--bg3); }
+details.change .when { font-size: 12.5px; color: var(--dim); padding-top: 1px; }
+details.change > summary .badge { justify-self: start; }
+details.change .what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+details.change .what .sub { font-size: 12px; color: var(--muted); }
+.change-body { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+.diff { margin: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--code-bg); font: 12.5px/1.55 var(--mono); max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.diff .add { color: var(--ok); background: var(--ok-soft); display: block; }
+.diff .del { color: var(--bad); background: var(--bad-soft); display: block; }
+.diff .ctx { color: var(--dim); display: block; }
+.diff .hunk { color: var(--muted); display: block; }
+
+/* ---------- 全教會設定：驗證器 App 的 QR code ---------- */
+.totp-setup { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+.totp-setup .qr { padding: 8px; background: #ffffff; border-radius: 6px; line-height: 0; }
+.totp-setup .stack { flex: 1; min-width: 240px; }
+.totp-setup .secret { font-size: 14px; letter-spacing: .06em; padding: 4px 8px; align-self: flex-start; }
+.btn.disabled { opacity: .5; pointer-events: none; }
+
+/* ---------- 提醒訊息編輯器：左邊打字、右邊預覽 ---------- */
+.msg-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+.msg-edit, .msg-preview { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.msg-tags .chip { cursor: pointer; }
+.msg-text { font: 13.5px/1.65 var(--sans); min-height: 220px; }
+.msg-preview .msg { min-height: 220px; background: var(--bg2); }
+.drawer .msg-editor { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 960px) { .msg-editor { grid-template-columns: minmax(0, 1fr); } }

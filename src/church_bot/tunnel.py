@@ -85,7 +85,7 @@ def register_webhook(paths: Paths, url: str, out: Callable[[str], None], *, trie
                 sleep(wait)
         log.info("已把 LINE Webhook URL 登記成 %s", url)
         # 記下這次的對外網址：管理員在 LINE 打「/服務網址」就拿得到，不用一個一個貼給人
-        save_service_url(History(paths.db_file), base, source="register")
+        save_service_url(History(paths.shared_db_file), base, source="register")  # 整個教會一份
         out(f"✅ 已自動登記到 LINE：{url}")
         _endpoint, active = messenger.webhook_info()
         for attempt in range(tries):

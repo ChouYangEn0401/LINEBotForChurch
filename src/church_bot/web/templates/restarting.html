@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>重新啟動中・服事提醒機器人</title>
+  <link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+  <script>
+    try {
+      const saved = localStorage.getItem("bot.theme");
+      const dark = saved ? saved === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+    } catch (_) { document.documentElement.dataset.theme = "light"; }
+  </script>
+</head>
+<body class="login-body">
+<main class="login">
+  <div class="eyebrow">⛪ 服事提醒機器人</div>
+  <h1>重新啟動中…</h1>
+  <p class="muted" id="restart-status">通常 5 秒左右，好了會自己回到剛剛那一頁。</p>
+  <p class="note"><a href="{{ next }}">等不及的話按這裡</a></p>
+</main>
+<script>
+  // 每秒問一次 /healthz：回來的 boot 跟現在這一個不一樣 = 新的程式已經起來了
+  (() => {
+    const oldBoot = {{ boot | tojson }};
+    const next = {{ next | tojson }};
+    const status = document.getElementById("restart-status");
+    const started = Date.now();
+    const tick = () => {
+      fetch("/healthz", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((h) => {
+          if (h && h.boot && h.boot !== oldBoot) { location.href = next; return; }
+          retry();
+        })
+        .catch(retry);
+    };
+    const retry = () => {
+      if (Date.now() - started > 60000) {
+        status.textContent = "一分鐘了還沒好，請看一下執行機器人的黑色視窗有沒有錯誤訊息；或把它關掉再雙擊 2-start。";
+        return;
+      }
+      setTimeout(tick, 1000);
+    };
+    setTimeout(tick, 1500);
+  })();
+</script>
+</body>
+</html>

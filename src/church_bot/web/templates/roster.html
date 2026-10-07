@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% import "_macros.html" as ui %}
+{% import "_macros.html" as ui with context %}
 {% block title %}服事表・服事提醒機器人{% endblock %}
 {% block content %}
 {% call ui.page_head("每週提醒", "📄 服事表", "機器人每次發送當下才讀這一份，所以 Google Sheet 改了就是最新的。排班請到 Google Sheet 改，這裡只看。") %}
-  <form method="post" action="/roster/refresh"><button type="submit" class="btn" title="不等一分鐘的暫存，現在就重新讀一次">重新讀取</button></form>
+  <form method="post" action="{{ mb }}/roster/refresh"><button type="submit" class="btn" title="不等一分鐘的暫存，現在就重新讀一次">重新讀取</button></form>
   {% if sheet_url %}<a class="btn btn-primary" href="{{ sheet_url }}" target="_blank" rel="noopener">在 Google Sheet 打開 ↗</a>{% endif %}
 {% endcall %}
 
@@ -23,7 +23,7 @@
   <div class="panel-head">讀不到服事表<span class="hint">這次提醒送不出去</span></div>
   <div class="item"><span class="badge bad">要修</span>
     <span class="tt"><span class="nm">{{ roster_error }}</span>{% if roster_hint %}<span class="sub">{{ roster_hint }}</span>{% endif %}</span>
-    <span class="side"><a href="/help#sheet">服事表怎麼排 →</a></span></div>
+    <span class="side"><a href="{{ mb }}/help#sheet">服事表怎麼排 →</a></span></div>
 </div>
 {% endif %}
 {% if issues %}
@@ -90,11 +90,11 @@
       <li>Google Sheet 右上角「共用」→「一般存取權」改成「知道連結的使用者」（檢視者）。</li>
       <li>點開服事表那個分頁，從瀏覽器網址列複製整串網址，貼到下面。</li>
     </ol>
-    <form method="post" action="/roster/source" class="row" data-confirm="要把服事表換成這一份 Google Sheet 嗎？">
+    <form method="post" action="{{ mb }}/roster/source" class="row" data-confirm="要把服事表換成這一份 Google Sheet 嗎？">
       <input type="url" name="url" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0" value="{{ sheet_url }}" required style="flex:1;min-width:260px">
       <button type="submit" class="btn btn-primary">接上</button>
     </form>
-    <p class="note admin-only">不公開的 Google Sheet、電腦裡的檔案、表格排法：<a href="/settings#source">設定 → 服事表來源</a>。</p>
+    <p class="note admin-only">不公開的 Google Sheet、電腦裡的檔案、表格排法：<a href="{{ mb }}/settings#source">設定 → 服事表來源</a>。</p>
   </div>
 </section>
 {% endblock %}

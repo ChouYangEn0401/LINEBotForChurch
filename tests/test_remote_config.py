@@ -7,6 +7,7 @@ from church_bot.config import Settings, load_settings, save_settings
 from church_bot.remote_config import (
     MAX_CODE_PUSHES_PER_DAY, NothingPending, OPTIONS, Verifier, VerifyError, find_option, parse_assignment,
 )
+from tests.conftest import CHURCH
 from tests.line_fakes import FakeLine, gid, say, sign, uid
 
 COLLECT = find_option("收集名單")
@@ -152,7 +153,7 @@ def test_change_setting_from_line_with_code_sent_to_admin(line_handler, paths, c
 
     body = say(f"/驗證 {code}")
     line_handler.handle(body, sign(body))
-    assert FakeLine.replies[-1][1] == "✅ 已更新：收集名單 → 開"
+    assert FakeLine.replies[-1][1] == "✅ 已更新：測試牧區・收集名單 → 開"
     assert load_settings(paths).chat.collect_names
     assert code not in (paths.data_dir / "church_bot.db").read_bytes().decode("latin-1")
 
@@ -197,10 +198,11 @@ def test_listing_and_unknown_options_need_no_code(line_handler):
 
 def test_web_shows_pending_change_and_can_approve(client, paths):
     verifier = client.app.state.webhook.verifier
-    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid(), requester="小美", chat_label="敬拜團")
-    page = client.get("/").text
-    assert "小美（敬拜團）要把「收集名單」" in page
-    client.post("/remote-config/approve")
+    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid(), requester="小美", chat_label="敬拜團",
+                   ministry_id="m1", ministry_name="測試牧區")
+    page = client.get(CHURCH + "/").text  # 首頁和每個牧區都看得到
+    assert "小美（測試牧區・敬拜團）要把「收集名單」" in page
+    client.post(CHURCH + "/remote-config/approve")
     assert load_settings(paths).chat.collect_names and verifier.current() is None
 
 
@@ -209,8 +211,8 @@ def test_web_reject(client, paths):
     settings.chat.collect_names = False
     save_settings(paths, settings)
     verifier = client.app.state.webhook.verifier
-    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid())
-    client.post("/remote-config/reject")
+    verifier.start(COLLECT, True, user_id=uid(), chat_id=gid(), ministry_id="m1")
+    client.post(CHURCH + "/remote-config/reject")
     assert verifier.current() is None and not load_settings(paths).chat.collect_names
 
 

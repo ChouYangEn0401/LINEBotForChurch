@@ -18,6 +18,7 @@ from church_bot.locking import process_lock
 from church_bot.messengers.line import LineMessenger
 from church_bot.models import RunReport, Target
 from church_bot.scheduler import scheduled_skip_reason
+from church_bot.ministries import Church
 from church_bot.service import BotService
 from church_bot.tables import TargetTable
 from tests.conftest import FakeMessenger, gid, uid, write
@@ -39,11 +40,11 @@ def service(paths, fake) -> BotService:
     write(paths.config_dir / "roster.csv", "日期,講員,司琴\n2026/9/13,王牧師,小明\n2026/9/20,李傳道,美華\n")
     settings = Settings()
     settings.source.kind = "csv"
-    settings.source.csv_path = "config/roster.csv"
+    settings.source.csv_path = "roster.csv"
     settings.line.admin_target_id = ADMIN
     save_settings(paths, settings)
     TargetTable(paths.targets_file).save([Target("同工群", gid()), Target("敬拜團", gid("c"))])
-    svc = BotService(paths)
+    svc = Church(paths.church).service("m1")  # 跟實際一樣：牧區共用教會那一份資料庫（用量、網址）
     svc.now = lambda settings: dt.datetime(2026, 9, 11, 20, 0, tzinfo=TZ)
     return svc
 
@@ -73,7 +74,7 @@ def test_scheduled_run_happens_once_per_fire_time(service):
 
 
 def test_scheduled_run_respects_the_auto_send_switch(service, paths):
-    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "config/roster.csv"},
+    settings = Settings.model_validate({"source": {"kind": "csv", "csv_path": "roster.csv"},
                                         "schedule": {"enabled": False}})
     save_settings(paths, settings)
     assert "自動發送已關閉" in scheduled_skip_reason(service, THU_2005)
@@ -293,7 +294,7 @@ def test_set_webhook_remembers_the_url_for_the_line_command(paths, monkeypatch):
     monkeypatch.setattr("church_bot.messengers.line.LineMessenger", FakeWebhookLine)
     FakeWebhookLine.calls, FakeWebhookLine.active = [], True
     cmd_set_webhook(paths, argparse.Namespace(url="https://abc.trycloudflare.com/", tries=3, wait=0))
-    current = BotService(paths).service_url()
+    current = Church(paths.church).root.service_url()
     assert current.url == "https://abc.trycloudflare.com" and current.source == "register"
 
 

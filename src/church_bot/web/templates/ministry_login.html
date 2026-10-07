@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_macros.html" as ui with context %}
+{% block title %}{{ locked.name }}・服事提醒機器人{% endblock %}
+{% block content %}
+{% if not locked.has_password %}
+{{ ui.page_head("牧區密碼", "🔒 " ~ locked.name, "這個牧區還沒設牧區密碼，所以只有伺服器管理員進得去。") }}
+<section class="panel" style="max-width:520px">
+  <div class="panel-body stack">
+    <p>請伺服器管理員進來，在「設定 → 這個牧區」設一組牧區密碼，再把密碼告訴這個牧區的負責人{{ "（" ~ locked.note ~ "）" if locked.note }}。</p>
+    <div class="row"><a class="btn btn-ghost" href="/">回所有牧區</a></div>
+  </div>
+</section>
+{% else %}
+{{ ui.page_head("牧區密碼", "🔒 " ~ locked.name, "進這個牧區要輸入它的密碼。輸入一次，這個瀏覽器 30 天內都會記住。") }}
+{% if error %}<div class="banner error"><b>✕</b><span>{{ error }}</span></div>{% endif %}
+<section class="panel" style="max-width:520px">
+  <form method="post" action="/m/{{ locked.id }}/unlock" class="panel-body stack">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="ffield">
+      <label for="password">「{{ locked.name }}」的牧區密碼</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
+      <span class="help">不知道的話請問這個牧區的負責人{{ "（" ~ locked.note ~ "）" if locked.note }}。</span>
+    </div>
+    <div class="row"><button type="submit" class="btn btn-primary">進入</button><a class="btn btn-ghost" href="/">回所有牧區</a></div>
+  </form>
+  <div class="panel-foot">忘記密碼的話，請伺服器管理員到「全教會設定 → 牧區密碼」重設。</div>
+</section>
+{% endif %}
+{% endblock %}

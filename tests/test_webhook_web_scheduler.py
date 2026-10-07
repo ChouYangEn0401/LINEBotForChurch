@@ -10,22 +10,23 @@ from church_bot.models import Member, OutgoingMessage
 from church_bot.scheduler import (
     QUOTA_EVERY_MINUTES, QUOTA_JOB_ID, BotScheduler, is_active_week, next_fire_time, previous_fire_time,
 )
+from church_bot.ministries import Church
 from church_bot.service import BotService
 from church_bot.tables import MemberTable, TargetTable
 from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
-from tests.conftest import write
+from tests.conftest import CHURCH, write
 from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
 
 def test_quota_is_refreshed_when_the_management_web_app_starts(paths, monkeypatch):
     """用量不會停在舊數字：開管理網頁先問一次，之後每 5 分鐘回來看該不該再問（見 core/quota.py）。"""
     calls: list[dict] = []
-    monkeypatch.setattr(BotService, "refresh_quota", lambda self, **kw: calls.append(kw))
+    monkeypatch.setattr(Church, "refresh_quota", lambda self, **kw: calls.append(kw))
     monkeypatch.setattr(BotScheduler, "_maybe_catch_up", lambda self: None)
     settings = Settings()
     settings.schedule.enabled = False
     save_settings(paths, settings)
 
-    scheduler = BotScheduler(BotService(paths))
+    scheduler = BotScheduler(Church(paths.church))
     scheduler.start()
     try:
         deadline = time.monotonic() + 5
@@ -42,8 +43,8 @@ def test_quota_refresh_failure_never_breaks_the_scheduler(paths, monkeypatch):
     def boom(self, **kw):
         raise RuntimeError("LINE 爛掉了")
 
-    monkeypatch.setattr(BotService, "refresh_quota", boom)
-    BotScheduler(BotService(paths))._refresh_quota()  # 不丟例外，只寫進記錄檔
+    monkeypatch.setattr(Church, "refresh_quota", boom)
+    BotScheduler(Church(paths.church))._refresh_quota()  # 不丟例外，只寫進記錄檔
 
 
 # ------------------------------------------------------------------ webhook
@@ -55,11 +56,12 @@ def test_signature():
 
 
 def test_join_adds_disabled_target_and_replies_group_id(handler, paths):
-    body = event_body({"type": "join", "replyToken": "r1", "source": {"type": "group", "groupId": gid()}})
+    """教會只有一個牧區：機器人被邀進新群組，直接加進那個牧區（跟以前單一牧區時一樣）。"""
+    body = event_body({"type": "join", "replyToken": "r1", "source": {"type": "group", "groupId": gid("j")}})
     assert handler.handle(body, sign(body)) == 1
-    target = TargetTable(paths.targets_file).load().items[0]
-    assert (target.name, target.line_id, target.enabled) == ("敬拜團", gid(), False)
-    assert FakeLine.replies[0][0] == "r1" and gid() in FakeLine.replies[0][1]
+    target = TargetTable(paths.targets_file).load().items[-1]
+    assert (target.name, target.line_id, target.enabled) == ("敬拜團", gid("j"), False)
+    assert FakeLine.replies[0][0] == "r1" and gid("j") in FakeLine.replies[0][1] and "測試牧區" in FakeLine.replies[0][1]
 
 
 def test_my_id_command_and_normal_chat_is_ignored(handler):
@@ -123,7 +125,7 @@ def test_register_name_is_refused_while_collection_is_off(handler, paths):
     body = say("/我的名字 林美華")
     handler.handle(body, sign(body))
     assert "沒有開放" in FakeLine.replies[-1][1]
-    assert handler.service.history.person(uid())["real_name"] == ""
+    assert handler.church.service("m1").history.person(uid())["real_name"] == ""
 
 
 def test_register_name_overwrites_previous_claim(handler, paths):
@@ -131,7 +133,7 @@ def test_register_name_overwrites_previous_claim(handler, paths):
     for text in ("/我的名字 林美", "/我的名字 「林美華」"):
         body = say(text)
         handler.handle(body, sign(body))
-    assert handler.service.history.person(uid())["real_name"] == "林美華"
+    assert handler.church.service("m1").history.person(uid())["real_name"] == "林美華"
     assert "已登記：林美華（LINE 名稱：小美）" in FakeLine.replies[-1][1]
 
     body = say("/我的名字")
@@ -143,7 +145,7 @@ def test_register_name_rejects_very_long_names(handler, paths):
     turn_on_name_collection(paths)
     body = say("/我的名字 " + "長" * 21)
     handler.handle(body, sign(body))
-    assert "太長" in FakeLine.replies[-1][1] and handler.service.history.person(uid())["real_name"] == ""
+    assert "太長" in FakeLine.replies[-1][1] and handler.church.service("m1").history.person(uid())["real_name"] == ""
 
 
 def test_remind_command_works_for_anyone(handler, monkeypatch):
@@ -187,7 +189,7 @@ def test_nicknames_add_up_instead_of_replacing_each_other(handler, paths):
     for text in ("/我的名字 陳小明", "/我的暱稱 阿明", "/我的暱稱 小明哥", "/我的暱稱 阿明"):
         body = say(text)
         handler.handle(body, sign(body))
-    person = handler.service.history.person(uid())
+    person = handler.church.service("m1").history.person(uid())
     assert person["real_name"] == "陳小明"  # /我的暱稱 不會動到登記的真實姓名
     assert nicknames_of(person) == ("阿明", "小明哥")
     assert "已經登記過" in FakeLine.replies[-1][1]  # 同一個暱稱再打一次不會變兩筆
@@ -195,7 +197,7 @@ def test_nicknames_add_up_instead_of_replacing_each_other(handler, paths):
     for i in range(MAX_NICKNAMES):
         body = say(f"/我的暱稱 綽號{i}")
         handler.handle(body, sign(body))
-    assert len(nicknames_of(handler.service.history.person(uid()))) == MAX_NICKNAMES
+    assert len(nicknames_of(handler.church.service("m1").history.person(uid()))) == MAX_NICKNAMES
     assert f"最多登記 {MAX_NICKNAMES} 個" in FakeLine.replies[-1][1]
 
 
@@ -206,7 +208,7 @@ def test_nickname_needs_collection_to_be_on(handler, paths):
     body = say("/我的暱稱 阿明")
     handler.handle(body, sign(body))
     assert "沒有開放" in FakeLine.replies[-1][1]
-    assert handler.service.history.person(uid())["nicknames"] == ""
+    assert handler.church.service("m1").history.person(uid())["nicknames"] == ""
 
 
 def test_nickname_without_an_argument_lists_what_was_registered(handler, paths):
@@ -315,7 +317,7 @@ def test_display_name_is_looked_up_at_most_once_a_day(handler):
         handler.handle(body, sign(body))
     assert FakeLine.profile_lookups == 1
 
-    history = handler.service.history
+    history = handler.church.service("m1").history
     stale = (dt.datetime.now().astimezone() - dt.timedelta(days=2)).isoformat(timespec="seconds")
     with history._conn() as conn:
         conn.execute("UPDATE people SET profile_checked_at=? WHERE user_id=?", (stale, uid()))
@@ -390,13 +392,13 @@ def test_public_base_keeps_real_hosts_and_drops_local_ones():
 def test_the_url_line_connected_to_is_remembered_only_after_the_signature_checks_out(handler):
     body = say("早安")
     handler.handle(body, sign(body), "https://abc.trycloudflare.com")
-    current = handler.service.service_url()
+    current = handler.church.service("m1").service_url()
     assert current.url == "https://abc.trycloudflare.com" and current.source == "webhook"
     assert current.describe().endswith("LINE 剛剛連到這個網址")
 
     with pytest.raises(SignatureError):  # 偽造的 Host 不會被記下來（簽章先驗過才記）
         handler.handle(body, sign(body, "other"), "https://evil.example")
-    assert handler.service.service_url().url == "https://abc.trycloudflare.com"
+    assert handler.church.service("m1").service_url().url == "https://abc.trycloudflare.com"
 
 
 def test_webhook_route_passes_the_forwarded_host_through(client, paths, monkeypatch):
@@ -404,11 +406,11 @@ def test_webhook_route_passes_the_forwarded_host_through(client, paths, monkeypa
     seen: list[str] = []
     monkeypatch.setattr("church_bot.webhook.WebhookHandler.handle",
                         lambda self, body, signature, public_url="": seen.append(public_url) or 1)
-    client.post("/line/webhook", content=b"{}",
+    client.post(CHURCH + "/line/webhook", content=b"{}",
                 headers={"x-line-signature": "x", "x-forwarded-host": "abc.trycloudflare.com",
                          "x-forwarded-proto": "https"})
     # 沒有經過 cloudflared（直接連本機）：那不是別人連得到的網址，不記
-    client.post("/line/webhook", content=b"{}", headers={"x-line-signature": "x", "host": "127.0.0.1:8787"})
+    client.post(CHURCH + "/line/webhook", content=b"{}", headers={"x-line-signature": "x", "host": "127.0.0.1:8787"})
     assert seen == ["https://abc.trycloudflare.com", ""]
 
 
@@ -465,11 +467,11 @@ def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths,
     calls: list[str] = []
     monkeypatch.setattr(BotService, "run", lambda self, trigger, **kw: calls.append(trigger))
     monkeypatch.setattr("church_bot.scheduler.is_active_week", lambda cfg, date: False)
-    scheduler = BotScheduler(BotService(paths))
+    scheduler = BotScheduler(Church(paths.church))
 
-    scheduler._run("schedule")  # 非發送週 → 跳過，不執行
+    scheduler._run("m1", "schedule")  # 非發送週 → 跳過，不執行
     for trigger in ("catchup", "manual", "cli"):
-        scheduler._run(trigger)  # 不受「每 N 週」影響，一定執行
+        scheduler._run("m1", trigger)  # 不受「每 N 週」影響，一定執行
 
     assert calls == ["catchup", "manual", "cli"]
 
@@ -479,8 +481,10 @@ def test_run_only_gates_on_active_week_for_the_automatic_schedule_trigger(paths,
 
 @pytest.mark.parametrize("url", ["/", "/roster", "/targets", "/targets?new=1", "/targets?edit=敬拜團", "/members",
                                  "/members?new=1", "/members?edit=陳小明", "/members/accounts", "/members/teams",
-                                 "/members/teams?new=1", "/settings", "/runs", "/check", "/help", "/lab/org",
-                                 "/api/status", "/api/preview", "/api/roster/sheet", "/healthz"])
+                                 "/members/teams?new=1", "/settings", "/runs", "/check", "/help",
+                                 "/api/status", "/api/preview", "/api/roster/sheet", "/api/nav",
+                                 CHURCH + "/", CHURCH + "/?new=1", CHURCH + "/settings", CHURCH + "/help",
+                                 CHURCH + "/api/status", CHURCH + "/healthz"])
 def test_pages_render(client, url):
     assert client.get(url).status_code == 200
 
@@ -488,16 +492,19 @@ def test_pages_render(client, url):
 def test_admin_mode_reveals_the_admin_pages_in_the_menu(client):
     """右上角「切換身分」只是把進階頁面收起來（cookie），不是權限：頁面本身照樣打得開。"""
     assert client.get("/settings").status_code == 200
-    r = client.post("/admin-mode", data={"enabled": "1", "next": "/settings#schedule"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"].startswith("/settings?msg=")
+    r = client.post(CHURCH + "/admin-mode", data={"enabled": "1", "next": "/m/m1/settings#schedule"},
+                    follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"].startswith("/m/m1/settings?msg=")
     page = client.get("/").text
     sidebar = page.split('<section id="view"')[0]
-    assert '<body class="admin">' in page
-    assert 'href="/settings"' in sidebar and 'href="/check"' in sidebar and 'href="/lab/org"' in sidebar
+    assert '<body class="admin"' in page
+    assert 'href="/m/m1/settings"' in sidebar and 'href="/m/m1/check"' in sidebar
+    assert 'href="/settings"' in client.get(CHURCH + "/").text.split('<section id="view"')[0]  # 全教會設定
 
-    r = client.post("/admin-mode", data={"enabled": "0", "next": "https://evil.example/"}, follow_redirects=False)
-    assert r.headers["location"].startswith("/?")  # 外部網址不理它，回主控台
-    assert 'href="/settings"' not in client.get("/").text.split('<section id="view"')[0]
+    r = client.post(CHURCH + "/admin-mode", data={"enabled": "0", "next": "https://evil.example/"},
+                    follow_redirects=False)
+    assert r.headers["location"].startswith("/?")  # 外部網址不理它，回首頁
+    assert 'href="/m/m1/settings"' not in client.get("/").text.split('<section id="view"')[0]
 
 
 def test_sidebar_status_says_how_each_page_is_doing(client):
@@ -517,7 +524,7 @@ def test_quota_tile_comes_from_the_snapshot_and_api_keeps_it_fresh(client, paths
     from tests.conftest import FakeMessenger
 
     assert "data-quota" not in client.get("/").text  # 測試模式（console）不顯示這一格
-    assert client.get("/api/quota").json() == {}
+    assert client.get(CHURCH + "/api/quota").json() == {}
 
     settings = load_settings(paths)
     settings.messenger.kind = "line"
@@ -526,13 +533,14 @@ def test_quota_tile_comes_from_the_snapshot_and_api_keeps_it_fresh(client, paths
     fake.quota_value = Quota(limit=200, used=37)
     monkeypatch.setattr("church_bot.service.build_messenger", lambda settings, paths: fake)
 
-    assert client.get("/api/quota").json()["value"] == "37 / 200"
+    assert client.get(CHURCH + "/api/quota").json()["value"] == "37 / 200"
     page = client.get("/").text
     assert "data-quota" in page and "37 / 200" in page and "剛剛更新" in page  # 存下來了，不用再連網
 
     fake.quota_value = Quota(limit=200, used=190)
-    assert client.get("/api/quota").json()["value"] == "37 / 200"  # 快照還很新，不重問
-    forced = client.get("/api/quota?force=1").json()
+    assert client.get(CHURCH + "/api/quota").json()["value"] == "37 / 200"  # 快照還很新，不重問
+    assert "37 / 200" in client.get(CHURCH + "/").text  # 首頁也是同一份（整個 LINE 帳號一份）
+    forced = client.get(CHURCH + "/api/quota?force=1").json()
     assert forced["value"] == "190 / 200" and forced["low"] and "還剩 10 則" in forced["detail"]
 
 
@@ -593,7 +601,7 @@ def test_add_group_then_send_from_web(client, paths):
     assert r.status_code == 303
     assert "會發送" in client.get("/").text
     r = client.post("/send", data={"force": "0"}, follow_redirects=False)
-    assert "已送出" in client.get(r.headers["location"]).text
+    assert "已送出" in client.get(CHURCH + r.headers["location"]).text
     assert gid() in (paths.data_dir / "outbox.log").read_text(encoding="utf-8")
 
 
@@ -609,22 +617,25 @@ def test_invalid_settings_are_not_saved(client, paths):
 def test_password_protects_ui_but_not_webhook(client, paths):
     write(paths.env_file, "UI_PASSWORD=pw\n")
     assert client.get("/").status_code == 401  # 沒登入：直接擋下來顯示登入畫面，不是跳轉
-    assert client.post("/login", data={"password": "wrong", "next": "/"}).status_code == 401
-    r = client.post("/login", data={"password": "pw", "next": "/"}, follow_redirects=False)
-    assert r.status_code == 303
+    assert client.get(CHURCH + "/").status_code == 401  # 首頁也一樣
+    assert client.post(CHURCH + "/login", data={"password": "wrong", "next": "/"}).status_code == 401
+    r = client.post(CHURCH + "/login", data={"password": "pw", "next": "/m/m1/"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/m/m1/"
     assert client.get("/").status_code == 200  # 登入後 cookie 生效，同一個 client 能繼續逛
-    assert client.post("/line/webhook", content=b'{"events":[]}').status_code == 503  # 沒設 secret，但不需要登入
+    assert client.get(CHURCH + "/").status_code == 200
+    assert client.post(CHURCH + "/line/webhook", content=b'{"events":[]}').status_code == 503  # 沒設 secret，但不需要登入
 
 
 def test_login_rejects_external_redirect_target(client, paths):
     write(paths.env_file, "UI_PASSWORD=pw\n")
-    r = client.post("/login", data={"password": "pw", "next": "https://evil.example/phish"}, follow_redirects=False)
+    r = client.post(CHURCH + "/login", data={"password": "pw", "next": "https://evil.example/phish"},
+                    follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"] == "/"
 
 
 def test_changing_password_forces_everyone_to_log_in_again(client, paths):
     write(paths.env_file, "UI_PASSWORD=old\n")
-    client.post("/login", data={"password": "old", "next": "/"})
+    client.post(CHURCH + "/login", data={"password": "old", "next": "/"})
     assert client.get("/").status_code == 200
     write(paths.env_file, "UI_PASSWORD=new\n")
     assert client.get("/").status_code == 401  # 舊的 cookie 對不上新密碼，立刻失效
@@ -635,13 +646,13 @@ def test_stale_process_gets_a_restart_hint_instead_of_a_scary_error(client, monk
     import jinja2
     from fastapi.testclient import TestClient
 
-    from church_bot.web import app as web_app
+    from church_bot.web import ministry as web_ministry
 
     def missing_variable(*args, **kwargs):
         raise jinja2.UndefinedError("'editing_team' is undefined")
 
-    monkeypatch.setattr(web_app.MemberTable, "load", missing_variable)
-    quiet = TestClient(client.app, raise_server_exceptions=False)  # 不要把例外再丟出來，看畫面就好
+    monkeypatch.setattr(web_ministry.MemberTable, "load", missing_variable)
+    quiet = TestClient(client.app, raise_server_exceptions=False, base_url="http://testserver/m/m1/")  # 看畫面就好
     body = quiet.get("/members").text
     assert "這個視窗還在跑舊的版本" in body and "2-start" in body
 
@@ -662,7 +673,7 @@ def test_member_flagged_as_admin_can_use_admin_commands(handler, paths, monkeypa
 
 def test_admin_toggle_on_the_members_page(client, paths):
     r = client.post("/members/admin", data={"name": "陳小明", "enabled": "1", "next": "/members"}, follow_redirects=False)
-    assert r.status_code == 303 and r.headers["location"].startswith("/members?")
+    assert r.status_code == 303 and r.headers["location"].startswith("/m/m1/members?")
     assert next(m for m in MemberTable(paths.members_file).load().items if m.name == "陳小明").admin
     assert 'value="0"' in client.get("/members").text  # 開著的那一列，按鈕變成「關」
     client.post("/members/admin", data={"name": "陳小明", "enabled": "0"})
@@ -676,7 +687,7 @@ def test_alerts_go_to_admin_members_when_no_target_is_set(paths, monkeypatch):
     monkeypatch.setattr("church_bot.service.build_messenger", lambda settings, paths: fake)
     write(paths.config_dir / "roster.csv", "日期,講員\n2026/9/13,王牧師\n")
     settings = Settings()
-    settings.source.kind, settings.source.csv_path, settings.schedule.enabled = "csv", "config/roster.csv", False
+    settings.source.kind, settings.source.csv_path, settings.schedule.enabled = "csv", "roster.csv", False
     save_settings(paths, settings)
     MemberTable(paths.members_file).save([Member("陳小明", line_user_id=uid("1"), admin=True),
                                           Member("林美華", line_user_id=uid("2"), admin=True), Member("沒帳號", admin=True)])

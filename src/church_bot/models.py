@@ -98,6 +98,14 @@ class Target:
     labels: tuple[str, ...] = ()  # 只發這些聚會；空 = 全部
     mention: bool = True  # 要不要在訊息裡 @ 服事的人（對不到 LINE 帳號的人照樣印名字）
     note: str = ""
+    # 這個群組自己的提醒訊息（罐頭訊息）；空白 = 用牧區「設定 → 訊息長什麼樣子」的那一份
+    title: str = ""
+    footer: str = ""
+    template: str = ""
+
+    @property
+    def has_own_message(self) -> bool:
+        return bool(self.title or self.footer or self.template)
 
 
 @dataclass(frozen=True, slots=True)
