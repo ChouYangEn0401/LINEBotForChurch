@@ -58,7 +58,7 @@ def form_values(s: Settings) -> dict[str, Any]:
         "roster_low_warning_days": s.behavior.roster_low_warning_days,
         "warn_unknown_names": s.behavior.warn_unknown_names,
         "collect_names": s.chat.collect_names, "remote_config": s.chat.remote_config,
-        "send_code_to_admin": s.chat.send_code_to_admin,
+        "send_code_to_admin": s.chat.send_code_to_admin, "easter_egg": s.chat.easter_egg,
     }
 
 
@@ -92,7 +92,7 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
     data["behavior"].update(lookahead_days=lookahead, resend_if_changed=on("resend_if_changed"),
                             roster_low_warning_days=low_days, warn_unknown_names=on("warn_unknown_names"))
     data["chat"].update(collect_names=on("collect_names"), remote_config=on("remote_config"),
-                        send_code_to_admin=on("send_code_to_admin"))
+                        send_code_to_admin=on("send_code_to_admin"), easter_egg=on("easter_egg"))
     try:
         new = Settings.model_validate(data)
     except ValidationError as exc:

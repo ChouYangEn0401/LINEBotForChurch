@@ -4,6 +4,7 @@ import re
 import pytest
 
 from church_bot.config import Settings, load_settings, save_settings
+from church_bot.core.easter_egg import FLATTERY, PREFIX
 from church_bot.remote_config import (
     MAX_CODE_PUSHES_PER_DAY, NothingPending, OPTIONS, Verifier, VerifyError, find_option, parse_assignment,
 )
@@ -223,3 +224,42 @@ def test_settings_page_saves_chat_switches(client, paths):
     client.post("/settings", data=form)
     chat = load_settings(paths).chat
     assert chat.collect_names and not chat.remote_config and not chat.send_code_to_admin
+    assert not chat.easter_egg  # 沒勾就是關（彩蛋預設不開）
+
+
+# ------------------------------------------------------------------ 彩蛋（見 core/easter_egg.py）
+
+
+def test_easter_egg_is_off_by_default(line_handler):
+    body = say("/設定 收集名單=關")  # 本來就是「關」
+    line_handler.handle(body, sign(body))
+    assert "本來就是「關」" in FakeLine.replies[-1][1]
+
+
+def test_easter_egg_says_yes_instead_of_correcting(line_handler, paths):
+    settings = load_settings(paths)
+    settings.chat.easter_egg = True
+    save_settings(paths, settings)
+
+    for _ in range(len(FLATTERY) + 1):
+        body = say("/設定 收集名單=關")  # 每次都是「本來就是這樣」
+        line_handler.handle(body, sign(body))
+
+    replies = [t for _, t in FakeLine.replies][-(len(FLATTERY) + 1):]
+    assert all(r.startswith(PREFIX + "\n") for r in replies)
+    # 三句輪完回到第一句
+    assert [r.split("\n", 1)[1] for r in replies] == [*FLATTERY, FLATTERY[0]]
+    assert "不用改" not in "".join(replies)
+    assert not load_settings(paths).chat.collect_names  # 設定沒有被動到
+    assert line_handler.verifier.current() is None  # 也沒有啟動驗證碼流程
+
+
+def test_easter_egg_does_not_touch_real_changes(line_handler, paths):
+    settings = load_settings(paths)
+    settings.chat.easter_egg = True
+    save_settings(paths, settings)
+    body = say("/設定 收集名單=開")  # 真的要改：照舊要驗證碼
+    line_handler.handle(body, sign(body))
+    assert "需要驗證碼" in FakeLine.replies[-1][1]
+    assert line_handler.verifier.current() is not None
+    assert not load_settings(paths).chat.collect_names

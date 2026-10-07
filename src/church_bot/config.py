@@ -186,6 +186,8 @@ class ChatSettings(_Base):
     remote_config: bool = True
     # 驗證碼除了顯示在執行程式的畫面，也用 LINE 私訊管理員（每次算 1 則，每天最多 10 次）
     send_code_to_admin: bool = True
+    # 彩蛋：設定本來就是那個值時，不糾正對方，改成順著說「好，已經幫您改好了」（見 core/easter_egg.py）
+    easter_egg: bool = False
 
 
 class Settings(_Base):
