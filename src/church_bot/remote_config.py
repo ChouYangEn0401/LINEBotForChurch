@@ -79,6 +79,10 @@ def _set_schedule(settings: Settings, value: bool) -> None:
     settings.schedule.enabled = value
 
 
+def _set_easter_egg(settings: Settings, value: bool) -> None:
+    settings.chat.easter_egg = value
+
+
 def _set_every_n_weeks(settings: Settings, weeks: int) -> None:
     settings.schedule.every_n_weeks = weeks
     # 跟網頁設定頁的提醒一樣：每 N 週發一次，就要往後看至少 N 週，不然中間那幾週的服事會漏掉
@@ -110,6 +114,9 @@ OPTIONS: tuple[RemoteOption, ...] = (
     RemoteOption("每幾週", ("every_n_weeks", "weeks", "頻率"),
                  "填 1～8：隔幾週提醒一次（機器人會自動多往後看幾天，中間幾週的服事不會漏掉）",
                  _parse_weeks, str, _set_every_n_weeks, lambda s: s.schedule.every_n_weeks, reschedule=True),
+    RemoteOption("彩蛋", ("彩蛋模式", "easter_egg", "easteregg", "egg"),
+                 "開 = 設定本來就是那個值時不糾正你，順著說「好，已經改好了」；關 = 照實說「不用改」",
+                 _parse_switch, _show_switch, _set_easter_egg, lambda s: s.chat.easter_egg),
 )
 
 

@@ -254,6 +254,29 @@ def test_easter_egg_says_yes_instead_of_correcting(line_handler, paths):
     assert line_handler.verifier.current() is None  # 也沒有啟動驗證碼流程
 
 
+def test_easter_egg_can_be_switched_on_from_line(line_handler, paths):
+    """「/設定 彩蛋=開」跟其他設定一樣：要驗證碼，改完真的生效。"""
+    body = say("/設定 彩蛋=開")
+    line_handler.handle(body, sign(body))
+    code = re.search(r"驗證碼：(\d{6})", next(t for to, t in FakeLine.replies if to == uid("f")))[1]
+    body = say(f"/驗證 {code}")
+    line_handler.handle(body, sign(body))
+    assert FakeLine.replies[-1][1] == "✅ 已更新：測試牧區・彩蛋 → 開"
+    assert load_settings(paths).chat.easter_egg
+
+    # 開起來之後，「本來就是這樣」的那種修改就會變成順著說「好」——連「彩蛋」自己也不例外
+    body = say("/設定 彩蛋模式=開")
+    line_handler.handle(body, sign(body))
+    assert FakeLine.replies[-1][1].startswith(PREFIX + "\n")
+
+
+def test_easter_egg_is_listed_in_the_options(line_handler):
+    body = say("/設定")
+    line_handler.handle(body, sign(body))
+    listing = FakeLine.replies[-1][1]
+    assert f"共 {len(OPTIONS)} 項" in listing and "・彩蛋：現在是「關」" in listing
+
+
 def test_easter_egg_does_not_touch_real_changes(line_handler, paths):
     settings = load_settings(paths)
     settings.chat.easter_egg = True
