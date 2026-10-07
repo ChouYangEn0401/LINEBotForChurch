@@ -17,6 +17,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from church_bot.config import MessageSettings, Paths, Settings, load_settings
+from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
 from church_bot.core.dispatcher import Dispatcher
@@ -26,6 +27,7 @@ from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, fin
 from church_bot.core.public_url import ServiceUrl, load_service_url, save_service_url
 from church_bot.core.quota import QuotaSnapshot, load_quota, save_quota
 from church_bot.core.renderer import Renderer, matches_any, sample_day, select_assignments
+from church_bot.core.roll_call import RollCall, roll_call
 from church_bot.errors import ChurchBotError, SourceError
 from church_bot.locking import process_lock
 from church_bot.messengers import Messenger, build_messenger
@@ -319,6 +321,17 @@ class BotService:
         today = self.now(ctx.settings).date()
         sheets = build_source(ctx.settings.source, self.paths).fetch()
         return ctx, sheets, [inspect_sheet(sheet, ctx.settings.source, today) for sheet in sheets], today
+
+    def roll_call(self, target: Target | None = None) -> RollCall:
+        """「/點名」：服事表從今天起、這個群組會提醒到的人，誰 @ 得到、誰登記了在等確認、誰還沒登記（見 core/roll_call.py）。
+
+        讀不到服事表丟 ChurchBotError（呼叫的人把原因回給打指令的人）。
+        """
+        ctx = self.load()
+        today = self.now(ctx.settings).date()
+        roster = self.fetch_roster(ctx.settings, today, use_cache=True)
+        accounts = build_accounts(self.history.people(), ctx.members)
+        return roll_call(roster, ctx.directory, target, accounts, today)
 
     def roster_roles(self) -> list[str]:
         """服事表上現有的服事項目（「LINE 群組」頁用來讓人用選的，不用自己猜怎麼寫）。
