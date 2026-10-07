@@ -29,7 +29,7 @@ import yaml
 
 from church_bot.config import Paths, Settings, load_settings, save_settings
 from church_bot.errors import ConfigError
-from church_bot.files import write_text
+from church_bot.files import read_text, write_text
 from church_bot.tables import MemberTable, TargetTable
 
 log = logging.getLogger(__name__)
@@ -107,7 +107,7 @@ def load_church(paths: Paths) -> ChurchConfig:
     if not file.exists():
         return ChurchConfig()
     try:
-        data = yaml.safe_load(file.read_text(encoding="utf-8-sig")) or {}
+        data = yaml.safe_load(read_text(file)) or {}
     except yaml.YAMLError as exc:
         raise ConfigError("牧區清單 config/church.yaml 格式錯誤",
                           "可以用「變更紀錄」還原，或對照 docs/MINISTRIES.md 修正。") from exc
@@ -298,7 +298,7 @@ def _legacy_web(settings_file: Path) -> dict:
     if not settings_file.exists():
         return {}
     try:
-        data = yaml.safe_load(settings_file.read_text(encoding="utf-8-sig")) or {}
+        data = yaml.safe_load(read_text(settings_file)) or {}
     except yaml.YAMLError:
         return {}
     web = data.get("web") if isinstance(data, dict) else None

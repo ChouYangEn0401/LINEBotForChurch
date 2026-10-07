@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Callable, Generic, Iterable, TypeVar
 
 from church_bot.errors import TableError
-from church_bot.files import write_text
+from church_bot.files import read_bytes, write_text
 from church_bot.models import Issue, Member, Severity, Target, Team
 
 LINE_ID_RE = re.compile(r"^[CUR][0-9a-f]{32}$")
@@ -68,7 +68,7 @@ def describe_line_id(line_id: str) -> str:
 
 def read_csv_text(path: Path) -> tuple[str, str]:
     """讀 CSV 並自動判斷編碼。回傳 (內容, 使用的編碼)。"""
-    raw = path.read_bytes()
+    raw = read_bytes(path)  # 存檔的那一瞬間被拒絕一下下：等一下再試
     for enc in ("utf-8-sig", "cp950", "big5hkscs"):
         try:
             return raw.decode(enc), enc
