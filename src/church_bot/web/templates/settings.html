@@ -160,6 +160,11 @@
         <span class="help">留空 = 每一欄都當成一項服事。月份、週次、星期會自動略過。</span>
       </div>
       <div class="ffield">
+        <label for="text_columns">照原樣顯示的欄位</label>
+        <input type="text" id="text_columns" name="text_columns" value="{{ f.text_columns }}" placeholder="服飾">
+        <span class="help">這些格子寫的是衣服、地點這種「一段文字」，不是人名。填了之後它不會被拆成名字、不會去對同工名單（不再跳「找不到這個人」），也<b>不會出現在每週提醒的服事清單裡</b>——提醒內容因此會變，排程會多送一次。大家在 LINE 打「/行事曆」看到的就是這一欄。</span>
+      </div>
+      <div class="ffield">
         <label for="csv_path">檔案位置</label>
         <input type="text" id="csv_path" name="csv_path" class="mono" value="{{ f.csv_path }}">
         <span class="help">來源選「本機 CSV 檔」才用得到。</span>

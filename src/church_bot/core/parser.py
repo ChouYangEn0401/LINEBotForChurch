@@ -101,6 +101,7 @@ class _Layout:
 class _DayDraft:
     roles: dict[str, list[str]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    texts: dict[str, str] = field(default_factory=dict)  # 照原樣顯示的欄位，例如「服飾」
 
 
 class _DayBuilder:
@@ -120,6 +121,11 @@ class _DayBuilder:
             if note not in draft.notes:
                 draft.notes.append(note)
 
+    def text(self, date: dt.date, label: str, name: str, value: str) -> None:
+        """照原樣顯示的欄位（服飾…）：不拆名字，同一天重複出現以先寫的為準。"""
+        if name and value:
+            self._days.setdefault((date, label), _DayDraft()).texts.setdefault(name, value)
+
     def build(self) -> tuple[ServiceDay, ...]:
         order = {key: i for i, key in enumerate(self._days)}
         days = [
@@ -128,6 +134,7 @@ class _DayBuilder:
                 label=label,
                 assignments=tuple(Assignment(role, tuple(names)) for role, names in draft.roles.items()),
                 note="；".join(draft.notes),
+                texts=tuple(draft.texts.items()),
             )
             for (date, label), draft in self._days.items()
         ]
@@ -176,6 +183,10 @@ class RosterParser:
 
     def _is_ignored(self, header: str) -> bool:
         return _norm(header) in _BOOKKEEPING_HEADERS or self._match(header, "ignore")
+
+    def _is_text(self, header: str) -> bool:
+        """「照原樣顯示的欄位」（服飾…）：不拆成名字，也不會出現在提醒的服事清單裡。"""
+        return self._match(header, "text")
 
     def _text(self, row: list[str], idx: int | None) -> str:
         """備註、聚會名稱這種「一段文字」的格子；寫「-」「無」之類的就當作空白。"""
@@ -238,7 +249,9 @@ class RosterParser:
         header = [clean_header(c) for c in rows[layout.header_row]]
         date_col, label_col, note_col = layout.cols["date"], layout.cols.get("label"), layout.cols.get("note")
         special = {date_col, label_col, note_col}
-        role_cols = [(i, h) for i, h in enumerate(header) if i not in special and h and not self._is_ignored(h)]
+        usable = [(i, h) for i, h in enumerate(header) if i not in special and h and not self._is_ignored(h)]
+        text_cols = [(i, h) for i, h in usable if self._is_text(h)]
+        role_cols = [(i, h) for i, h in usable if not self._is_text(h)]
 
         builder = _DayBuilder()
         last_date: dt.date | None = None
@@ -246,7 +259,7 @@ class RosterParser:
         for r_idx in range(layout.header_row + 1, len(rows)):
             row = rows[r_idx]
             date_text = _cell(row, date_col)
-            has_content = any(_cell(row, i) for i, _ in role_cols)
+            has_content = any(_cell(row, i) for i, _ in usable)
             if date_text:
                 date = parse_date(date_text, self.today)
                 if date is None:
@@ -261,6 +274,8 @@ class RosterParser:
             last_date, last_label = date, label
             for i, role in role_cols:
                 builder.add(date, label, role, split_names(_cell(row, i), self.cfg.empty_markers))
+            for i, name in text_cols:
+                builder.text(date, label, name, self._text(row, i))
             builder.note(date, label, self._text(row, note_col))
         return builder.build()
 
@@ -292,7 +307,11 @@ class RosterParser:
             role = role_text or last_role
             last_role = role
             builder.note(date, label, self._text(row, c.get("note")))
-            if role and not self._is_ignored(role):
+            if not role or self._is_ignored(role):
+                continue
+            if self._is_text(role):
+                builder.text(date, label, role, self._text(row, c["person"]))
+            else:
                 builder.add(date, label, role, split_names(person, self.cfg.empty_markers))
         return builder.build()
 
@@ -302,6 +321,7 @@ class RosterParser:
         labels: dict[int, str] = {}
         notes: dict[int, str] = {}
         cells: list[tuple[str, int, tuple[str, ...]]] = []
+        texts: list[tuple[str, int, str]] = []
         last_role = ""
         for r_idx in range(layout.header_row + 1, len(rows)):
             row = rows[r_idx]
@@ -319,6 +339,9 @@ class RosterParser:
             if self._match(role, "note"):
                 notes.update({j: self._text(row, j) for j, _ in date_cols if self._text(row, j)})
                 continue
+            if self._is_text(role):
+                texts.extend((role, j, self._text(row, j)) for j, _ in date_cols)
+                continue
             for j, _ in date_cols:
                 cells.append((role, j, split_names(_cell(row, j), self.cfg.empty_markers)))
 
@@ -327,6 +350,8 @@ class RosterParser:
             builder.note(date, labels.get(j, ""), notes.get(j, ""))
         for role, j, names in cells:
             builder.add(dict(date_cols)[j], labels.get(j, ""), role, names)
+        for role, j, value in texts:
+            builder.text(dict(date_cols)[j], labels.get(j, ""), role, value)
         return builder.build()
 
 

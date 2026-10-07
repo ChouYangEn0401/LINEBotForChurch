@@ -54,6 +54,9 @@ class ServiceDay:
     assignments: tuple[Assignment, ...]
     label: str = ""  # 例如「主日崇拜」「青年崇拜」；表格沒有就空字串
     note: str = ""
+    # 「照原樣顯示的欄位」（設定 → 服事表來源）：(欄位名, 內容)，例如 ("服飾", "深色西裝＋領帶")。
+    # 刻意不放進 assignments：這些格子寫的是衣服不是人，不該被拆成名字、也不該去對同工名單。
+    texts: tuple[tuple[str, str], ...] = ()
 
     def all_names(self) -> list[str]:
         seen: dict[str, None] = {}
@@ -61,6 +64,10 @@ class ServiceDay:
             for n in a.names:
                 seen.setdefault(n, None)
         return list(seen)
+
+    def text_of(self, name: str) -> str:
+        """某個「照原樣顯示的欄位」這一天寫什麼；沒有就空字串。"""
+        return next((v for k, v in self.texts if k == name), "")
 
 
 @dataclass(frozen=True, slots=True)

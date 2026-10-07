@@ -14,6 +14,8 @@
 * /服務網址 → 管理網頁現在的網址（每次重開免費模式都會變，所以不用再一個一個貼給管理員）
 * /提醒（或 /現在提醒）→ 在設定好的提醒群組裡，誰都可以打；立刻用 Reply 免費送出這週的提醒（不計入 LINE 額度）。
   排程時間前 2 天內打過、內容也一樣，排程就略過（見 History.skip_reason），服事表改過才會再送
+* /行事曆（或 /服飾）→ 誰都可以打；用 Flex 排出「上兩週＋下四週」的服飾表（見 core/calendar.py）。
+  資料來自服事表「照原樣顯示的欄位」，免費的 Reply，不寫發送紀錄
 * /別周測試 1004 → **只有管理員**：試印別一週的提醒，不記錄、不影響排程（見 service.preview_for）
 * /點名 → **只有管理員**，在群組裡打：列出服事表上「這個群組會提醒到的人」誰還沒登記、誰在等確認
   （見 core/roll_call.py），並教大家打「/我的名字」。免費的 Reply
@@ -50,11 +52,11 @@ from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
 from church_bot.config import Settings, load_settings
-from church_bot.core import easter_egg, versions
+from church_bot.core import calendar, easter_egg, versions
 from church_bot.core.dates import parse_user_date
 from church_bot.core.history import MAX_NICKNAMES, History, nicknames_of
 from church_bot.core.roll_call import RollCall
-from church_bot.errors import ChurchBotError, ConfigError
+from church_bot.errors import ChurchBotError, ConfigError, MessengerError
 from church_bot.messengers.line import LineMessenger
 from church_bot.ministries import Church, Unit
 from church_bot.models import Member, OutgoingMessage
@@ -82,9 +84,10 @@ COMMAND_WORDS: dict[str, tuple[str, ...]] = {
     "test_week": ("別周測試", "別週測試", "測試提醒", "測試", "testweek", "test"),
     "service_url": ("服務網址", "管理網址", "管理網頁", "網址", "網站", "後台", "serviceurl", "url", "site", "web"),
     "roll_call": ("點名", "登記檢查", "誰還沒登記", "rollcall"),
+    "calendar": ("行事曆", "日曆", "服飾", "服裝", "穿著", "calendar", "dress"),
 }
 NO_ARGUMENT = {"chat_id", "my_id", "help", "cancel", "notify_now", "permissions", "my_permissions", "service_url",
-               "roll_call"}
+               "roll_call", "calendar"}
 _WORD_TO_COMMAND = {word: name for name, words in COMMAND_WORDS.items() for word in words}
 # 長的寫法先比，避免短的寫法把長的吃掉
 _ARGUMENT_WORDS = sorted(((w, n) for w, n in _WORD_TO_COMMAND.items() if n not in NO_ARGUMENT),
@@ -98,6 +101,8 @@ HELP_TEXT = (
     "🟢 大家都可以打\n"
     "・/提醒\n"
     "　→ 馬上看這週誰服事（免費，不扣 LINE 額度）\n"
+    "・/行事曆\n"
+    "　→ 上兩週、下四週的服飾表（免費；打 /服飾 也可以）\n"
     "・/我的名字 王小明\n"
     "　→ 登記真實姓名，提醒才 @ 得到你\n"
     "・/我的暱稱 阿明\n"
@@ -120,7 +125,7 @@ HELP_TEXT = (
 )
 
 
-EVERYONE_COMMANDS = "/提醒、/我的名字、/我的暱稱、/我的ID、/群組ID、/服務網址、/說明、/權限、/我的權限"
+EVERYONE_COMMANDS = "/提醒、/行事曆、/我的名字、/我的暱稱、/我的ID、/群組ID、/服務網址、/說明、/權限、/我的權限"
 ADMIN_COMMANDS = "/別周測試、/點名"
 TEST_WEEK_USAGE = ("用法：/別周測試 1004\n（10/04、10-4、10月4日、2026/10/4 都可以）\n"
                    "會在你打指令的這個聊天室試印那一天起這一週的提醒：不會發到其他群組、不會 @ 別的群組的人、"
@@ -459,8 +464,30 @@ class WebhookHandler:
             self._service_url(chat)
         elif command.name == "roll_call":
             self._roll_call(chat)
+        elif command.name == "calendar":
+            self._calendar(chat)
         elif command.name == "help":
             chat.reply(HELP_TEXT)
+
+    # ------------------------------------------------------------------ /行事曆（免費 Reply，見 core/calendar.py）
+
+    def _calendar(self, chat: _Chat) -> None:
+        """上兩週＋下四週的服飾表，用 Flex 排版。誰都可以打：Reply 免費，而且只是唸服事表上的字。"""
+        if chat.unit is None and chat.in_group:
+            chat.reply(UNASSIGNED)
+            return
+        entries, column, today, note = chat.service.calendar_now()
+        if not entries:
+            chat.reply(note)
+            return
+        try:
+            chat.messenger.reply_messages(chat.reply_token, [calendar.flex(entries, today, column)])
+        except MessengerError as exc:
+            if exc.status_code != 400:
+                raise
+            # 跟 @ 標記被拒絕時一樣：版型出問題不要讓大家整則收不到，改用純文字
+            log.warning("Flex 行事曆被 LINE 拒絕，改用純文字回覆：%s", exc.message)
+            chat.reply(calendar.as_text(entries, today, column))
 
     # ------------------------------------------------------------------ /設定（見 remote_config.py）
 

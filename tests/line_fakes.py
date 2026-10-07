@@ -44,6 +44,7 @@ class FakeLine:
     """假的 LineMessenger：reply 和 send 都記在 replies（reply 記 reply token，send 記收件人）。"""
 
     replies: list[tuple[str, str]] = []
+    flex: list[dict] = []
     profile_name = "小美"
     profile_lookups = 0
 
@@ -52,7 +53,7 @@ class FakeLine:
 
     @classmethod
     def reset(cls) -> None:
-        cls.replies, cls.profile_name, cls.profile_lookups = [], "小美", 0
+        cls.replies, cls.flex, cls.profile_name, cls.profile_lookups = [], [], "小美", 0
 
     def reply(self, token: str, text: str) -> None:
         FakeLine.replies.append((token, text))
@@ -60,6 +61,12 @@ class FakeLine:
     def reply_texts(self, token: str, texts: list) -> None:
         for text in texts[:5]:
             FakeLine.replies.append((token, text if isinstance(text, str) else text.text))
+
+    def reply_messages(self, token: str, messages: list) -> None:
+        """Flex 之類的訊息物件：replies 記 altText（看得出送了什麼），原始內容記在 flex 方便檢查版型。"""
+        for message in messages[:5]:
+            FakeLine.flex.append(message)
+            FakeLine.replies.append((token, message.get("altText", "")))
 
     def group_name(self, group_id: str) -> str:
         return "敬拜團"
