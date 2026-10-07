@@ -22,7 +22,12 @@
 <section class="panel" id="accounts">
   <div class="panel-head">收集到的帳號 <span class="badge">{{ accounts | length }}</span>
     {% if pending %}<span class="badge warn">{{ pending | length }} 位等你確認</span>{% endif %}
-    <span class="tools"><input type="search" placeholder="找名字…" data-filter="#account-table" aria-label="搜尋帳號"></span>
+    <span class="tools">
+      {% if linkable %}
+      <form method="post" action="{{ mb }}/members/accounts/link-all"
+            data-confirm="把這 {{ linkable | length }} 個 LINE 帳號對應到名單上同名的人：{% for a in linkable %}{{ a.real_name }}→{{ a.match.name }}{{ '、' if not loop.last }}{% endfor %}？">
+        <button type="submit" class="btn btn-sm btn-primary" title="本人登記的名字剛好是名單上一位還沒有 LINE 帳號的同工；撞名的不會動">名字對得上的 {{ linkable | length }} 位全部對應</button></form>
+      {% endif %}<input type="search" placeholder="找名字…" data-filter="#account-table" aria-label="搜尋帳號"></span>
   </div>
   {% if accounts %}
   <div class="table-wrap">

@@ -89,3 +89,15 @@ def build_accounts(people: list[dict], members: list[Member]) -> list[LineAccoun
             member=member, match=match, matched_by=matched_by, nicknames=nicknames_of(p),
         ))
     return sorted(accounts, key=lambda a: (not a.needs_review, ACTION_ORDER[a.action]))
+
+
+def exact_links(accounts: list[LineAccount]) -> list[LineAccount]:
+    """可以一次全部「對應」的帳號：本人用「/我的名字」登記的名字，剛好是名單上一位還沒有 LINE 帳號的同工。
+
+    只看本人登記的名字（不看 LINE 名稱猜的）；兩個帳號登記成同一個人的，兩個都不算，要管理員一個一個判斷。
+    """
+    candidates = [a for a in accounts if not a.ignored and a.action == "link" and a.matched_by == "real_name"]
+    claims: dict[str, int] = {}
+    for a in candidates:
+        claims[a.match.name] = claims.get(a.match.name, 0) + 1  # type: ignore[union-attr]
+    return [a for a in candidates if claims[a.match.name] == 1]  # type: ignore[union-attr]
