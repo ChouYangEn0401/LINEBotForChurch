@@ -120,6 +120,7 @@ def test_file_open_in_excel_gives_a_clear_message_and_changes_nothing(church, pa
         return real_replace(self, target)
 
     monkeypatch.setattr(Path, "replace", locked)
+    monkeypatch.setattr("church_bot.files.SWAP_WAIT", 0)  # 一直被鎖住：重試幾次之後才說清楚
     page = church.post("/members/accounts/link-all")
     assert "Excel" in page.text and "關掉" in page.text
     assert paths.members_file.read_bytes() == before
@@ -166,3 +167,26 @@ def test_single_link_refuses_when_two_rows_share_the_name(church, paths):
     r = church.post("/members/accounts/link", data={"user_id": uid("2"), "member_name": "林美華"}, follow_redirects=False)
     assert "兩列都叫" in unquote(r.headers["location"])
     assert not [m for m in MemberTable(paths.members_file).load().items if m.line_user_id == uid("2")]
+
+
+def test_a_brief_lock_is_waited_out(paths, monkeypatch):
+    """Windows 上別的執行緒剛好在讀 .env（每個網頁請求都會讀）：換檔被拒絕一下下，等一下就好，不該當成錯誤。"""
+    from pathlib import Path
+
+    from church_bot.config import read_env_file
+
+    real_replace = Path.replace
+    refused = {"n": 0}
+
+    def briefly_locked(self, target):
+        if refused["n"] < 3:
+            refused["n"] += 1
+            raise PermissionError(5, "Access is denied")
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", briefly_locked)
+    monkeypatch.setattr("church_bot.files.SWAP_WAIT", 0)
+    update_env_file(paths.env_file, {"UI_PASSWORD": "abcd1234"})
+    MemberTable(paths.members_file).save([Member("陳小明")])
+    assert read_env_file(paths.env_file)["UI_PASSWORD"] == "abcd1234" and refused["n"] == 3
+    assert [m.name for m in MemberTable(paths.members_file).load().items] == ["陳小明"]

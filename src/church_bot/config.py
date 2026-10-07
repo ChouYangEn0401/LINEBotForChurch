@@ -20,7 +20,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from church_bot.errors import ConfigError
-from church_bot.files import write_text
+from church_bot.files import swap, write_text
 
 # 預設的提醒訊息：用【中文標籤】寫，不懂程式的人也改得動（規則見 core/message_template.py）
 DEFAULT_TEMPLATE = """\
@@ -335,7 +335,7 @@ def update_env_file(path: Path, updates: dict[str, str]) -> None:
     out.extend(f"{k}={v}" for k, v in remaining.items())
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text("\n".join(out) + "\n", encoding="utf-8")
-    tmp.replace(path)
+    swap(tmp, path)  # .env 每個網頁請求都會讀，Windows 上可能剛好被開著：等一下再試
 
 
 # --------------------------------------------------------------------------- load / save
