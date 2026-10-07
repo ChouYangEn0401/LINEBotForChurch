@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from church_bot import __version__
 from church_bot.config import ScheduleSettings, Settings, load_settings, save_settings
 from church_bot.core.public_url import public_base
 from church_bot.models import Member, OutgoingMessage
@@ -14,7 +15,7 @@ from church_bot.ministries import Church
 from church_bot.service import BotService
 from church_bot.tables import MemberTable, TargetTable
 from church_bot.webhook import Command, SignatureError, parse_command, verify_signature
-from tests.conftest import CHURCH, write
+from tests.conftest import CHURCH, REPO_ROOT, write
 from tests.line_fakes import SECRET, FakeLine, event_body, gid, say, sign, uid
 
 def test_quota_is_refreshed_when_the_management_web_app_starts(paths, monkeypatch):
@@ -110,6 +111,30 @@ def test_my_id_command_and_normal_chat_is_ignored(handler):
 ])
 def test_parse_command(text, expected):
     assert parse_command(text) == expected
+
+
+# ------------------------------------------------------------------ 版本號
+
+
+def test_help_shows_the_version(handler):
+    """「你們跑的是哪一版？」打 /說明 就看得到，不用請人去開管理網頁。"""
+    body = say("/說明")
+    handler.handle(body, sign(body))
+    assert f"版本 v{__version__}" in FakeLine.replies[-1][1]
+
+
+def test_new_friend_greeting_also_shows_the_version(handler):
+    body = event_body({"type": "follow", "replyToken": "r",
+                       "source": {"type": "user", "userId": uid()}})
+    handler.handle(body, sign(body))
+    assert f"版本 v{__version__}" in FakeLine.replies[-1][1]
+
+
+def test_version_lives_in_exactly_one_place():
+    """pyproject 的版本是從 church_bot.__version__ 算出來的；誰把它改回寫死的數字就會紅燈。"""
+    read_configuration = pytest.importorskip("setuptools.config.pyprojecttoml").read_configuration
+    resolved = read_configuration(REPO_ROOT / "pyproject.toml")["project"]
+    assert resolved["version"] == __version__
 
 
 def turn_on_name_collection(paths):

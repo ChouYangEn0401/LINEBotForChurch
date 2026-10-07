@@ -51,6 +51,7 @@ import unicodedata
 from dataclasses import dataclass, replace
 from typing import Callable, Iterable
 
+from church_bot import __version__
 from church_bot.config import Settings, load_settings
 from church_bot.core import calendar, easter_egg, versions
 from church_bot.core.dates import parse_user_date
@@ -121,7 +122,10 @@ HELP_TEXT = (
     "・/別周測試 1004　→ 試印 10/4 那一週，不會真的發出去\n"
     "・/點名　→ 列出服事表上這個群組還沒登記的人，請大家登記\n"
     "\n"
-    "打錯或不認得的指令我不會回，直接再打一次就好 🙏"
+    "打錯或不認得的指令我不會回，直接再打一次就好 🙏\n"
+    "\n"
+    # 問「你們跑的是哪一版？」時不用請人去開管理網頁；跟網頁左下角、cli.bat --version 是同一個版本號
+    f"版本 v{__version__}"
 )
 
 
