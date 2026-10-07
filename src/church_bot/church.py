@@ -69,7 +69,8 @@ class Ministry:
     id: str
     name: str
     note: str = ""  # 例如負責人：「王小明、林美華」
-    password_hash: str = ""  # 第二層密碼；空白 = 這個牧區沒有另外設密碼
+    password_hash: str = ""  # 牧區密碼；空白 = 還沒設（只有伺服器管理員進得去）
+    password_temporary: bool = False  # 伺服器管理員給的臨時密碼：第一次用它進來要換成自己的
 
     @property
     def has_password(self) -> bool:
@@ -118,14 +119,16 @@ def load_church(paths: Paths) -> ChurchConfig:
             log.warning("church.yaml 有一筆牧區看不懂，略過：%r", raw)
             continue
         ministries.append(Ministry(id=str(raw["id"]), name=str(raw.get("name") or raw["id"]),
-                                   note=str(raw.get("note") or ""), password_hash=str(raw.get("password_hash") or "")))
+                                   note=str(raw.get("note") or ""), password_hash=str(raw.get("password_hash") or ""),
+                                   password_temporary=bool(raw.get("password_temporary"))))
     web = data.get("web") if isinstance(data.get("web"), dict) else {}
     return ChurchConfig(ministries, web)
 
 
 def save_church(paths: Paths, cfg: ChurchConfig) -> None:
     data: dict = {"ministries": [
-        {k: v for k, v in (("id", m.id), ("name", m.name), ("note", m.note), ("password_hash", m.password_hash)) if v}
+        {k: v for k, v in (("id", m.id), ("name", m.name), ("note", m.note), ("password_hash", m.password_hash),
+                           ("password_temporary", m.password_temporary)) if v}
         for m in cfg.ministries
     ]}
     if cfg.web:
@@ -190,7 +193,8 @@ def new_ministry_settings() -> Settings:
 
 
 def edit_ministry(paths: Paths, ministry_id: str, *, name: str | None = None, note: str | None = None,
-                  password_hash: str | None = None) -> Ministry:
+                  password_hash: str | None = None, temporary: bool = False) -> Ministry:
+    """改牧區的名稱、備註、密碼。換密碼時 ``temporary`` = 這是伺服器管理員給的臨時密碼（下次用它進來要換）。"""
     result: list[Ministry] = []
 
     def change(cfg: ChurchConfig) -> None:
@@ -205,7 +209,7 @@ def edit_ministry(paths: Paths, ministry_id: str, *, name: str | None = None, no
         if note is not None:
             updated = replace(updated, note=note.strip())
         if password_hash is not None:
-            updated = replace(updated, password_hash=password_hash)
+            updated = replace(updated, password_hash=password_hash, password_temporary=bool(password_hash and temporary))
         cfg.ministries = [updated if m.id == ministry_id else m for m in cfg.ministries]
         result.append(updated)
 

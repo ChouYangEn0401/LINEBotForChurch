@@ -38,7 +38,8 @@ from church_bot.core.login_codes import LoginCodeError, TelegramSender
 from church_bot.core.public_url import public_base
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.web.common import (
-    ADMIN_COOKIE, HERE, MANAGER_COOKIE, MANAGER_SESSION, MIN_MANAGER_PASSWORD, SESSION_COOKIE, LoginRequired, ManagerRequired, MinistryLocked, Web,
+    ADMIN_COOKIE, HERE, MANAGER_COOKIE, MANAGER_SESSION, MIN_MANAGER_PASSWORD, SESSION_COOKIE, LoginRequired,
+    ManagerRequired, MinistryLocked, MustSetPassword, Web,
     is_local, mask, ministry_cookie, ministry_token, quota_json, redirect, safe_next,
 )
 from church_bot.web.manager import manager_routes
@@ -130,6 +131,31 @@ def create_app(paths: Paths) -> FastAPI:
         response.status_code = 401
         return response
 
+    @app.exception_handler(MustSetPassword)
+    async def must_set_password(request: Request, exc: MustSetPassword):
+        if "/api/" in request.url.path:
+            return JSONResponse({"detail": f"「{exc.unit.name}」要先換掉臨時密碼"}, status_code=403)
+        return web.page(request, "ministry_set_password.html", None, locked=exc.unit.ministry, next=exc.next_url)
+
+    @ui.post("/m/{mid}/set-password")
+    def ministry_set_password(request: Request, mid: str, password: str = Form(""), confirm: str = Form(""),
+                              next: str = Form("")):
+        """用臨時密碼進來的牧區管理員，換成自己的牧區密碼（換好才能用這個牧區）。"""
+        ministry = church.config().get(mid)
+        if ministry is None:
+            return redirect("/", "找不到這個牧區", "error")
+        target = next if next.startswith(f"/m/{mid}/") else f"/m/{mid}/"
+        if not ministry.password_temporary or not web.unlocked(request, mid):
+            return redirect(target)  # 已經換過了，或還沒輸入臨時密碼（會先顯示牧區登入）
+        if problem := web.ministry_password_problem(password.strip(), confirm.strip(), ministry.password_hash):
+            return web.page(request, "ministry_set_password.html", None, locked=ministry, next=target, error=problem)
+        updated = edit_ministry(web.paths, mid, password_hash=hash_password(password.strip()))
+        log.warning("「%s」的臨時密碼換成牧區自己的密碼了", ministry.name)
+        resp = redirect(target, f"已換成「{ministry.name}」自己的牧區密碼：請告訴同一個牧區的其他管理員")
+        resp.set_cookie(ministry_cookie(mid), ministry_token(updated.password_hash), httponly=True, samesite="lax",
+                        max_age=60 * 60 * 24 * 30)
+        return resp
+
     @app.exception_handler(ManagerRequired)
     async def manager_required(request: Request, exc: ManagerRequired):
         if "/api/" in request.url.path:
@@ -154,6 +180,23 @@ def create_app(paths: Paths) -> FastAPI:
         resp.set_cookie(ministry_cookie(mid), ministry_token(ministry.password_hash), httponly=True, samesite="lax",
                         max_age=60 * 60 * 24 * 30)
         return resp
+
+    @manager.post("/m/{mid}/temp-password")
+    def ministry_temp_password(mid: str, password: str = Form("")):
+        """伺服器管理員給某個牧區一組臨時密碼（留空 = 用網站密碼）；那個牧區的人第一次用它進來，要換成自己的。"""
+        ministry = church.config().get(mid)
+        if ministry is None:
+            return redirect("/settings#ministry-passwords", "找不到這個牧區", "error")
+        password = password.strip() or web.current_password()
+        if len(password) < MIN_MINISTRY_PASSWORD:
+            return redirect("/settings#ministry-passwords", f"臨時密碼至少 {MIN_MINISTRY_PASSWORD} 個字"
+                            "（網站沒設密碼的話，請自己打一組）", "error")
+        if password == web.manager_password():
+            return redirect("/settings#ministry-passwords", "臨時密碼不能跟管理者密碼一樣", "error")
+        edit_ministry(web.paths, mid, password_hash=hash_password(password), temporary=True)
+        log.warning("伺服器管理員給「%s」設了臨時密碼", ministry.name)
+        return redirect("/settings#ministry-passwords", f"已給「{ministry.name}」設臨時密碼；"
+                        "那個牧區的人第一次用它進來，要先換成自己的")
 
     @manager.post("/m/{mid}/forgot-password")
     def ministry_forgot_password(mid: str):
@@ -198,6 +241,7 @@ def create_app(paths: Paths) -> FastAPI:
             last = unit.service.history.last_run()
             rows.append({
                 "id": unit.id, "name": unit.name, "note": unit.ministry.note, "locked": unit.ministry.has_password,
+                "temporary": unit.ministry.password_temporary,
                 "groups": sum(1 for t in targets if t.enabled and t.line_id), "groups_total": len(targets),
                 "members": len(unit.members()), "schedule": scheduler.status_for(unit.id),
                 "next_run": scheduler.next_run_text(unit.id) if scheduler.next_run(unit.id) else "",
@@ -216,8 +260,8 @@ def create_app(paths: Paths) -> FastAPI:
     @ui.post("/ministries/add")
     async def ministries_add(name: str = Form(""), note: str = Form(""), password: str = Form("")):
         """誰進得了網站都可以新增牧區，但一定要同時設牧區密碼：建的人之後才進得來，別人沒有密碼就進不去。"""
-        if len(password.strip()) < MIN_MINISTRY_PASSWORD:
-            return redirect("/?new=1", f"請設定這個牧區的密碼（至少 {MIN_MINISTRY_PASSWORD} 個字），之後進這個牧區要用", "error")
+        if problem := web.ministry_password_problem(password.strip()):
+            return redirect("/?new=1", f"這個牧區的密碼：{problem}", "error")
         try:
             ministry = await run_in_threadpool(add_ministry, web.paths, name, note)
         except ConfigError as exc:
