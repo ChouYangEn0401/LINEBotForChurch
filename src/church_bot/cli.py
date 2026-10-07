@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import shutil
 import socket
 import subprocess
@@ -301,6 +302,19 @@ def cmd_ministries(paths: Paths, args: argparse.Namespace) -> int:
         renamed = edit_ministry(church.paths, unit.id, name=args.name)
         _print(f"✅ 「{unit.name}」改名成「{renamed.name}」（編號不變：{unit.id}）")
         return 0
+    if action == "temp-password":
+        from church_bot.church import MIN_MINISTRY_PASSWORD, hash_password
+        from church_bot.config import read_env_file
+
+        unit = church.require(args.ministry)
+        site = os.environ.get("UI_PASSWORD") or read_env_file(church.paths.env_file).get("UI_PASSWORD", "")
+        password = (args.password or site).strip()
+        if len(password) < MIN_MINISTRY_PASSWORD:
+            raise ChurchBotError("沒有可以用的臨時密碼", "網站沒設密碼（.env 的 UI_PASSWORD）；請用 --password 指定一組。")
+        edit_ministry(church.paths, unit.id, password_hash=hash_password(password), temporary=True)
+        which = "自己指定的那一組" if args.password else "跟網站密碼一樣"
+        _print(f"✅ 已給「{unit.name}」設臨時密碼（{which}）。那個牧區的人第一次用它進來，要先換成自己的。")
+        return 0
     if action == "clear-password":
         unit = church.require(args.ministry)
         edit_ministry(church.paths, unit.id, password_hash="")
@@ -521,6 +535,9 @@ def build_parser() -> argparse.ArgumentParser:
     rename = actions.add_parser("rename", help="改名（編號不變）")
     rename.add_argument("ministry", help="現在的名稱或編號")
     rename.add_argument("name", help="新的名稱")
+    temp = actions.add_parser("temp-password", help="給牧區一組臨時密碼（預設 = 網站密碼），第一次用它進來要換成自己的")
+    temp.add_argument("ministry", help="名稱或編號")
+    temp.add_argument("--password", default="", help="自己指定臨時密碼（不給 = 用網站密碼）")
     clear = actions.add_parser("clear-password", help="清掉牧區密碼（忘記密碼時，在這台電腦上執行）")
     clear.add_argument("ministry", help="名稱或編號")
     hook = sub.add_parser("set-webhook", help="把臨時網址登記成 LINE 的 Webhook URL，並請 LINE 測試連線")

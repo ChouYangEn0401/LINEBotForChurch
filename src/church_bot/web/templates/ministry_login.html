@@ -19,7 +19,8 @@
     <div class="ffield">
       <label for="password">「{{ locked.name }}」的牧區密碼</label>
       <input type="password" id="password" name="password" autocomplete="current-password" autofocus required>
-      <span class="help">不知道的話請問這個牧區的負責人{{ "（" ~ locked.note ~ "）" if locked.note }}。</span>
+      <span class="help">{% if locked.password_temporary %}現在是伺服器管理員給的臨時密碼（問他）；第一次進來要換成你們自己的。
+        {% else %}不知道的話請問這個牧區的負責人{{ "（" ~ locked.note ~ "）" if locked.note }}。{% endif %}</span>
     </div>
     <div class="row"><button type="submit" class="btn btn-primary">進入</button><a class="btn btn-ghost" href="/">回所有牧區</a></div>
   </form>

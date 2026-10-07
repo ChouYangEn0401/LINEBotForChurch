@@ -230,12 +230,12 @@
         <label for="ministry_password">牧區密碼 {{ ui.info("第二層密碼：進網站之後，要進這個牧區還要再輸入一次。防君子不防小人：網站密碼不小心外流，別的牧區的人也改不到這裡。") }}</label>
         <input type="password" id="ministry_password" name="password" autocomplete="new-password" minlength="4"
                placeholder="{{ '已設定（輸入新的就會換掉）' if ministry.has_password else '沒有設（只要網站密碼就進得來）' }}">
-        <span class="help">至少 4 個字。忘記了只能在執行機器人的那台電腦上清掉。</span>
+        <span class="help">至少 4 個字，不能跟網站密碼一樣。換了之後告訴同牧區的其他管理員；忘記了找伺服器管理員。</span>
       </div>
       <div class="ffield ffield-chk" style="--span:5">
-        {% if ministry.has_password %}
+        {% if ministry.has_password and is_manager %}
         <label><input type="checkbox" name="clear">
-          <span><b>取消牧區密碼</b><span class="help"><br>勾了按儲存，只要網站密碼就進得來。</span></span></label>
+          <span><b>清掉牧區密碼</b><span class="help"><br>清掉之後只有伺服器管理員進得去。</span></span></label>
         {% endif %}
       </div>
       <div class="ffield" style="--span:2"><label>&nbsp;</label><button type="submit" class="btn">儲存密碼</button></div>

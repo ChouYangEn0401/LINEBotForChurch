@@ -151,6 +151,15 @@ class MinistryLocked(Exception):
         self.next_url = next_url
 
 
+class MustSetPassword(Exception):
+    """用伺服器管理員給的臨時密碼進來的：要先換成自己的牧區密碼才能用這個牧區。"""
+
+    def __init__(self, unit: Unit, next_url: str) -> None:
+        super().__init__(unit.id)
+        self.unit = unit
+        self.next_url = next_url
+
+
 class ManagerRequired(Exception):
     """這件事只有伺服器管理員能做。"""
 
@@ -266,10 +275,29 @@ class Web:
         if ministry is None:
             raise HTTPException(404, f"找不到牧區「{mid}」，可能已經移除了。回首頁看現有的牧區。")
         view = MinistryView(Unit(ministry, self.church.service(ministry.id)))
+        next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+        next_url = next_url if request.method == "GET" else view.base + "/"
         if not self.unlocked(request, mid):
-            next_url = request.url.path + (f"?{request.url.query}" if request.url.query else "")
-            raise MinistryLocked(view.unit, next_url if request.method == "GET" else view.base + "/")
+            raise MinistryLocked(view.unit, next_url)
+        if ministry.password_temporary and not self.is_manager(request):
+            raise MustSetPassword(view.unit, next_url)
         return view
+
+    def ministry_password_problem(self, password: str, confirm: str | None = None, current_hash: str = "") -> str:
+        """新的牧區密碼哪裡不行（空字串 = 可以）。不能跟網站密碼一樣：網站密碼大家都知道，等於沒鎖。"""
+        from church_bot.church import MIN_MINISTRY_PASSWORD, check_password
+
+        if len(password) < MIN_MINISTRY_PASSWORD:
+            return f"牧區密碼至少 {MIN_MINISTRY_PASSWORD} 個字"
+        if confirm is not None and password != confirm:
+            return "兩次輸入的不一樣"
+        if current_hash and check_password(password, current_hash):
+            return "跟現在的（臨時）密碼一樣，請換一個只有你們牧區知道的"
+        if password == self.current_password():
+            return "不能跟網站密碼一樣（網站密碼大家都知道，等於沒鎖）"
+        if password == self.manager_password():
+            return "不能跟伺服器管理員的密碼一樣"
+        return ""
 
     def role(self, request: Request, m: MinistryView | None = None) -> str:
         if self.is_manager(request):

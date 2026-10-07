@@ -128,8 +128,14 @@
         {% for r in rows %}
           <tr>
             <td><b>{{ r.name }}</b><div class="id admin-only">{{ r.id }}</div></td>
-            <td>{% if r.locked %}<span class="badge">🔒 有設</span>{% else %}<span class="muted">沒有設</span>{% endif %}</td>
-            <td class="ops"><a class="btn btn-sm" href="/m/{{ r.id }}/settings#ministry">{{ "換密碼" if r.locked else "設定密碼" }}</a>
+            <td>{% if r.temporary %}<span class="badge warn">臨時密碼</span><div class="sub">下次有人用它進來，要先換成自己的</div>
+                {% elif r.locked %}<span class="badge">🔒 有設</span>{% else %}<span class="muted">沒有設（只有你進得去）</span>{% endif %}</td>
+            <td class="ops">
+              <form method="post" action="/m/{{ r.id }}/temp-password" class="row"
+                    data-confirm="給「{{ r.name }}」設臨時密碼？對方第一次用它進來，要先換成自己的。">
+                <input type="password" name="password" autocomplete="new-password" placeholder="留空 = 用網站密碼" style="max-width:160px">
+                <button type="submit" class="btn btn-sm">設臨時密碼</button></form>
+              <a class="btn btn-sm btn-ghost" href="/m/{{ r.id }}/settings#ministry">{{ "直接換密碼" if r.locked else "直接設密碼" }}</a>
               {% if r.locked %}
               <form method="post" action="/m/{{ r.id }}/forgot-password" data-confirm="清掉「{{ r.name }}」的牧區密碼？清掉之後只有伺服器管理員進得去，記得再設一個新的。">
                 <button type="submit" class="btn btn-sm btn-danger">清掉密碼</button></form>

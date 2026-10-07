@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import ValidationError
 
 from church_bot import __version__
-from church_bot.church import MIN_MINISTRY_PASSWORD, edit_ministry, hash_password, remove_ministry
+from church_bot.church import edit_ministry, hash_password, remove_ministry
 from church_bot.config import DEFAULT_TEMPLATE, SETTINGS_LOCK, Settings, load_settings, save_settings, update_settings
 from church_bot.core.accounts import build_accounts, duplicate_names, exact_links
 from church_bot.core.dates import format_date
@@ -731,16 +731,20 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         return m.redirect("/settings#ministry", f"已儲存：{renamed.name}")
 
     @ui.post("/ministry/password")
-    def ministry_password(password: str = Form(""), clear: str = Form(""), m: MinistryView = Depends(web.ministry)):
-        """第二層密碼。設好之後這個瀏覽器直接記住（不用馬上再輸入一次），其他人進這個牧區要輸入。"""
+    def ministry_password(request: Request, password: str = Form(""), clear: str = Form(""),
+                          m: MinistryView = Depends(web.ministry)):
+        """換牧區密碼。設好之後這個瀏覽器直接記住（不用馬上再輸入一次），其他人進這個牧區要輸入新的。
+        清掉密碼只有伺服器管理員可以（清掉之後只有伺服器管理員進得去，牧區管理員自己按會把自己鎖在外面）。"""
         if clear == "on":
+            if not web.is_manager(request):
+                return m.redirect("/settings#ministry", "清掉牧區密碼只有伺服器管理員可以", "error")
             edit_ministry(web.paths, m.id, password_hash="")
-            resp = m.redirect("/settings#ministry", "已取消這個牧區的密碼：只要網站密碼就進得去")
+            resp = m.redirect("/settings#ministry", "已清掉這個牧區的密碼：現在只有伺服器管理員進得去，記得再設一個")
             resp.delete_cookie(ministry_cookie(m.id))
             return resp
         password = password.strip()
-        if len(password) < MIN_MINISTRY_PASSWORD:
-            return m.redirect("/settings#ministry", f"牧區密碼至少 {MIN_MINISTRY_PASSWORD} 個字", "error")
+        if problem := web.ministry_password_problem(password):
+            return m.redirect("/settings#ministry", problem, "error")
         updated = edit_ministry(web.paths, m.id, password_hash=hash_password(password))
         resp = m.redirect("/settings#ministry", "已設定牧區密碼：其他人進這個牧區要先輸入（這個瀏覽器已經記住了）")
         resp.set_cookie(ministry_cookie(m.id), ministry_token(updated.password_hash), httponly=True, samesite="lax",
