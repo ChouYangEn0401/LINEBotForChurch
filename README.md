@@ -71,6 +71,30 @@
 > 不想讓電腦一直開著後台的話，也可以讓 Telegram 機器人每週呼叫一次 `cli.bat send` 當備援（見下面第 8 步），兩邊都觸發也只會發一次。
 > 從舊版（只有一個牧區）升級：第一次打開新版會自動把原本的設定搬進「第一個牧區」，什麼都不用重設，到首頁改名字就好。
 
+### 讓它自己活著：註冊成 Windows 服務（建議，Windows）
+
+雙擊 `2-start.bat` 的缺點是那個黑色視窗一關、當掉、或電腦重開機，提醒就不會發了，而且**沒有人會知道**。
+把後台註冊成 Windows 服務就沒有這個問題——跟 nginx 在 Windows 上的做法一樣：
+
+**雙擊 `scripts\windows\service\install.bat`**（會跳一次「是否允許變更你的裝置」，按「是」）。
+
+跑完之後：
+
+- 電腦**重新開機就自己起來**，不用登入 Windows、不用有人去點
+- 程式**當掉 10 秒後自己再開一次**
+- 以後要手動操作，用同一個資料夾裡的
+  `start.bat`（啟動）、`stop.bat`（停止）、`restart.bat`（更新程式後重開）、
+  `status.bat`（看服務狀態＋所有牧區的狀況）、`uninstall.bat`（取消註冊，改回雙擊 2-start）
+- `sc start church-bot`、`sc stop church-bot`、`net stop church-bot`、「服務」管理員（`services.msc`）也都認得它
+
+> 背後是 [nssm](https://nssm.cc)（公有領域的小工具，`install.bat` 第一次會自己用 winget 下載到 `tools\`）。
+> Python 這種程式不會跟 Windows 的服務控制器對話，直接 `sc create` 會在啟動時卡住跳 error 1053，所以中間要包這一層。
+>
+> ⚠️ 服務在背景跑，**看不到黑色視窗，也不會跳出 `--popup` 的小提示**。
+> 所以註冊成服務之後，請一定要把 **Telegram** 設好（首頁 → ⚙️ 全教會設定 → 伺服器管理員）：
+> 開機、關機、當掉、每次發送都會傳一則給你，機器人有沒有活著一看就知道。
+> 想主動問：雙擊 `status.bat`，或在 Telegram 呼叫 `cli.bat 狀態 --telegram`。
+
 ---
 
 ## 第一次設定（跟著做，大約 30 分鐘）
@@ -199,6 +223,8 @@
 | `data/church_bot.db` | 整個教會共用：LINE 用量、對外網址、還沒分配的群組、**變更紀錄** | 不用；刪掉會忘記變更紀錄 |
 | `config/_before_ministries/`、`config/_deleted/` | 升級前的舊檔、移除的牧區（都沒有真的刪掉） | 確認不需要了可以刪 |
 | `data/ministries/m1/send.lock` | 發送時排隊用的鎖（避免兩個程式同時發） | 不用，也不用刪 |
+| `data/service.log` | 註冊成 Windows 服務時，程式畫面上的訊息（超過 1 MB 自動換一份） | 不用；出問題時連同 `church_bot.log` 一起傳 |
+| `tools/nssm.exe` | 把後台包成 Windows 服務的小工具，`service\install.bat` 自己下載的 | 不用；刪掉再跑一次 install.bat 就有 |
 
 > 🔒 `.env`、`settings.yaml`、`config/` 底下所有 CSV、`service-account.json`、`data/` 都設定成**不會上傳到 git**，範例檔（`*.example.*`）才會。
 

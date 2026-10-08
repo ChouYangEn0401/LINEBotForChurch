@@ -35,3 +35,11 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# ---- Windows 服務用的小工具 ----
+# nssm.exe：install.bat 會自己用 winget 抓一份放進來（見 scripts/windows/service/service.ps1）。
+# 公有領域的現成執行檔，不進 git；換電腦時那邊自己抓就好。
+tools/
+# 服務模式下程式畫面上的訊息（nssm 幫忙寫的，會自動輪替）
+data/service.log
+data/service.log.*

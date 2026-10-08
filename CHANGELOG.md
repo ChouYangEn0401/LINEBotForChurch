@@ -2,6 +2,17 @@
 
 ## 未發佈
 
+- 新功能：**把後台註冊成 Windows 服務**（`scripts\windows\service\install.bat`，要按一次「是」）。
+  電腦重新開機自己起來（不用登入 Windows）、程式當掉 10 秒後自己再開一次。
+  `start.bat`／`stop.bat`／`restart.bat`／`status.bat`／`uninstall.bat` 切狀態，
+  `sc start church-bot`、`net stop church-bot`、services.msc 也都認得。
+  背後是 [nssm](https://nssm.cc)（公有領域，install.bat 第一次自己用 winget 下載到 `tools\`，會驗 SHA256）：
+  Python 不會跟 Windows 的服務控制器對話，直接 `sc create` 會在啟動時卡住跳 error 1053，所以要包這一層。
+  註冊時會順手拿掉舊的「開機自動執行」捷徑（兩個會搶同一個 port）。
+  ⚠️ 服務在背景跑，看不到視窗、也不會跳 `--popup`，所以請一定要把 Telegram 設好
+- 變更：雙擊 `2-start` 但 port 已經被佔用時，如果偵測到服務正在跑，會直接說「已經註冊成服務了，
+  不用再雙擊 2-start」，並指到 `service\stop.bat`／`restart.bat`
+
 - 新功能：**Telegram 播報**（伺服器管理員）。後台開起來、正常關掉、意外停掉都會傳一則到你的 Telegram；
   後台自己不見過一次的話，下次開起來那一則會明講「上一次沒有正常關閉」。不佔 LINE 額度。
   設定就是登入碼那一組（`.env` 的 `TELEGRAM_BOT_TOKEN`、`SERVER_MANAGER_TELEGRAM_ID`，

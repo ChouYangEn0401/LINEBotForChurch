@@ -437,6 +437,21 @@ def _port_owner(port: int) -> str:
     return f"{name or '某個程式'}（PID {pid}）"
 
 
+SERVICE_NAME = "church-bot"  # 註冊成 Windows 服務時的名字（見 scripts/windows/service/service.ps1）
+
+
+def _service_running() -> bool:
+    """後台是不是以 Windows 服務的身分在跑。查詢服務狀態不用系統管理員權限。"""
+    if sys.platform != "win32":
+        return False
+    try:
+        out = subprocess.run(["sc", "query", SERVICE_NAME], capture_output=True, timeout=10,
+                             creationflags=subprocess.CREATE_NO_WINDOW).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return b"RUNNING" in out
+
+
 PORT_IN_USE = 4  # 已經有程式在用這個 port：讓 2-start 停下來把原因顯示出來，不要一閃就關掉
 RESTART_CODE = 3  # 管理網頁按「重新啟動」：網頁那個子程式用這個代碼結束，外面那一層就再開一次
 RESTART_LIMIT = 5  # 一分鐘內重開超過這麼多次就停下來（一直壞的話不要無限重開）
@@ -512,8 +527,12 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
         owner = _port_owner(port)
         _print(f"⚠️ {url} 已經有程式在用了{('：' + owner) if owner else ''}")
         _print("   很可能是管理網頁本來就開著——免費模式（3-open-webhook）也會順便開一個。已經幫你打開瀏覽器。")
-        _print("   想換成這一次開的（例如更新過程式）：先關掉原本那個視窗，再雙擊一次 2-start；")
-        _print("   或在網頁右上角按「重新啟動」（伺服器管理員）。")
+        if _service_running():
+            _print("   這台電腦已經把後台註冊成 Windows 服務了，所以它開機就一直在跑，不用再雙擊 2-start。")
+            _print("   要停它請用 scripts\\windows\\service\\stop.bat，更新過程式用 restart.bat。")
+        else:
+            _print("   想換成這一次開的（例如更新過程式）：先關掉原本那個視窗，再雙擊一次 2-start；")
+            _print("   或在網頁右上角按「重新啟動」（伺服器管理員）。")
         if not args.no_browser:
             webbrowser.open(url)
         return PORT_IN_USE  # 不是 0：2-start 會停下來（按任意鍵才關），不會一閃就不見
