@@ -1,16 +1,22 @@
-"""右下角的小圖示：後台、LINE 指令（臨時網址）各一個。
+"""右下角的小圖示：後台（L）、LINE webhook（Lw）各一個。
 
 擁有者 2026-10-09：「服務在背景運作的時候，我要能在小工具裡面看到它在運作，然後可以透過小工具去暫停服務」，
 而且「不管用何種方式運作，都要讓 2 個程式顯示小圖示在下面」。選單：
 
     結束程式（服務模式下 nssm 會再把它開起來）／服務：停止／服務：啟動／服務：重新啟動
 
-顏色：綠＝以 Windows 服務在跑；藍＝雙擊開的在跑；黃＝正在啟動／停止中；紅＝服務開著但程式不在
-（nssm 正在重開它，或一直起不來）；灰＝沒在跑。
+**名字**照擁有者定的家族慣例（以後別的專案也一樣）：圖示上是「專案字母＋元件記號」，這個專案是 L、Lw；
+提示文字以「專案 · 元件」開頭（LINE · 後台、LINE · webhook）。ClawBot 是 H／T。
 
-**怎麼知道狀態**：每 5 秒在這個程式裡面問一次 Windows（服務控制器＋那個 pid 還在不在），
-不開新程式、不連網，一次不到 1 毫秒。擁有者否決了「點開選單才查」：那樣它掛了也看不到。
-從「在跑」變成「不在」而且不是你按的，會跳一個通知。
+**狀態和能按什麼來自同一個判斷**（``describe`` → ``Status`` → ``menu_state``），而且**任何狀態都至少有一個能按的**——
+2026-10-09 擁有者看到「服務開著、小圖示說沒在跑、又按不了啟動」，那個圖示等於沒用。
+顏色：綠＝服務在跑；藍＝雙擊開的在跑；黃＝服務開著但程式沒回應、或正在啟動／停止；灰＝沒在跑。
+
+**程式在不在**：服務開著時看 nssm 底下有沒有子程式（``runctl.service_app_alive``，不靠程式自己寫的紀錄，
+所以舊版程式也認得）；雙擊開的看 ``data/run/*.json``。
+
+**多久看一次**：每 5 秒在這個程式裡面問一次 Windows（服務控制器＋程式清單），不開新程式、不連網。
+擁有者否決了「點開選單才查」：那樣它掛了也看不到。從「在跑」變成「不在」而且不是你按的，會跳一個通知。
 
 開法：``scripts\\windows\\tray.pyw``（pythonw，沒有黑色視窗）。不帶參數＝兩個都開（已經開著的不重開）；
 帶 ``web`` 或 ``webhook``＝只跑那一個。登入 Windows 時由「啟動」資料夾的捷徑開（service\\install.bat 放的），
@@ -24,6 +30,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,14 +41,14 @@ from church_bot.config import Paths
 log = logging.getLogger(__name__)
 
 REFRESH_SECONDS = 5.0
+STUCK_SECONDS = 60  # 「正在啟動／停止」超過這麼久＝卡住了，把停止、重新啟動還給你
 COLORS = {
     "service": (46, 160, 67),    # 綠
     "manual": (31, 111, 235),    # 藍
     "busy": (210, 153, 34),      # 黃
-    "trouble": (207, 34, 46),    # 紅
     "down": (140, 140, 140),     # 灰
 }
-GLYPHS = {"web": ("後", "B"), "webhook": ("令", "L")}  # 中文字型找不到就用英文字母
+GLYPHS = {"web": "L", "webhook": "Lw"}  # 專案字母＋元件記號（家族慣例）
 PENDING = {"start_pending": "正在啟動", "stop_pending": "正在停止",
            "continue_pending": "正在繼續", "pause_pending": "正在暫停"}
 ACTION_ZH = {"stop": "停止", "start": "啟動", "restart": "重新啟動"}
@@ -50,39 +57,55 @@ CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 @dataclass(frozen=True)
 class Status:
-    color: str          # COLORS 的鍵
-    line: str           # 滑鼠停在上面、選單第一行看到的那一句
-    alive: bool         # 程式本身在跑
+    color: str           # COLORS 的鍵
+    line: str            # 滑鼠停在上面、選單第一行看到的那一句
+    alive: bool          # 程式本身在跑
     service: str | None  # 服務狀態；None＝沒註冊成服務
+    stuck: bool = False  # 卡在「正在啟動／停止」太久
 
 
-def describe(program: runctl.Program, service: str | None, run: dict | None) -> Status:
-    """把「服務狀態」＋「在跑的紀錄」翻成一個顏色和一句話。純函式，測試直接餵。"""
-    if run:
-        if run.get("mode") == "service":
-            return Status("service", f"{program.title}：執行中（Windows 服務）", True, service)
-        return Status("manual", f"{program.title}：執行中（{program.launcher} 開的）", True, service)
+def describe(program: runctl.Program, service: str | None, run: dict | None, *,
+             service_app: bool = False, stuck: bool = False) -> Status:
+    """把「服務狀態」＋「程式在不在」翻成一個顏色和一句話。純函式，測試直接餵。
+
+    run：data/run/*.json 的紀錄（雙擊開的、新版服務）；service_app：nssm 底下真的有程式。
+    """
+    title = program.title
+    if service == "running" and (service_app or (run and run.get("mode") == "service")):
+        return Status("service", f"{title}：執行中（Windows 服務）", True, service)
+    if run and run.get("mode") != "service":
+        return Status("manual", f"{title}：執行中（{program.launcher} 開的）", True, service)
     if service in PENDING:
-        return Status("busy", f"{program.title}：服務{PENDING[service]}…", False, service)
+        if stuck:
+            return Status("busy", f"{title}：服務卡在「{PENDING[service]}」超過 1 分鐘——可以按「服務：重新啟動」或「停止」",
+                          False, service, stuck=True)
+        return Status("busy", f"{title}：服務{PENDING[service]}…", False, service)
     if service == "running":
-        return Status("trouble", f"{program.title}：服務開著，但程式沒在跑（正在重開，或一直起不來）",
+        return Status("busy", f"{title}：服務在跑，但程式沒回應（可能正在重開）——可以按「服務：重新啟動」",
                       False, service)
     if service == "paused":
-        return Status("busy", f"{program.title}：服務已暫停", False, service)
+        return Status("busy", f"{title}：服務已暫停——可以按「服務：啟動」", False, service)
     if service == "stopped":
-        return Status("down", f"{program.title}：沒在跑（服務已停止）", False, service)
-    return Status("down", f"{program.title}：沒在跑", False, service)
+        return Status("down", f"{title}：沒在跑（服務已停止）——可以按「服務：啟動」", False, service)
+    return Status("down", f"{title}：沒在跑（還沒註冊成服務）——可以按「開起來」", False, service)
 
 
 def menu_state(status: Status) -> dict[str, bool]:
-    """每個選項現在能不能按。"""
+    """每個選項現在能不能按。跟 describe 用同一份判斷。
+
+    任何狀態至少有一個 True（測試會檢查）；唯一的例外是「正在啟動／停止」的頭 1 分鐘，
+    那幾秒先灰掉免得連按，超過 1 分鐘（卡住）就把停止、重新啟動還給你。
+    """
     installed = status.service is not None
-    stopped = status.service == "stopped"
+    settling = status.service in PENDING and not status.stuck
     return {
         "end": status.alive,
-        "stop": installed and not stopped,
-        "start": installed and stopped,
-        "restart": installed,
+        "stop": installed and status.service != "stopped" and not settling,
+        # 雙擊開的那一份還開著時不給啟動：服務會跟它搶 port，起不來又被 nssm 一直重開
+        "start": installed and status.service in ("stopped", "paused") and not status.alive,
+        "restart": installed and not settling,
+        # 沒註冊成服務、也沒在跑：用雙擊的方式（2-start／3-open-webhook）開起來
+        "launch": not installed and not status.alive,
     }
 
 
@@ -125,31 +148,33 @@ def control_service(paths: Paths, program: runctl.Program, action: str) -> tuple
 # --------------------------------------------------------------------------- 圖示
 
 
-def _font(size: int, chinese: bool):
+def _font(size: int):
     from PIL import ImageFont
 
-    names = ("msjhbd.ttc", "msjh.ttc", "msyhbd.ttc") if chinese else ("segoeuib.ttf", "arialbd.ttf")
-    for name in names:
+    for name in ("segoeuib.ttf", "arialbd.ttf", "DejaVuSans-Bold.ttf"):
         try:
             return ImageFont.truetype(name, size)
         except OSError:
             continue
-    return None
+    return ImageFont.load_default()
 
 
 def render(program: runctl.Program, color: str, size: int = 64):
-    """圓角方塊＋一個字：「後」＝後台、「令」＝LINE 指令。顏色就是狀態。"""
+    """圓角方塊＋白字：「L」＝後台、「Lw」＝webhook。顏色就是狀態。字縮到放得進方塊為止。"""
     from PIL import Image, ImageDraw
 
     image = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     draw = ImageDraw.Draw(image)
     draw.rounded_rectangle((2, 2, size - 3, size - 3), radius=size // 5, fill=COLORS[color] + (255,))
-    chinese, latin = GLYPHS[program.key]
-    font = _font(int(size * 0.62), chinese=True)
-    glyph = chinese if font else latin
-    font = font or _font(int(size * 0.62), chinese=False)
-    if font is not None:
-        draw.text((size / 2, size / 2), glyph, fill=(255, 255, 255, 255), font=font, anchor="mm")
+    glyph = GLYPHS[program.key]
+    font_size = int(size * 0.7)
+    while True:
+        font = _font(font_size)
+        left, top, right, bottom = draw.textbbox((0, 0), glyph, font=font)
+        if right - left <= size * 0.8 or font_size <= 8:
+            break
+        font_size -= 2
+    draw.text((size / 2, size / 2), glyph, fill=(255, 255, 255, 255), font=font, anchor="mm")
     return image
 
 
@@ -160,6 +185,7 @@ class Tray:
     def __init__(self, paths: Paths, program: runctl.Program) -> None:
         self.paths = paths.church
         self.program = program
+        self._pending_since: float | None = None
         self.status = self.snapshot()
         self.icon = None
         self._stop = threading.Event()
@@ -167,7 +193,14 @@ class Tray:
         self._expect_down = False  # 是你按的（結束、停止、重開）就不要跳「停了」的通知
 
     def snapshot(self) -> Status:
-        return describe(self.program, runctl.service_state(self.program), runctl.running(self.paths, self.program))
+        service = runctl.service_state(self.program)
+        if service in PENDING:
+            self._pending_since = self._pending_since or time.monotonic()
+        else:
+            self._pending_since = None
+        stuck = self._pending_since is not None and time.monotonic() - self._pending_since > STUCK_SECONDS
+        return describe(self.program, service, runctl.running(self.paths, self.program),
+                        service_app=service == "running" and runctl.service_app_alive(self.program), stuck=stuck)
 
     # -- 選單
 
@@ -176,10 +209,12 @@ class Tray:
         from pystray import Menu, MenuItem as Item
 
         can = lambda key: (lambda item: menu_state(self.status)[key])  # noqa: E731
-        under_service = lambda: self.status.alive and self.status.service is not None  # noqa: E731
+        under_service = lambda: self.status.alive and self.status.service == "running"  # noqa: E731
         items = [
             Item(lambda item: self.status.line, None, enabled=False),
             Menu.SEPARATOR,
+            Item(f"開起來（跟雙擊 {self.program.launcher} 一樣）", self._launch, enabled=can("launch"),
+                 visible=can("launch")),
             Item(lambda item: "結束程式（服務會自己再開起來）" if under_service() else "結束程式",
                  self._end, enabled=can("end")),
             Item("服務：停止（nssm stop）", self._service("stop"), enabled=can("stop")),
@@ -193,10 +228,19 @@ class Tray:
                   Item("關掉這個小圖示（程式照常跑）", self._quit)]
         return pystray.Menu(*items)
 
+    def _launch(self, icon, item) -> None:
+        bat = self.paths.root / "scripts" / "windows" / self.program.launcher
+        try:
+            os.startfile(bat)  # noqa: S606 - 跟雙擊一模一樣：開一個黑色視窗
+        except OSError as exc:
+            self._toast(f"開不起來：{exc}")
+        self._kick()
+
     def _end(self, icon, item) -> None:
         self._expect_down = True
         if not runctl.request_end(self.paths, self.program):
-            self._toast("它現在沒在跑，或是比較舊的版本開的（關掉那個視窗就好）")
+            self._toast("它沒有回應「結束」（比較舊的版本開的？）——服務的話按「服務：重新啟動」或「停止」，"
+                        "雙擊開的就關掉那個視窗")
         self._kick()
 
     def _service(self, action: str):
@@ -233,7 +277,7 @@ class Tray:
     def _toast(self, text: str) -> None:
         try:
             if self.icon is not None:
-                self.icon.notify(text, self.program.title)
+                self.icon.notify(text[:250], self.program.title)
         except Exception:  # noqa: BLE001 - 跳不出通知不影響其他事
             log.exception("跳通知失敗")
 

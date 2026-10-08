@@ -92,7 +92,7 @@
 ## 8. 已知限制
 
 - 電腦關機時不會發送。每週提醒由後台（`2-start`，或註冊成 Windows 服務的同一支程式）照每個牧區的時間發，Telegram 機器人呼叫 `cli.bat send` 是備援（發今天輪到的牧區）；兩個都沒開就不會發。
-- **註冊成服務之後**（`scripts\windows\service\install.bat`）後台在背景跑：開機自己起來、當掉 10 秒後自己重開，但也因此**看不到黑色視窗、不會跳出 `--popup` 的小提示**。在那台電腦前看右下角的小圖示（「後」＝後台、「令」＝LINE 指令；綠＝在跑，紅／灰＝不在；右鍵可以停／開／重開），人不在電腦前就靠 Telegram 播報和 `status.bat`。LINE 指令的臨時網址也是一個服務（`church-bot-webhook`），網址每次重開會換，但會自己重新登記到 LINE。`--popup` 只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
+- **註冊成服務之後**（`scripts\windows\service\install.bat`）後台在背景跑：開機自己起來、當掉 10 秒後自己重開，但也因此**看不到黑色視窗、不會跳出 `--popup` 的小提示**。在那台電腦前看右下角的小圖示（「L」＝LINE · 後台、「Lw」＝LINE · webhook；綠＝在跑，黃＝有狀況，灰＝不在；滑鼠停在上面會說可以按什麼，右鍵可以停／開／重開），人不在電腦前就靠 Telegram 播報和 `status.bat`。LINE 指令的臨時網址也是一個服務（`church-bot-webhook`），網址每次重開會換，但會自己重新登記到 LINE。`--popup` 只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
 - LINE token 失效時，連管理員通知也送不出去，只能看網頁或 log。
 - 免費的一般 LINE 帳號**拿不到群組完整成員名單**（見 [LINE_IDS_AND_MEMBERS.md](LINE_IDS_AND_MEMBERS.md)）。
 - 管理網頁沒有 CSRF 防護：預設只開放這台電腦；要開放給其他電腦時，務必設定密碼。
