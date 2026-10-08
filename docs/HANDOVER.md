@@ -75,6 +75,7 @@
 - **每月**：看「❓ 說明 → 🩺 系統檢查」的 LINE 本月額度。
 - **每季**：排好下一期服事表（程式會在剩 14 天時提醒）。
 - **更新程式**：拿到新版（`git pull` 或直接覆蓋檔案）後，再執行一次 `1-install`，不會覆蓋任何設定。
+  有註冊成服務的話，最後雙擊 `scripts\windows\service\restart.bat`（或在網頁右上角按「重新啟動」）。
 - **身分**：網站密碼（`UI_PASSWORD`）大家共用；每個牧區一組牧區密碼；伺服器管理員用 `SERVER_MANAGER_PASSWORD`，
   從外面登入還要驗證器 App 或 Telegram 登入碼（見 [MINISTRIES.md](MINISTRIES.md)「三種身分」）。這幾樣都在 `.env`，跟 LINE 金鑰一起保管。
 - **更新程式後**：伺服器管理員按右上角「重新啟動」，不用去關黑色視窗。
@@ -88,7 +89,8 @@
 
 ## 8. 已知限制
 
-- 電腦關機時不會發送。每週提醒由後台（`2-start`）照每個牧區的時間發，Telegram 機器人呼叫 `cli.bat send` 是備援（發今天輪到的牧區）；兩個都沒開就不會發；`--popup` 的通知視窗只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
+- 電腦關機時不會發送。每週提醒由後台（`2-start`，或註冊成 Windows 服務的同一支程式）照每個牧區的時間發，Telegram 機器人呼叫 `cli.bat send` 是備援（發今天輪到的牧區）；兩個都沒開就不會發。
+- **註冊成服務之後**（`scripts\windows\service\install.bat`）後台在背景跑：開機自己起來、當掉 10 秒後自己重開，但也因此**看不到黑色視窗、不會跳出 `--popup` 的小提示**。這時候「它還活著嗎」只能靠 Telegram 播報和 `status.bat`，所以 Telegram 一定要設好。`--popup` 只有在 Telegram 機器人跑在登入中的 Windows 桌面時看得到。
 - LINE token 失效時，連管理員通知也送不出去，只能看網頁或 log。
 - 免費的一般 LINE 帳號**拿不到群組完整成員名單**（見 [LINE_IDS_AND_MEMBERS.md](LINE_IDS_AND_MEMBERS.md)）。
 - 管理網頁沒有 CSRF 防護：預設只開放這台電腦；要開放給其他電腦時，務必設定密碼。
