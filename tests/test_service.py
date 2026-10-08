@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from church_bot.config import Settings, save_settings
+from church_bot.config import Settings, load_settings, save_settings
 from church_bot.errors import ConfigError, MessengerError
 from church_bot.core.quota import SETTLE, QuotaSnapshot
 from church_bot.messengers.base import Quota
@@ -57,11 +57,11 @@ def test_run_sends_once_then_skips(service, fake):
     assert statuses(report) == [("同工群", DeliveryStatus.SENT), ("敬拜團", DeliveryStatus.SENT)]
     assert "王大衛牧師" in fake.texts_to(gid())[0]
     assert "講員" not in fake.texts_to(gid("c"))[0]  # 敬拜團只收司琴
-    assert fake.texts_to(ADMIN) == []  # 一切正常就不吵管理員
+    assert len(fake.texts_to(ADMIN)) == 1  # 成功彙報一則（內容見 test_success_report_goes_to_the_lead）
 
     again, _ = service.run("schedule")
     assert [s for _, s in statuses(again)] == [DeliveryStatus.SKIPPED] * 2
-    assert len(fake.sent) == 2
+    assert len(fake.sent) == 3  # 2 則提醒 + 1 則彙報；全部略過的那一次不再彙報
 
     forced, _ = service.run("manual", force=True)
     assert [s for _, s in statuses(forced)] == [DeliveryStatus.SENT] * 2
@@ -95,6 +95,75 @@ def test_fatal_error_stops_further_attempts(service, fake):
     assert [s for _, s in statuses(report)] == [DeliveryStatus.FAILED, DeliveryStatus.FAILED]
     assert "沒有嘗試" in report.deliveries[1].detail
     assert fake.texts_to(gid("c")) == []
+
+
+# ------------------------------------------------------------------ 發完之後的彙報（settings.notify）
+
+
+def test_success_report_goes_to_the_lead(service, fake):
+    """成功發完，主責同工收到一份彙總：送了幾則、每一則去了哪裡。"""
+    service.name = "青年牧區"
+    report, _ = service.run("cli")
+    assert report.status == "ok"
+    sent = fake.texts_to(ADMIN)
+    assert len(sent) == 1
+    assert sent[0].startswith("✅ 【青年牧區】提醒已送出")
+    assert "送出 2 則、失敗 0 則、略過 0 則" in sent[0]
+    assert "・同工群：已送出" in sent[0] and "・敬拜團：已送出" in sent[0]
+
+
+def test_success_report_can_go_to_someone_else(service, fake):
+    other = uid("b")
+    settings = load_settings(service.paths)
+    settings.notify.report_target_id = other
+    save_settings(service.paths, settings)
+    service.run("cli")
+    assert len(fake.texts_to(other)) == 1
+    assert fake.texts_to(ADMIN) == []  # 指定了主責同工就只傳給他，不再傳給「出問題通知誰」
+
+
+def test_success_report_can_be_turned_off(service, fake):
+    settings = load_settings(service.paths)
+    settings.notify.report_on_success = False
+    save_settings(service.paths, settings)
+    service.run("cli")
+    assert fake.texts_to(ADMIN) == []  # 不想多花 LINE 則數的牧區，關掉就完全不傳
+
+
+def test_failure_does_not_send_the_report_on_top_of_the_alert(service, fake):
+    """有錯誤時只傳一則「出問題」通知，不要為了同一件事再扣一則彙報。"""
+    fake.fail[gid()] = MessengerError("LINE 拒絕這個操作", status_code=403)
+    service.run("cli")
+    alerts = fake.texts_to(ADMIN)
+    assert len(alerts) == 1 and alerts[0].startswith("❌")
+
+
+def test_telegram_report_is_sent_for_every_scheduled_run(service, fake, monkeypatch):
+    """自動排程那一次一定傳 Telegram，就算全部略過——沒收到就代表後台當時沒在跑。"""
+    sent: list[str] = []
+    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    service.run("schedule")
+    assert len(sent) == 1 and sent[0].startswith("✅")
+    service.run("schedule")  # 第二次全部略過，還是要報一聲（心跳）
+    assert len(sent) == 2 and "略過 2 則" in sent[1]
+
+
+def test_telegram_report_stays_quiet_when_nothing_happened(service, fake, monkeypatch):
+    sent: list[str] = []
+    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    service.run("cli")
+    service.run("cli")  # 手動再跑一次，全部略過 → 不用吵
+    assert len(sent) == 1
+
+
+def test_telegram_report_can_be_turned_off(service, fake, monkeypatch):
+    settings = load_settings(service.paths)
+    settings.notify.telegram = False
+    save_settings(service.paths, settings)
+    sent: list[str] = []
+    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    service.run("schedule")
+    assert sent == []
 
 
 def test_quota_warning(service, fake):

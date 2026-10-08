@@ -55,6 +55,8 @@ def form_values(s: Settings) -> dict[str, Any]:
         "template": s.message.template, "role_order": fmt_list(s.message.role_order),
         "name_separator": s.message.name_separator,
         "admin_target_id": s.line.admin_target_id,
+        "report_on_success": s.notify.report_on_success, "report_target_id": s.notify.report_target_id,
+        "report_telegram": s.notify.telegram,
         "lookahead_days": s.behavior.lookahead_days, "resend_if_changed": s.behavior.resend_if_changed,
         "roster_low_warning_days": s.behavior.roster_low_warning_days,
         "warn_unknown_names": s.behavior.warn_unknown_names,
@@ -91,6 +93,9 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
         role_order=list(parse_list(f.get("role_order", ""))), name_separator=f.get("name_separator") or "、",
     )
     data["line"]["admin_target_id"] = f.get("admin_target_id", "").strip()
+    data["notify"].update(report_on_success=on("report_on_success"),
+                          report_target_id=f.get("report_target_id", "").strip(),
+                          telegram=on("report_telegram"))
     data["behavior"].update(lookahead_days=lookahead, resend_if_changed=on("resend_if_changed"),
                             roster_low_warning_days=low_days, warn_unknown_names=on("warn_unknown_names"))
     data["chat"].update(collect_names=on("collect_names"), remote_config=on("remote_config"),
@@ -104,6 +109,10 @@ def apply_form(current: Settings, f: dict[str, str]) -> Settings:
     admin = new.line.admin_target_id
     if admin and not LINE_ID_RE.match(admin):
         raise ConfigError("管理員 LINE ID 格式不對", "要是 U 或 C 開頭再加 32 個英數字。私訊機器人「/我的ID」就能拿到。")
+    lead = new.notify.report_target_id
+    if lead and not LINE_ID_RE.match(lead):
+        raise ConfigError("主責同工的 LINE ID 格式不對",
+                          "要是 U 或 C 開頭再加 32 個英數字。請他私訊機器人打「/我的ID」就拿得到。")
     if new.source.kind in ("google_public", "google_service_account"):
         parse_sheet_url(new.source.spreadsheet_url)
     Renderer(new.message).validate()
