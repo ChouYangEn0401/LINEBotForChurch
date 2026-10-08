@@ -2,6 +2,19 @@
 
 ## 未發佈
 
+- 新功能：**右下角小圖示**（後台「後」、LINE 指令「令」各一個），不管是服務還是雙擊開的都會出現。
+  顏色就是狀態（綠＝服務在跑、藍＝雙擊開的、黃＝起停中、紅＝服務開著但程式不在、灰＝沒在跑），
+  右鍵：結束程式（服務模式下 nssm 會再開回來）、服務：停止／啟動／重新啟動（nssm stop／start／restart）。
+  在跑的突然不在了會跳通知。登入 Windows 時由「啟動」資料夾的捷徑開（install.bat 放、uninstall.bat 拿掉）。
+  狀態每 5 秒在自己程式裡問一次 Windows（不開新程式、不連網）；「結束程式」是按一個 Windows 事件，
+  程式照 Ctrl+C 的路收工，不是砍程式，所以也不用跳 UAC。新增依賴：pystray、Pillow、psutil
+- 新功能：**LINE 指令（3-open-webhook 的臨時網址）也可以註冊成服務**（`church-bot-webhook`，接在後台後面才起來）。
+  `scripts\windows` 多了 `2-service-start／stop／restart.bat`（後台）、`3-service-start／stop／restart.bat`（LINE 指令）；
+  原本雙擊的 `2-start.bat`、`3-open-webhook.bat` 照舊。`service\start／stop／restart.bat` 改成兩個一起。
+  install.bat 會把這兩個服務的啟動／停止權限開給你的 Windows 帳號，之後停開不用再跳 UAC；
+  雙擊開著的黑色視窗沒關的話，install.bat 會請你先關。服務在跑時再雙擊 3-open-webhook 會直接說不用開
+  （兩條臨時網址會互相把對方從 LINE 擠掉）
+
 - 新功能：**把後台註冊成 Windows 服務**（`scripts\windows\service\install.bat`，要按一次「是」）。
   電腦重新開機自己起來（不用登入 Windows）、程式當掉 10 秒後自己再開一次。
   `start.bat`／`stop.bat`／`restart.bat`／`status.bat`／`uninstall.bat` 切狀態，

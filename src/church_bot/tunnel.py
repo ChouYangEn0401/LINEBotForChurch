@@ -116,14 +116,20 @@ def copy_to_clipboard(text: str) -> None:
         pass
 
 
-def run_tunnel(command: list[str], register: Callable[[str], bool], out: Callable[[str], None]) -> int:
-    """開 cloudflared（command），等臨時網址建好就呼叫 register(webhook 網址)；一直開著直到 cloudflared 結束或 Ctrl+C。"""
+def run_tunnel(command: list[str], register: Callable[[str], bool], out: Callable[[str], None],
+               started: Callable[[subprocess.Popen], None] | None = None) -> int:
+    """開 cloudflared（command），等臨時網址建好就呼叫 register(webhook 網址)；一直開著直到 cloudflared 結束或 Ctrl+C。
+
+    started(proc)：cloudflared 開起來時通知呼叫的人（小圖示「結束程式」要能把它收掉）。
+    """
     try:
         proc = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 encoding="utf-8", errors="replace", bufsize=1)
     except OSError as exc:
         out(f"❌ 開不了 cloudflared：{exc}")
         return 2
+    if started:
+        started(proc)
     webhook = ""
     registered = False
     try:
