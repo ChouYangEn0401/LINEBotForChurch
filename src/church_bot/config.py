@@ -196,10 +196,9 @@ class ChatSettings(_Base):
 class NotifySettings(_Base):
     """發送完之後要不要回報、回報給誰（出問題的通知一直都有，那個是 line.admin_target_id）。"""
 
-    # 成功發送後，用 LINE 把整份彙總傳給主責同工。會多算 LINE 則數：每個牧區每次發送多 1 則
+    # 成功發送後，用 LINE 把整份彙總傳給管理員（就是「出問題通知誰」那一批，不另外設第二組名單）。
+    # 會多算 LINE 則數：每位管理員每次發送各 1 則
     report_on_success: bool = True
-    # 傳給誰（LINE 的 userId 或群組 ID）。留空 = 跟「出問題通知誰」同一批（設定沒填就是勾了管理員的同工）
-    report_target_id: str = ""
     # 每次發送後也把同一份彙總傳到伺服器管理員的 Telegram。不佔 LINE 額度，所以預設開著；
     # 要收得到還得先在「全教會設定 → 伺服器管理員」填 Telegram（見 core/notify.py）
     telegram: bool = True

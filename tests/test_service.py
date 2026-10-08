@@ -57,7 +57,7 @@ def test_run_sends_once_then_skips(service, fake):
     assert statuses(report) == [("同工群", DeliveryStatus.SENT), ("敬拜團", DeliveryStatus.SENT)]
     assert "王大衛牧師" in fake.texts_to(gid())[0]
     assert "講員" not in fake.texts_to(gid("c"))[0]  # 敬拜團只收司琴
-    assert len(fake.texts_to(ADMIN)) == 1  # 成功彙報一則（內容見 test_success_report_goes_to_the_lead）
+    assert len(fake.texts_to(ADMIN)) == 1  # 成功彙報一則（內容見 test_success_report_goes_to_the_admin）
 
     again, _ = service.run("schedule")
     assert [s for _, s in statuses(again)] == [DeliveryStatus.SKIPPED] * 2
@@ -100,8 +100,8 @@ def test_fatal_error_stops_further_attempts(service, fake):
 # ------------------------------------------------------------------ 發完之後的彙報（settings.notify）
 
 
-def test_success_report_goes_to_the_lead(service, fake):
-    """成功發完，主責同工收到一份彙總：送了幾則、每一則去了哪裡。"""
+def test_success_report_goes_to_the_admin(service, fake):
+    """成功發完，管理員收到一份彙總：送了幾則、每一則去了哪裡。"""
     service.name = "青年牧區"
     report, _ = service.run("cli")
     assert report.status == "ok"
@@ -110,16 +110,6 @@ def test_success_report_goes_to_the_lead(service, fake):
     assert sent[0].startswith("✅ 【青年牧區】提醒已送出")
     assert "送出 2 則、失敗 0 則、略過 0 則" in sent[0]
     assert "・同工群：已送出" in sent[0] and "・敬拜團：已送出" in sent[0]
-
-
-def test_success_report_can_go_to_someone_else(service, fake):
-    other = uid("b")
-    settings = load_settings(service.paths)
-    settings.notify.report_target_id = other
-    save_settings(service.paths, settings)
-    service.run("cli")
-    assert len(fake.texts_to(other)) == 1
-    assert fake.texts_to(ADMIN) == []  # 指定了主責同工就只傳給他，不再傳給「出問題通知誰」
 
 
 def test_success_report_can_be_turned_off(service, fake):

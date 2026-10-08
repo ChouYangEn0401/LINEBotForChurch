@@ -165,26 +165,18 @@ SETTINGS_FORM = {"source_kind": "csv", "csv_path": "config/roster.demo.csv", "da
 
 def test_settings_page_has_the_report_section(client):
     page = client.get("/settings").text
-    assert "發完之後的彙報" in page and 'name="report_target_id"' in page
+    assert "發完之後的彙報" in page and 'name="report_on_success"' in page
+    assert 'name="report_target_id"' not in page  # 主責同工就是管理員，不另外設一組
 
 
 def test_settings_page_saves_the_report_switches(client, paths):
     from church_bot.config import load_settings
-    from tests.conftest import uid as _uid
 
-    lead = _uid("e")
-    client.post("/settings", data={**SETTINGS_FORM, "report_on_success": "on", "report_target_id": lead})
+    client.post("/settings", data={**SETTINGS_FORM, "report_on_success": "on"})
     saved = load_settings(paths).notify
-    assert saved.report_on_success and saved.report_target_id == lead
+    assert saved.report_on_success
     assert not saved.telegram  # checkbox 沒勾就是關
 
     client.post("/settings", data={**SETTINGS_FORM, "report_telegram": "on"})
     saved = load_settings(paths).notify
-    assert saved.telegram and not saved.report_on_success and saved.report_target_id == ""
-
-
-def test_settings_page_rejects_a_bad_lead_id(client, paths):
-    from church_bot.config import load_settings
-
-    client.post("/settings", data={**SETTINGS_FORM, "report_on_success": "on", "report_target_id": "小明"})
-    assert load_settings(paths).notify.report_target_id == ""  # 存不進去，原本的設定不動
+    assert saved.telegram and not saved.report_on_success

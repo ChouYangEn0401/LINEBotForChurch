@@ -111,12 +111,7 @@
     <div class="fcard-body">
       <div class="ffield ffield-chk" style="--span:12">
         <label><input type="checkbox" id="report_on_success" name="report_on_success" {{ "checked" if f.report_on_success }}>
-          <span><b>成功發送後，用 LINE 傳一份彙總給主責同工</b><span class="help"><br>每次發送會多扣 1 則 LINE 額度（傳給好幾個人就是好幾則）。不想多花就不要勾。</span></span></label>
-      </div>
-      <div class="ffield" style="--span:12">
-        <label for="report_target_id">主責同工的 LINE ID</label>
-        <input type="text" id="report_target_id" name="report_target_id" class="mono" value="{{ f.report_target_id }}" placeholder="U 開頭（個人）或 C 開頭（群組）+ 32 碼">
-        <span class="help">留空 = 跟上面「出問題通知誰」同一批人。請他私訊機器人打「/我的ID」就拿得到。</span>
+          <span><b>成功發送後，用 LINE 傳一份彙總給管理員</b><span class="help"><br>傳給的就是上面「出問題通知誰」那一批人。每位管理員每次發送各多扣 1 則 LINE 額度，不想多花就不要勾。</span></span></label>
       </div>
       <div class="ffield ffield-chk" style="--span:12">
         <label><input type="checkbox" id="report_telegram" name="report_telegram" {{ "checked" if f.report_telegram }}>
