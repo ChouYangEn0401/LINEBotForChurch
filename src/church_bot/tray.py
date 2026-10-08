@@ -129,28 +129,96 @@ def _denied(text: str) -> bool:
     return any(word in lowered for word in ("access is denied", "拒絕存取", "存取被拒", "error 5", "錯誤 5"))
 
 
+ERROR_ACCESS_DENIED = 5
+_SERVICE_START, _SERVICE_STOP, _SERVICE_QUERY_STATUS = 0x0010, 0x0020, 0x0004
+_STOPPED, _RUNNING = 1, 4
+
+
+def _scm_control(service: str, action: str, wait_seconds: float = 60.0) -> tuple[bool, str, int]:
+    """直接請 Windows 的服務控制器 start／stop／restart，**只要剛好需要的權限**（啟動、停止、查狀態）。
+
+    為什麼不叫 nssm.exe：2026-10-09 擁有者按「重新啟動」看到「Can't open service! OpenService(): ?????」——
+    nssm 開服務時要的權限比 install.bat 授權的多，被拒；它印的「存取被拒」在中文 Windows 上又是亂碼，
+    _denied() 認不出來，也就沒有退回 UAC。這裡回 Windows 的錯誤代碼（數字），不比對文字。
+    回傳 (成功?, 一句話, 錯誤代碼)。"""
+    import ctypes
+    from ctypes import wintypes
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi.OpenSCManagerW.restype = wintypes.HANDLE
+    advapi.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+    advapi.OpenServiceW.restype = wintypes.HANDLE
+    advapi.OpenServiceW.argtypes = [wintypes.HANDLE, wintypes.LPCWSTR, wintypes.DWORD]
+    advapi.ControlService.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p]
+    advapi.StartServiceW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p]
+    advapi.QueryServiceStatus.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+    advapi.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+
+    scm = advapi.OpenSCManagerW(None, None, 0x0001)  # SC_MANAGER_CONNECT
+    if not scm:
+        return False, "連不上服務控制器", ctypes.get_last_error()
+    try:
+        handle = advapi.OpenServiceW(scm, service, _SERVICE_START | _SERVICE_STOP | _SERVICE_QUERY_STATUS)
+        if not handle:
+            code = ctypes.get_last_error()
+            return False, ("沒有權限" if code == ERROR_ACCESS_DENIED else f"打不開服務（錯誤 {code}）"), code
+        try:
+            status = (wintypes.DWORD * 7)()
+
+            def state() -> int:
+                return status[1] if advapi.QueryServiceStatus(handle, ctypes.byref(status)) else 0
+
+            def wait_for(target: int) -> bool:
+                deadline = time.monotonic() + wait_seconds
+                while time.monotonic() < deadline:
+                    if state() == target:
+                        return True
+                    time.sleep(0.5)
+                return False
+
+            if action in ("stop", "restart") and state() != _STOPPED:
+                if not advapi.ControlService(handle, 1, ctypes.byref(status)):  # SERVICE_CONTROL_STOP
+                    code = ctypes.get_last_error()
+                    if code != 1062:  # ERROR_SERVICE_NOT_ACTIVE：本來就停了
+                        return False, f"停不下來（錯誤 {code}）", code
+                if not wait_for(_STOPPED):
+                    return False, f"{int(wait_seconds)} 秒內沒停好（還在收尾？）", 0
+            if action in ("start", "restart") and state() != _RUNNING:
+                if not advapi.StartServiceW(handle, 0, None):
+                    code = ctypes.get_last_error()
+                    if code != 1056:  # ERROR_SERVICE_ALREADY_RUNNING
+                        return False, f"開不起來（錯誤 {code}）", code
+                if not wait_for(_RUNNING):
+                    return False, "30 秒內沒起來，看一下紀錄檔", 0
+            return True, {"stop": "已停止", "start": "已啟動", "restart": "已重新啟動"}[action], 0
+        finally:
+            advapi.CloseServiceHandle(handle)
+    finally:
+        advapi.CloseServiceHandle(scm)
+
+
 def control_service(paths: Paths, program: runctl.Program, action: str) -> tuple[bool, str]:
-    """nssm start / stop / restart。沒有權限（install.bat 沒授權過）就改用系統管理員身分再做一次（會跳 UAC）。"""
+    """服務 start / stop / restart。沒有權限（install.bat 還沒授權給你的帳號）就改用系統管理員身分再做一次
+    （會跳 UAC，nssm 代勞）。"""
     nssm = _nssm(paths)
     if not nssm.exists():
         return False, "找不到 tools\\nssm.exe：還沒註冊成服務（雙擊 scripts\\windows\\service\\install.bat）"
+    if sys.platform != "win32":
+        return False, "只有 Windows 有服務"
     try:
-        done = subprocess.run([str(nssm), action, program.service], capture_output=True, timeout=120,
-                              creationflags=CREATE_NO_WINDOW)
-    except (OSError, subprocess.SubprocessError) as exc:
-        return False, f"nssm 執行失敗：{exc}"
-    text = (done.stdout + done.stderr).decode("mbcs", errors="replace").replace("\x00", "").strip()
-    if done.returncode == 0:
-        return True, text
-    if _denied(text) and sys.platform == "win32":
-        import ctypes
+        ok, text, code = _scm_control(program.service, action)
+    except OSError as exc:
+        return False, f"問不到服務控制器：{exc}"
+    if ok or code != ERROR_ACCESS_DENIED:
+        return ok, text
+    import ctypes
 
-        # 0 = SW_HIDE：UAC 那一下之後不會再多一個黑色視窗
-        rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(nssm), f"{action} {program.service}", None, 0)
-        if rc > 32:
-            return True, "已經用系統管理員身分送出（按了「是」才會生效）"
-        return False, "沒有取得系統管理員權限"
-    return False, text or f"nssm {action} 失敗（代碼 {done.returncode}）"
+    # 0 = SW_HIDE：UAC 那一下之後不會再多一個黑色視窗
+    rc = ctypes.windll.shell32.ShellExecuteW(None, "runas", str(nssm), f"{action} {program.service}", None, 0)
+    if rc > 32:
+        return True, ("你的帳號還沒有權限，這次用系統管理員身分送出（按了「是」才會生效）。"
+                      "重跑一次 service\\install.bat 之後就不會再問")
+    return False, "沒有取得系統管理員權限"
 
 
 # --------------------------------------------------------------------------- 圖示
