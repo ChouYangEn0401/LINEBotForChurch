@@ -106,6 +106,25 @@
     </div>
   </section>
 
+  <section class="fcard closed" id="report" data-fcard>
+    {{ card_head("發完之後的彙報", "提醒送出去之後，回報一份「送了幾則、送到哪些群組」。出問題的通知是上面那一段，這一段是「一切正常」時也講一聲。", 3) }}
+    <div class="fcard-body">
+      <div class="ffield ffield-chk" style="--span:12">
+        <label><input type="checkbox" id="report_on_success" name="report_on_success" {{ "checked" if f.report_on_success }}>
+          <span><b>成功發送後，用 LINE 傳一份彙總給主責同工</b><span class="help"><br>每次發送會多扣 1 則 LINE 額度（傳給好幾個人就是好幾則）。不想多花就不要勾。</span></span></label>
+      </div>
+      <div class="ffield" style="--span:12">
+        <label for="report_target_id">主責同工的 LINE ID</label>
+        <input type="text" id="report_target_id" name="report_target_id" class="mono" value="{{ f.report_target_id }}" placeholder="U 開頭（個人）或 C 開頭（群組）+ 32 碼">
+        <span class="help">留空 = 跟上面「出問題通知誰」同一批人。請他私訊機器人打「/我的ID」就拿得到。</span>
+      </div>
+      <div class="ffield ffield-chk" style="--span:12">
+        <label><input type="checkbox" id="report_telegram" name="report_telegram" {{ "checked" if f.report_telegram }}>
+          <span><b>同一份也傳到伺服器管理員的 Telegram</b><span class="help"><br>不佔 LINE 額度，所以預設開著。自動發送那一次一定會傳（就算全部略過也報一聲，當成「後台還活著」的心跳）。要收得到，先到「全教會設定 → 伺服器管理員」把 Telegram 設好。</span></span></label>
+      </div>
+    </div>
+  </section>
+
   <section class="fcard closed" id="chat" data-fcard>
     {{ card_head("LINE 聊天室指令", "這一段決定大家在 LINE 打「/」指令時，機器人會做哪些事。", 3) }}
     <div class="fcard-body">

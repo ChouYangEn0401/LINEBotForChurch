@@ -53,7 +53,9 @@ class FakeMessenger:
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    for key in ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET", "UI_PASSWORD", "CHURCH_BOT_HOME"):
+    # Telegram 那兩個一定要清掉：留著的話測試會真的去打 api.telegram.org，把通知傳到維護者手機上
+    for key in ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET", "UI_PASSWORD", "CHURCH_BOT_HOME",
+                "TELEGRAM_BOT_TOKEN", "SERVER_MANAGER_TELEGRAM_ID", "CHURCH_BOT_SERVICE"):
         monkeypatch.delenv(key, raising=False)
 
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import logging
 import os
 import shutil
 import socket
@@ -24,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from church_bot import __version__
 from church_bot.config import Paths, load_settings
-from church_bot.core import versions
+from church_bot.core import notify, versions
 from church_bot.core.planner import Plan
 from church_bot.errors import ChurchBotError
 from church_bot.logging_setup import setup_logging
@@ -33,6 +34,8 @@ from church_bot.tables import MemberTable, TargetTable, TeamTable, write_csv
 
 if TYPE_CHECKING:
     from church_bot.ministries import Church, Unit
+
+log = logging.getLogger(__name__)
 
 DEMO_HEADER = ["日期", "聚會", "講員", "司會", "敬拜主領", "司琴", "音控", "投影", "招待", "備註"]
 DEMO_ROWS = [
@@ -336,6 +339,26 @@ def cmd_ministries(paths: Paths, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
+    """所有牧區現在的狀況：服事表排到哪、上一次發了什麼、下一次什麼時候發。
+
+    給伺服器管理員用的那一個指令。``--telegram`` 會把同一份傳到手機，人不在電腦前也看得到。
+    結束代碼：0 = 都正常、1 = 有牧區要處理（服事表快排完、讀不到、上一次發送有錯誤）。
+    """
+    from church_bot import status as status_mod
+    from church_bot.ministries import Church
+
+    church = Church(paths)
+    statuses = status_mod.collect(church, check_roster=not args.quick)
+    text = status_mod.text(church, statuses, detail=not args.short)
+    _print(text)
+    if args.telegram:
+        ok = notify.Notifier(paths).send(text)
+        _print("\n（已傳到 Telegram）" if ok else
+               "\n（Telegram 還沒設定好、或這次傳不出去，所以只印在這裡）")
+    return 1 if any(not s.ok for s in statuses) else 0
+
+
 def _popup_text(report: RunReport, limit: int = 5) -> str:
     problems = [i for i in report.issues if i.is_error]
     lines = [f"已送出 {report.count_sent} 則、失敗 {report.count_failed} 則。", ""]
@@ -423,11 +446,11 @@ def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
     """開管理網頁。外面這一層只負責「開網頁、網頁說要重新啟動就再開一次」，真正的網頁在子程式裡跑
     （``--child``），所以按「重新啟動」會載入新的程式，例如更新過程式之後。2-start、免費模式、開機自動執行都一樣。"""
     if not getattr(args, "child", False):
-        return _supervise(args)
+        return _supervise(paths, args)
     return _serve(paths, args)
 
 
-def _supervise(args: argparse.Namespace) -> int:
+def _supervise(paths: Paths, args: argparse.Namespace) -> int:
     base = [sys.executable, "-m", "church_bot", *(["-v"] if getattr(args, "verbose", False) else []), "web", "--child"]
     base += ["--host", args.host] if args.host else []
     base += ["--port", str(args.port)] if args.port else []
@@ -443,16 +466,32 @@ def _supervise(args: argparse.Namespace) -> int:
                 child.wait(timeout=30)
             except (subprocess.TimeoutExpired, KeyboardInterrupt):
                 child.kill()
-            return 0
+            return 0  # 「已停止」那一則由子程式自己傳（它才知道有沒有收好），這裡不重複
         if code != RESTART_CODE:
+            # 子程式自己結束得掉的話（正常關閉、按重新啟動）都不會走到這裡還帶著錯誤代碼。
+            # 走到這裡 = 它死掉了，而且死得太突然，來不及自己講——這一層是唯一還活著的人。
+            if code != 0:
+                _notify_crash(paths, code)
             return code
         now = time.monotonic()
         starts = [t for t in starts if now - t < 60] + [now]
         if len(starts) > RESTART_LIMIT:
             _print("❌ 一分鐘內重新啟動太多次，先停下來。請把 data/church_bot.log 傳給維護的人，再雙擊 2-start。")
+            notify.Notifier(paths).send("❌ 服事提醒機器人：後台一分鐘內重新啟動太多次，已經停下來不再重開。\n"
+                                        "請到那台電腦看 data/church_bot.log。")
             return 1
         _print("🔄 重新啟動管理網頁…")
         restarted = True
+
+
+def _notify_crash(paths: Paths, code: int) -> None:
+    if code == PORT_IN_USE:
+        text = ("⚠️ 服事提醒機器人：後台沒有啟動。\n"
+                "網址的 port 已經被別的程式佔用了（很可能本來就有一個開著）。")
+    else:
+        text = (f"❌ 服事提醒機器人：後台意外停止（結束代碼 {code}）。\n"
+                "自動發送在它重新起來之前都不會動。請到那台電腦看 data/church_bot.log。")
+    notify.Notifier(paths).send(text)
 
 
 def _serve(paths: Paths, args: argparse.Namespace) -> int:
@@ -492,8 +531,41 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
     app = create_app(paths)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
     app.state.server = server  # 「重新啟動」按鈕靠它讓網頁停下來（見 web/app.py）
+
+    church = app.state.web.church
+    notifier = notify.Notifier(paths)
+    before = notify.record_start(church.shared)
+    # 另開執行緒去傳：Telegram 連不上時最多要等 10 秒，不能讓網頁晚 10 秒才開
+    threading.Thread(target=_announce_start, args=(notifier, church, url, before, args.restarted),
+                     daemon=True).start()
+
     server.run()
-    return RESTART_CODE if getattr(app.state, "restart_requested", False) else 0
+
+    restarting = bool(getattr(app.state, "restart_requested", False))
+    notify.record_stop(church.shared, clean=True, reason="重新啟動" if restarting else "正常關閉")
+    if restarting:
+        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…")
+    else:
+        notifier.send("⏹ 服事提醒機器人：後台已經正常關閉。\n"
+                      "在它重新開起來之前，每週提醒不會自動發送。")
+    return RESTART_CODE if restarting else 0
+
+
+def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, before: dict, restarted: bool) -> None:
+    """後台開起來了。順便講「上一次有沒有正常關閉」——伺服器自己不見的時候，就是靠這一行發現的。"""
+    from church_bot import status as status_mod
+
+    head = "🔄 服事提醒機器人：後台已重新啟動" if restarted else "✅ 服事提醒機器人：後台已啟動"
+    lines = [f"{head}（v{__version__}）", f"管理網頁：{url}"]
+    if os.environ.get("CHURCH_BOT_SERVICE"):
+        lines.append("（以 Windows 服務執行：關機重開、當掉都會自己再起來）")
+    if warning := notify.previous_shutdown_line(before):
+        lines += ["", warning]
+    try:  # check_roster=False：啟動通知要快，不連網去讀 Google 服事表
+        lines += ["", *status_mod.lines(status_mod.collect(church, check_roster=False), detail=False)]
+    except Exception:  # noqa: BLE001 - 通知裡少一段，絕對不能害後台開不起來
+        log.exception("組啟動通知的牧區狀況時失敗")
+    notifier.send("\n".join(lines))
 
 
 # --------------------------------------------------------------------------- main
@@ -524,6 +596,10 @@ def build_parser() -> argparse.ArgumentParser:
     send.add_argument("--retries", type=int, default=0, help="讀不到服事表、LINE 暫時連不上時，最多再試幾次（預設 0）")
     send.add_argument("--retry-wait", type=float, default=300, help="每次重試前等幾秒（預設 300 = 5 分鐘）")
     send.add_argument("--popup", action="store_true", help="最後還是失敗的話，在這台電腦跳出小視窗通知")
+    state = sub.add_parser("狀態", aliases=["status"], help="所有牧區的狀況：服事表排到哪、上次發送、下次發送")
+    state.add_argument("--telegram", action="store_true", help="同時傳一份到伺服器管理員的 Telegram")
+    state.add_argument("--quick", action="store_true", help="不去讀服事表（不連網，瞬間就好）")
+    state.add_argument("--short", action="store_true", help="一個牧區只印一行")
     quota = sub.add_parser("quota", help="查本月 LINE 用量（發送後約 5 分鐘呼叫一次，用量就會是發送後的數字）")
     quota.add_argument("--force", action="store_true", help="不管上次查多久以前，一定重新問 LINE")
     ministries = sub.add_parser("牧區", aliases=["ministries"], help="牧區清單：列出、新增、改名、清掉牧區密碼")
@@ -552,7 +628,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
             "quota": cmd_quota, "牧區": cmd_ministries, "ministries": cmd_ministries, "set-webhook": cmd_set_webhook,
-            "tunnel": cmd_tunnel}
+            "tunnel": cmd_tunnel, "狀態": cmd_status, "status": cmd_status}
 
 
 def main(argv: list[str] | None = None) -> int:

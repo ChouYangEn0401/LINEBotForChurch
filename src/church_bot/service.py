@@ -22,6 +22,7 @@ from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
 from church_bot.core.dispatcher import Dispatcher
+from church_bot.core import notify
 from church_bot.core.history import History
 from church_bot.core.parser import SheetInfo, inspect_sheet, parse_roster
 from church_bot.core.planner import DATE_FMT, Plan, Planner, active_targets, find_unknown_names
@@ -103,10 +104,47 @@ def build_admin_alert(report: RunReport, limit: int = 8) -> str:
     return "\n".join(lines)
 
 
+def build_summary(report: RunReport, ministry: str = "", limit: int = 8) -> str:
+    """一次發送的完整彙總：成功了幾則、每一則去了哪裡、還有什麼要處理。
+
+    主責同工的 LINE 彙報（settings.notify）和伺服器管理員的 Telegram 播報用的是同一份，
+    所以兩邊看到的內容一模一樣，對帳的時候不用猜。
+    """
+    icon = {"error": "❌", "warning": "⚠️", "ok": "✅"}[report.status]
+    head = {"error": "這次發送有錯誤", "warning": "發送完成，但有事項要處理", "ok": "提醒已送出"}[report.status]
+    who = f"【{ministry}】" if ministry else ""
+    when = report.started_at.strftime("%m/%d %H:%M")
+    lines = [f"{icon} {who}{head}", f"{when}・{TRIGGER_ZH.get(report.trigger, report.trigger)}"]
+    if report.service_date:
+        lines.append(f"服事日期：{format_date(report.service_date, '%-m/%-d')}")
+    lines.append(f"送出 {report.count_sent} 則、失敗 {report.count_failed} 則、略過 {report.count_skipped} 則")
+
+    shown = [d for d in report.deliveries if d.status is not DeliveryStatus.DRY_RUN]
+    if shown:
+        lines.append("")
+        for delivery in shown[:limit]:
+            detail = f"（{delivery.detail}）" if delivery.detail else ""
+            lines.append(f"・{delivery.target_name}：{delivery.status.zh}{detail}")
+        if len(shown) > limit:
+            lines.append(f"…還有 {len(shown) - limit} 個群組")
+
+    problems = [i for i in report.issues if i.severity is not Severity.INFO]
+    if problems:
+        lines.append("")
+        lines += [i.one_line() for i in problems[:limit]]
+        if len(problems) > limit:
+            lines.append(f"…還有 {len(problems) - limit} 項")
+    return "\n".join(lines)
+
+
 class BotService:
     def __init__(self, paths: Paths, shared: History | None = None) -> None:
         """``shared`` = 整個教會共用的資料庫（LINE 用量、對外網址）；沒給就跟自己的同一份（只有一個牧區時）。"""
         self.paths = paths
+        # 牧區名稱。BotService 自己不知道有別的牧區，所以由 Church 在拿 Unit 時填進來（見 ministries.py），
+        # 只用在通知的字面上（「【青年牧區】提醒已送出」）。沒填也不會壞，只是不會寫牧區名字。
+        self.name = ""
+        self.notifier = notify.Notifier(paths)
         self.history = History(paths.db_file)
         self.shared = shared or self.history
         self._run_lock = threading.Lock()  # 排程和手動按鈕同時按下去也不會重複發送
@@ -239,6 +277,7 @@ class BotService:
                     self._note_push(messenger)  # 用量變了：馬上更新快照，並排一次 5 分鐘後的重查
                 if not dry_run and ctx is not None and not (will_retry and worth_retrying(report)):
                     self._alert_admin(ctx.settings, messenger, report)
+                    self._report_done(ctx.settings, messenger, report)
                 if not dry_run:  # 預覽不記錄：網頁每次打開都會預覽，記下來只會讓資料庫一直變大
                     self._record(report)
                 if messenger is not None:
@@ -284,6 +323,59 @@ class BotService:
         finally:
             if own is not None:
                 own.close()
+
+    def _report_done(self, settings: Settings, messenger: Messenger | None, report: RunReport) -> None:
+        """發完之後的彙報。兩條路，互不影響，哪一條壞了都不准讓這一次的發送變成失敗。
+
+        * Telegram（免費）：傳給伺服器管理員。自動排程那一次**一定**傳，就算全部略過也報一聲
+          ——沒收到就代表後台當時沒在跑，這正是要抓的事。
+        * LINE（要算則數）：成功送出而且沒事要處理時，把同一份彙總傳給主責同工
+          （``notify.report_target_id``，沒填就是「出問題通知誰」那一批）。有錯誤或提醒事項時不傳，
+          因為 ``_alert_admin`` 已經通知過同一批人了，不要為了同一件事扣兩則。
+        """
+        summary = build_summary(report, self.name)
+        if settings.notify.telegram and self._telegram_worth_saying(report):
+            self.notifier.send(summary)
+
+        if not settings.notify.report_on_success or not report.count_sent:
+            return
+        if report.has_errors or report.has_warnings:
+            return
+        explicit = settings.notify.report_target_id.strip()
+        targets = [explicit] if explicit else self.admin_targets(settings)
+        if not targets or messenger is None:
+            return
+        try:
+            for target in targets:
+                messenger.send(target, OutgoingMessage(text=summary))
+            log.info("已把發送彙總傳給主責同工（%d 位）", len(targets))
+        except ChurchBotError as exc:
+            # 彙報本身失敗不算這一次發送失敗：提醒已經送到群組了，這只是「回報」沒傳成功
+            log.warning("傳發送彙總給主責同工失敗：%s", exc)
+
+    def _report_check(self, settings: Settings, admin_targets: list[str]) -> CheckItem:
+        """系統檢查那一頁的「發完之後的彙報」：講清楚這個設定每週會多花幾則 LINE。"""
+        where: list[str] = []
+        if settings.notify.report_on_success:
+            lead = settings.notify.report_target_id.strip()
+            count = 1 if lead else len(admin_targets)
+            where.append(f"LINE 傳給主責同工（{lead or '出問題通知誰那一批'}，每次發送多算 {count} 則）"
+                         if count else "LINE：想傳，但還沒有人可以傳（沒有管理員也沒填主責同工）")
+        if settings.notify.telegram:
+            where.append("Telegram 傳給伺服器管理員（免費）"
+                         if self.notifier.enabled else
+                         "Telegram：開著，但「全教會設定 → 伺服器管理員」還沒設定好，所以傳不出去")
+        if not where:
+            return CheckItem("發完之後的彙報", None, "都關著：成功發送後不另外回報")
+        ok = not any("還沒" in w for w in where)
+        return CheckItem("發完之後的彙報", ok or None, "；".join(where),
+                         "" if ok else "到「設定 → 發完之後的彙報」調整，或把用不到的那一項關掉。")
+
+    @staticmethod
+    def _telegram_worth_saying(report: RunReport) -> bool:
+        if report.trigger in ("schedule", "catchup"):
+            return True  # 每週固定一則：有發、沒發、略過都報，當成「後台還活著」的心跳
+        return bool(report.count_sent or report.count_failed or report.has_errors)
 
     def _record(self, report: RunReport) -> None:
         try:
@@ -606,6 +698,7 @@ class BotService:
                                f"出問題會通知管理員：{'、'.join(admins)}" if admins else
                                "還沒有管理員，出問題時沒辦法用 LINE 通知你",
                                "" if targets else "到「同工名單」把自己勾成管理員（要先對應好 LINE 帳號），或到「設定 → 出問題通知誰」填 LINE ID。"))
+        items.append(self._report_check(s, targets))
         items.append(CheckItem("自動排程", s.schedule.enabled or None, s.schedule.describe()))
         items.append(CheckItem("群組 ID 自動抓取", True if s.line.channel_secret else None,
                                "已設定 Channel secret" if s.line.channel_secret else "沒有設定 Channel secret（選用功能）",

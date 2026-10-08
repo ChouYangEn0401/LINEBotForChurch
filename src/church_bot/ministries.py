@@ -93,7 +93,12 @@ class Church:
     def unit(self, key: str) -> Unit | None:
         """用編號或名稱找牧區。"""
         ministry = self.config().find(key)
-        return Unit(ministry, self.service(ministry.id)) if ministry else None
+        return self._unit(ministry) if ministry else None
+
+    def _unit(self, ministry: Ministry) -> Unit:
+        service = self.service(ministry.id)
+        service.name = ministry.name  # 牧區改名後，通知裡寫的名字也跟著換（見 service.BotService.name）
+        return Unit(ministry, service)
 
     def require(self, key: str) -> Unit:
         unit = self.unit(key)
@@ -103,7 +108,7 @@ class Church:
         return unit
 
     def units(self) -> list[Unit]:
-        return [Unit(m, self.service(m.id)) for m in self.ministries()]
+        return [self._unit(m) for m in self.ministries()]
 
     # ------------------------------------------------------------------ 本月 LINE 用量（整個帳號共用一份）
 

@@ -9,6 +9,9 @@ rem   cli.bat preview            show what would be sent (sends nothing)
 rem   cli.bat check              health check + preview
 rem   cli.bat quota              this month's LINE usage; schedule it ~5 min after send so the
 rem                              management page shows the usage *after* that send (LINE counts lag)
+rem   cli.bat 狀態 --telegram  every ministry at a glance: roster end date, last send, next send,
+rem                              LINE usage. --telegram also pushes it to the server manager's phone;
+rem                              --quick skips reading the roster (no network); --short one line each
 setlocal
 call "%~dp0_env.bat"
 if not exist "%VENV_PY%" (
