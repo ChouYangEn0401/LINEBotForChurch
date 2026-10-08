@@ -9,14 +9,20 @@
   背後是 [nssm](https://nssm.cc)（公有領域，install.bat 第一次自己用 winget 下載到 `tools\`，會驗 SHA256）：
   Python 不會跟 Windows 的服務控制器對話，直接 `sc create` 會在啟動時卡住跳 error 1053，所以要包這一層。
   註冊時會順手拿掉舊的「開機自動執行」捷徑（兩個會搶同一個 port）。
-  ⚠️ 服務在背景跑，看不到視窗、也不會跳 `--popup`，所以請一定要把 Telegram 設好
+  ⚠️ 服務在背景跑，看不到視窗、也不會跳 `--popup`，所以要靠下面的狀態播報知道它活著沒。
+  nssm 不另外抄一份畫面輸出：開了那個重導向，停服務時會一直卡在「正在停止」；紀錄看 `data\church_bot.log`
 - 變更：雙擊 `2-start` 但 port 已經被佔用時，如果偵測到服務正在跑，會直接說「已經註冊成服務了，
   不用再雙擊 2-start」，並指到 `service\stop.bat`／`restart.bat`
 
-- 新功能：**Telegram 播報**（伺服器管理員）。後台開起來、正常關掉、意外停掉都會傳一則到你的 Telegram；
+- 新功能：**狀態播報**（伺服器管理員）。後台開起來、正常關掉、意外停掉都會傳一則到你的 Telegram；
   後台自己不見過一次的話，下次開起來那一則會明講「上一次沒有正常關閉」。不佔 LINE 額度。
-  設定就是登入碼那一組（`.env` 的 `TELEGRAM_BOT_TOKEN`、`SERVER_MANAGER_TELEGRAM_ID`，
-  在「全教會設定 → 伺服器管理員」填），沒設定就安靜地不做事
+  **走這台電腦上的 `Notifier_TB`**（跟 `ISDStockProject` 的 live monitor 同一套：往
+  `127.0.0.1:9999` 丟一個 `{"sig": ..., "payload": ...}` 封包就結束，不連 Telegram、不輪詢），
+  所以這個專案一個 Telegram 金鑰都不用保管。預設自己去隔壁找 `../Notifier_TB/config.json`，
+  搬家就在 `.env` 填 `NOTIFIER_TB_HOME`，不想接填 `NOTIFIER_DISABLED=1`。
+  Notifier 是「要用才開」的：**沒開著就幫它開**（跟 ClawBot 同一個做法，用它自己的
+  `--until-idle 180`，送完沒事做 3 分鐘自己關），所以 Notifier 不用註冊成服務。
+  真的開不起來時訊息先存進 `data/notify_outbox.jsonl`，下次送得出去（或後台重開）時一起補送，不會不見
 - 新功能：**「設定 → 發完之後的彙報」**。提醒送出去之後回報一份「送了幾則、送到哪些群組」：
   - 用 LINE 傳給**管理員**（預設開，就是「出問題通知誰」那一批人，不另外設第二組名單）。
     ⚠️ 每位管理員每次發送各多算 1 則 LINE 額度；不想多花就到那一段取消勾選

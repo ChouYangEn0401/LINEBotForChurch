@@ -55,8 +55,17 @@ class FakeMessenger:
 def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
     # Telegram 那兩個一定要清掉：留著的話測試會真的去打 api.telegram.org，把通知傳到維護者手機上
     for key in ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET", "UI_PASSWORD", "CHURCH_BOT_HOME",
-                "TELEGRAM_BOT_TOKEN", "SERVER_MANAGER_TELEGRAM_ID", "CHURCH_BOT_SERVICE"):
+                "TELEGRAM_BOT_TOKEN", "SERVER_MANAGER_TELEGRAM_ID", "CHURCH_BOT_SERVICE",
+                "NOTIFIER_TB_HOME", "NOTIFIER_DISABLED"):
         monkeypatch.delenv(key, raising=False)
+
+    # 測試絕對不能真的把 Notifier_TB 開起來（會在擁有者的桌面上跳視窗）；要測的地方自己換掉它
+    from church_bot.core import notify
+
+    def refuse(folder, python):
+        raise AssertionError(f"測試想真的開 Notifier：{python}")
+
+    monkeypatch.setattr(notify, "launch_notifier", refuse)
 
 
 @pytest.fixture

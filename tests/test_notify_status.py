@@ -1,10 +1,14 @@
-"""伺服器管理員的 Telegram 播報（core/notify.py）與「各牧區狀況」（status.py、cli.bat 狀態）。"""
+"""狀態播報（core/notify.py，走 Notifier_TB）與「各牧區狀況」（status.py、cli.bat 狀態）。"""
 
 from __future__ import annotations
 
 import datetime as dt
+import json
+import secrets
+import socket
+import threading
+import time
 
-import httpx
 import pytest
 
 from church_bot import status as status_mod
@@ -37,50 +41,250 @@ def ministry(paths):
     return paths
 
 
-# --------------------------------------------------------------------------- Notifier
+# --------------------------------------------------------------------------- Notifier_TB
 
 
-class FakeTelegram:
-    """擋住 httpx.post，記下送出去的東西。回傳值照 Telegram Bot API 的樣子。"""
+class FakeNotifier:
+    """假的 Notifier_TB：真的開一個 TCP listener 收封包。
 
-    def __init__(self, ok: bool = True, boom: Exception | None = None) -> None:
-        self.ok, self.boom, self.calls = ok, boom, []
+    刻意用真 socket 而不是 monkeypatch——這樣封包格式、連線行為都真的被測到，
+    跟 Notifier_TB 的 test_socket.py 收到的會是同一個東西。
+    """
 
-    def __call__(self, url, *, timeout=None, json=None):
-        self.calls.append((url, json))
-        if self.boom is not None:
-            raise self.boom
-        return httpx.Response(200, json={"ok": self.ok, "description": "" if self.ok else "chat not found"})
+    def __init__(self, port: int = 0) -> None:
+        self.received: list[dict] = []
+        self._srv = socket.socket()
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", port))
+        self._srv.listen(8)
+        self.port = self._srv.getsockname()[1]
+        self._stop = False
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self) -> None:
+        while not self._stop:
+            try:
+                conn, _ = self._srv.accept()
+            except OSError:
+                return
+            with conn:
+                chunks = []
+                while chunk := conn.recv(65536):
+                    chunks.append(chunk)
+            try:
+                self.received.append(json.loads(b"".join(chunks).decode("utf-8")))
+            except ValueError:
+                pass
+
+    def close(self) -> None:
+        self._stop = True
+        try:  # Windows 上關 socket 不一定叫得醒卡在 accept() 的執行緒，自己連一下把它推醒
+            socket.create_connection(("127.0.0.1", self.port), timeout=1).close()
+        except OSError:
+            pass
+        self._srv.close()
+        self._thread.join(timeout=2)
+
+    def wait(self, count: int, timeout: float = 5.0) -> list[dict]:
+        """等到收滿 count 個封包。送出去和收下來是兩個執行緒，不等會抓到空的。"""
+        deadline = time.monotonic() + timeout
+        while len(self.received) < count and time.monotonic() < deadline:
+            time.sleep(0.01)
+        return self.received
+
+    @property
+    def payloads(self) -> list[str]:
+        return [item.get("payload", "") for item in self.received]
 
 
-def test_notifier_is_quiet_until_telegram_is_set_up(paths, monkeypatch):
-    fake = FakeTelegram()
-    monkeypatch.setattr(httpx, "post", fake)
+def dead_port() -> int:
+    """綁一個再放掉：這個埠現在保證沒有人在聽（模擬 Notifier_TB 沒開著）。"""
+    spare = socket.socket()
+    spare.bind(("127.0.0.1", 0))
+    port = spare.getsockname()[1]
+    spare.close()
+    return port
+
+
+def write_notifier_config(paths, *, port: int, secret: str = "probe-secret", folder: str = "Notifier_TB"):
+    """在專案隔壁擺一個長得像 Notifier_TB 的資料夾（只要 config.json 就夠）。"""
+    home = paths.church.root.parent / folder
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.json").write_text(json.dumps(
+        {"bot_token": "notifier-keeps-this", "socket_host": "127.0.0.1",
+         "socket_port": port, "socket_secret": secret}), encoding="utf-8")
+    return home
+
+
+@pytest.fixture
+def fake_notifier():
+    server = FakeNotifier()
+    yield server
+    server.close()
+
+
+def test_notifier_is_quiet_when_there_is_no_notifier_tb(paths):
     notifier = notify.Notifier(paths)
     assert not notifier.enabled
     assert notifier.send("哈囉") is False
-    assert fake.calls == []  # 沒設定就完全不連網，不是連了才失敗
+    assert notifier.pending() == 0  # 根本沒接上就不用存，也不會有積欠
 
 
-def test_notifier_sends_to_the_server_manager(paths, monkeypatch):
-    write(paths.root / ".env", "TELEGRAM_BOT_TOKEN=tok123\nSERVER_MANAGER_TELEGRAM_ID=4242\n")
-    fake = FakeTelegram()
-    monkeypatch.setattr(httpx, "post", fake)
+def test_notifier_pushes_the_house_packet_format(paths, fake_notifier):
+    """封包要跟 Notifier_TB 的 test_socket.py、ISDStockProject 的 post_event_socket 一樣。"""
+    write_notifier_config(paths, port=fake_notifier.port, secret="s3cret")
     notifier = notify.Notifier(paths)
     assert notifier.enabled and notifier.send("後台開起來了") is True
-    url, body = fake.calls[0]
-    assert url == "https://api.telegram.org/bottok123/sendMessage"
-    assert body["chat_id"] == "4242" and body["text"] == "後台開起來了"
-    assert "parse_mode" not in body  # 純文字：牧區名稱裡有 < & * 都不會把訊息弄壞
+    assert fake_notifier.wait(1) == [{"sig": "s3cret", "payload": "後台開起來了"}]
 
 
-@pytest.mark.parametrize("fake", [FakeTelegram(ok=False),
-                                  FakeTelegram(boom=httpx.ConnectError("沒網路"))])
-def test_notifier_never_raises(paths, monkeypatch, fake):
-    """通知傳不出去絕對不能變成發送失敗——這是整個模組最重要的一條。"""
-    write(paths.root / ".env", "TELEGRAM_BOT_TOKEN=tok\nSERVER_MANAGER_TELEGRAM_ID=1\n")
-    monkeypatch.setattr(httpx, "post", fake)
+def test_notifier_keeps_no_telegram_token_of_its_own(paths, fake_notifier):
+    """金鑰只存在 Notifier_TB 那一份 config.json，這個專案的 .env 一個都不用。"""
+    write_notifier_config(paths, port=fake_notifier.port)
+    write(paths.root / ".env", "LINE_CHANNEL_ACCESS_TOKEN=tok\n")
+    assert notify.Notifier(paths).send("不用 token 也送得出去") is True
+
+
+def test_notifier_can_be_pointed_somewhere_else(paths, fake_notifier):
+    home = write_notifier_config(paths, port=fake_notifier.port, folder="SomewhereElse")
+    write(paths.root / ".env", f"NOTIFIER_TB_HOME={home}\n")
+    assert notify.Notifier(paths).send("換個地方") is True
+    fake_notifier.wait(1)
+    assert fake_notifier.payloads == ["換個地方"]
+
+
+def test_notifier_can_be_switched_off(paths, fake_notifier):
+    write_notifier_config(paths, port=fake_notifier.port)
+    write(paths.root / ".env", "NOTIFIER_DISABLED=1\n")
+    notifier = notify.Notifier(paths)
+    assert not notifier.enabled and notifier.send("不該送出去") is False
+    assert fake_notifier.received == []
+
+
+def test_notifier_never_raises_when_notifier_tb_is_down(paths):
+    """通知送不出去絕對不能變成發送失敗——這是整個模組最重要的一條。"""
+    write_notifier_config(paths, port=dead_port())
     assert notify.Notifier(paths).send("會失敗的一則") is False
+
+
+def test_messages_are_kept_and_resent_when_notifier_comes_back(paths):
+    """Notifier_TB 是「要用才開」的，沒開著的時候訊息不能就這樣不見。"""
+    write_notifier_config(paths, port=dead_port())
+    notifier = notify.Notifier(paths)
+    assert notifier.send("後台當掉了") is False
+    assert notifier.send("後台又起來了") is False
+    assert notifier.pending() == 2
+
+    server = FakeNotifier()
+    try:  # Notifier 開起來了
+        write_notifier_config(paths, port=server.port)
+        assert notifier.flush() == 2
+        assert notifier.pending() == 0
+        server.wait(2)
+        assert [p.splitlines()[-1] for p in server.payloads] == ["後台當掉了", "後台又起來了"]
+        assert all(p.startswith("（補送・") for p in server.payloads)
+    finally:
+        server.close()
+
+
+def test_a_successful_send_also_drains_the_backlog(paths, fake_notifier):
+    write_notifier_config(paths, port=dead_port())
+    notifier = notify.Notifier(paths)
+    notifier.send("之前沒送出去的")
+
+    write_notifier_config(paths, port=fake_notifier.port)
+    assert notifier.send("現在這一則") is True
+    fake_notifier.wait(2)
+    assert fake_notifier.payloads[0] == "現在這一則"  # 當下那則先走，補送的跟在後面
+    assert "之前沒送出去的" in fake_notifier.payloads[1]
+    assert notifier.pending() == 0
+
+
+def test_the_backlog_does_not_grow_for_ever(paths, monkeypatch):
+    # 直接讓 _post 回 False：這裡要測的是「存起來」那段的上限，不是連線本身
+    # （真的連 200 次沒人聽的埠，光是被拒絕就要等好幾分鐘）
+    write_notifier_config(paths, port=dead_port())
+    monkeypatch.setattr(notify.Notifier, "_post", staticmethod(lambda target, text: False))
+    notifier = notify.Notifier(paths)
+    for i in range(notify.OUTBOX_LIMIT + 20):
+        notifier.send(f"第 {i} 則")
+    assert notifier.pending() == notify.OUTBOX_LIMIT  # 只留最後那些，最舊的丟掉
+    kept = notifier.outbox.read_text(encoding="utf-8")
+    assert "第 19 則" not in kept and "第 20 則" in kept  # 丟掉的是最舊的那幾則
+
+
+# --------------------------------------------------------------------------- 要用才開
+
+
+@pytest.fixture
+def notifier_program(paths, monkeypatch):
+    """Notifier_TB 關著、但開得起來：資料夾裡有它的 venv python 和 main.py。
+
+    真的開的那一步（launch_notifier）換成測試自己的，記下被叫了幾次。
+    放在每個測試自己的資料夾（NOTIFIER_TB_HOME）：專案隔壁那個 Notifier_TB 是所有測試共用的。
+    """
+    port = dead_port()
+    home = write_notifier_config(paths, port=port, folder=f"Notifier_TB_{secrets.token_hex(4)}")
+    write(paths.root / ".env", f"NOTIFIER_TB_HOME={home}\n")
+    (home / ".venv" / "Scripts").mkdir(parents=True)
+    (home / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
+    (home / "main.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(notify, "_last_wake", float("-inf"))  # 別的測試開過不算
+    calls: list = []
+    servers: list[FakeNotifier] = []
+    state = {"comes_up": True}
+
+    def launch(folder, python):
+        calls.append((folder, python))
+        if state["comes_up"]:
+            servers.append(FakeNotifier(port))  # Notifier 起來了，聽它 config.json 寫的那個埠
+
+    monkeypatch.setattr(notify, "launch_notifier", launch)
+    yield {"home": home, "calls": calls, "servers": servers, "state": state}
+    for server in servers:
+        server.close()
+
+
+def test_a_closed_notifier_is_opened_and_the_message_goes_out_at_once(paths, notifier_program):
+    """跟 ClawBot 一樣「要用才開」：Notifier 不用註冊成服務，要送的時候幫它開起來。"""
+    notifier = notify.Notifier(paths)
+    assert notifier.send("後台開起來了", wait=5) is True
+    server = notifier_program["servers"][0]
+    server.wait(1)
+    assert server.payloads == ["後台開起來了"]  # 當場送到，不是「補送」
+    assert notifier.pending() == 0
+    folder, python = notifier_program["calls"][0]
+    assert folder == notifier_program["home"] and python.name == "python.exe"
+
+
+def test_the_backlog_also_opens_notifier_at_start_up(paths, notifier_program):
+    notifier_program["state"]["comes_up"] = False
+    notifier = notify.Notifier(paths)
+    notifier.send("上次關機那一則", wait=0)  # wait=0：不開，只存起來
+    assert notifier.pending() == 1 and notifier_program["calls"] == []
+
+    notifier_program["state"]["comes_up"] = True
+    assert notifier.flush(wait=5) == 1
+    notifier_program["servers"][0].wait(1)
+    assert "上次關機那一則" in notifier_program["servers"][0].payloads[0]
+
+
+def test_if_notifier_never_comes_up_the_message_is_kept_and_it_is_not_reopened(paths, notifier_program):
+    notifier_program["state"]["comes_up"] = False
+    notifier = notify.Notifier(paths)
+    assert notifier.send("第一則", wait=1.5) is False
+    assert notifier.send("第二則", wait=1.5) is False
+    assert notifier.pending() == 2  # 不會不見，下次送得出去時補送
+    assert len(notifier_program["calls"]) == 1  # 剛開過就不再開第二個，等它就好
+
+
+def test_nothing_is_opened_when_notifier_tb_cannot_be_started(paths):
+    """資料夾裡只有 config.json（沒有它的程式）→ 不開、不等，直接存起來。"""
+    write_notifier_config(paths, port=dead_port())
+    started = time.monotonic()
+    assert notify.Notifier(paths).send("開不起來") is False
+    assert time.monotonic() - started < 5
 
 
 # --------------------------------------------------------------------------- 上一次有沒有正常關閉
@@ -135,15 +339,14 @@ def test_status_says_so_when_auto_send_is_off(ministry):
     assert state.next_run is None and state.next_text == "（不會自動發）"
 
 
-def test_status_command_prints_and_can_push_to_telegram(ministry, monkeypatch, capsys):
-    write(ministry.root / ".env", "TELEGRAM_BOT_TOKEN=tok\nSERVER_MANAGER_TELEGRAM_ID=9\n")
+def test_status_command_prints_and_can_push_to_telegram(ministry, monkeypatch, capsys, fake_notifier):
+    write_notifier_config(ministry, port=fake_notifier.port)
     monkeypatch.setenv("CHURCH_BOT_HOME", str(ministry.root))
-    fake = FakeTelegram()
-    monkeypatch.setattr(httpx, "post", fake)
     assert main(["狀態", "--telegram"]) == 0
     printed = capsys.readouterr().out
     assert "測試牧區" in printed and "下一次發送" in printed and "已傳到 Telegram" in printed
-    assert "測試牧區" in fake.calls[0][1]["text"]
+    fake_notifier.wait(1)
+    assert "測試牧區" in fake_notifier.payloads[0]
 
 
 def test_status_command_exit_code_is_1_when_something_needs_attention(paths, monkeypatch, capsys):

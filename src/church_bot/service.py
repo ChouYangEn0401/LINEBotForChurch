@@ -360,9 +360,9 @@ class BotService:
             where.append(f"LINE 傳給管理員（{count} 位，每次發送多算 {count} 則）"
                          if count else "LINE：想傳，但還沒有管理員可以傳")
         if settings.notify.telegram:
-            where.append("Telegram 傳給伺服器管理員（免費）"
+            where.append(f"Telegram 傳給伺服器管理員，免費（{self.notifier.describe()}）"
                          if self.notifier.enabled else
-                         "Telegram：開著，但「全教會設定 → 伺服器管理員」還沒設定好，所以傳不出去")
+                         "Telegram：開著，但找不到 Notifier_TB，所以傳不出去")
         if not where:
             return CheckItem("發完之後的彙報", None, "都關著：成功發送後不另外回報")
         ok = not any("還沒" in w for w in where)

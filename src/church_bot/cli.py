@@ -493,7 +493,7 @@ def _supervise(paths: Paths, args: argparse.Namespace) -> int:
         if len(starts) > RESTART_LIMIT:
             _print("❌ 一分鐘內重新啟動太多次，先停下來。請把 data/church_bot.log 傳給維護的人，再雙擊 2-start。")
             notify.Notifier(paths).send("❌ 服事提醒機器人：後台一分鐘內重新啟動太多次，已經停下來不再重開。\n"
-                                        "請到那台電腦看 data/church_bot.log。")
+                                        "請到那台電腦看 data/church_bot.log。", wait=notify.STOP_WAIT)
             return 1
         _print("🔄 重新啟動管理網頁…")
         restarted = True
@@ -506,7 +506,7 @@ def _notify_crash(paths: Paths, code: int) -> None:
     else:
         text = (f"❌ 服事提醒機器人：後台意外停止（結束代碼 {code}）。\n"
                 "自動發送在它重新起來之前都不會動。請到那台電腦看 data/church_bot.log。")
-    notify.Notifier(paths).send(text)
+    notify.Notifier(paths).send(text, wait=notify.STOP_WAIT)  # 不能拖太久：服務要等這裡結束才重開
 
 
 def _serve(paths: Paths, args: argparse.Namespace) -> int:
@@ -563,10 +563,10 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
     restarting = bool(getattr(app.state, "restart_requested", False))
     notify.record_stop(church.shared, clean=True, reason="重新啟動" if restarting else "正常關閉")
     if restarting:
-        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…")
+        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…", wait=notify.STOP_WAIT)
     else:
         notifier.send("⏹ 服事提醒機器人：後台已經正常關閉。\n"
-                      "在它重新開起來之前，每週提醒不會自動發送。")
+                      "在它重新開起來之前，每週提醒不會自動發送。", wait=notify.STOP_WAIT)
     return RESTART_CODE if restarting else 0
 
 
@@ -574,6 +574,7 @@ def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, bef
     """後台開起來了。順便講「上一次有沒有正常關閉」——伺服器自己不見的時候，就是靠這一行發現的。"""
     from church_bot import status as status_mod
 
+    notifier.flush()  # Notifier 沒開著時積下來的，趁現在補送（只在啟動這一刻做一次，不是輪詢）
     head = "🔄 服事提醒機器人：後台已重新啟動" if restarted else "✅ 服事提醒機器人：後台已啟動"
     lines = [f"{head}（v{__version__}）", f"管理網頁：{url}"]
     if os.environ.get("CHURCH_BOT_SERVICE"):
