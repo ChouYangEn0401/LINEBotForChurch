@@ -3,10 +3,15 @@
 擁有者 2026-10-09：「服務在背景運作的時候，我要能在小工具裡面看到它在運作，然後可以透過小工具去暫停服務」，
 而且「不管用何種方式運作，都要讓 2 個程式顯示小圖示在下面」。選單：
 
-    結束程式（服務模式下 nssm 會再把它開起來）／服務：停止／服務：啟動／服務：重新啟動
+    開起來／結束程式（服務模式下 nssm 會再把它開起來）／服務：停止／服務：啟動／服務：重新啟動
+    ／安裝成服務（還沒註冊時）／打開紀錄檔
+
+**圖示是小主管程式，不會自己不見**（擁有者 2026-10-09：「小圖示不可以不見，不然我要如何開回來？」）：
+選單沒有「關掉這個小圖示」，服務停了圖示照樣在、變灰。取消註冊不放選單（要去資料夾雙擊 uninstall.bat，避免誤觸）。
 
 **名字**照擁有者定的家族慣例（以後別的專案也一樣）：圖示上是「專案字母＋元件記號」，這個專案是 L、Lw；
-提示文字以「專案 · 元件」開頭（LINE · 後台、LINE · webhook）。ClawBot 是 H／T。
+提示文字以「專案 · 元件」開頭（LINE · 後台、LINE · webhook）。ClawBot 是 C／Ct。
+共同規則寫在 MyFirstTelegramClawBot 的 docs/tray-standard.html。
 
 **狀態和能按什麼來自同一個判斷**（``describe`` → ``Status`` → ``menu_state``），而且**任何狀態都至少有一個能按的**——
 2026-10-09 擁有者看到「服務開著、小圖示說沒在跑、又按不了啟動」，那個圖示等於沒用。
@@ -86,7 +91,7 @@ def describe(program: runctl.Program, service: str | None, run: dict | None, *,
     if service == "paused":
         return Status("busy", f"{title}：服務已暫停——可以按「服務：啟動」", False, service)
     if service == "stopped":
-        return Status("down", f"{title}：沒在跑（服務已停止）——可以按「服務：啟動」", False, service)
+        return Status("down", f"{title}：沒在跑（服務已停止）——可以按「服務：啟動」或「開起來」", False, service)
     return Status("down", f"{title}：沒在跑（還沒註冊成服務）——可以按「開起來」", False, service)
 
 
@@ -104,8 +109,11 @@ def menu_state(status: Status) -> dict[str, bool]:
         # 雙擊開的那一份還開著時不給啟動：服務會跟它搶 port，起不來又被 nssm 一直重開
         "start": installed and status.service in ("stopped", "paused") and not status.alive,
         "restart": installed and not settling,
-        # 沒註冊成服務、也沒在跑：用雙擊的方式（2-start／3-open-webhook）開起來
-        "launch": not installed and not status.alive,
+        # 沒在跑、服務也沒開著（沒註冊，或註冊了但停著）：用雙擊的方式（2-start／3-open-webhook）開起來。
+        # 擁有者 2026-10-09：「如果服務沒開我可以自己手動啟動」——服務停著時也要給，不是只有沒註冊才給
+        "launch": not status.alive and status.service in (None, "stopped"),
+        # 還沒註冊成服務：選單裡可以直接裝（nssm install；會跳 UAC）。取消註冊刻意不放選單（要去資料夾雙擊，避免誤觸）
+        "install": not installed,
     }
 
 
@@ -213,19 +221,22 @@ class Tray:
         items = [
             Item(lambda item: self.status.line, None, enabled=False),
             Menu.SEPARATOR,
-            Item(f"開起來（跟雙擊 {self.program.launcher} 一樣）", self._launch, enabled=can("launch"),
-                 visible=can("launch")),
+            Item(f"開起來（跟雙擊 {self.program.launcher} 一樣）", self._launch, enabled=can("launch")),
             Item(lambda item: "結束程式（服務會自己再開起來）" if under_service() else "結束程式",
                  self._end, enabled=can("end")),
+            Menu.SEPARATOR,
             Item("服務：停止（nssm stop）", self._service("stop"), enabled=can("stop")),
             Item("服務：啟動（nssm start）", self._service("start"), enabled=can("start")),
             Item("服務：重新啟動（nssm restart）", self._service("restart"), enabled=can("restart")),
+            Item("安裝成服務（nssm install；會跳「是否允許」）", self._install, enabled=can("install"),
+                 visible=can("install")),
             Menu.SEPARATOR,
         ]
         if self.program is runctl.WEB:
             items.append(Item("打開管理網頁", self._open_web, default=True))
-        items += [Item("打開紀錄檔", self._open_log),
-                  Item("關掉這個小圖示（程式照常跑）", self._quit)]
+        # 刻意沒有「關掉這個小圖示」（擁有者 2026-10-09）：圖示是小主管程式，服務停了也要在，不然沒地方開回來。
+        # 它只在登出 Windows 時結束；登入時「啟動」資料夾的捷徑再把它開起來。
+        items.append(Item("打開紀錄檔", self._open_log))
         return pystray.Menu(*items)
 
     def _launch(self, icon, item) -> None:
@@ -269,10 +280,16 @@ class Tray:
         if log_file.exists():
             os.startfile(log_file)  # noqa: S606 - 用記事本之類打開，跟雙擊一樣
 
-    def _quit(self, icon, item) -> None:
-        self._stop.set()
-        self._refresh_now.set()
-        icon.stop()
+    def _install(self, icon, item) -> None:
+        """註冊成服務：開一個看得到的視窗跑 service.ps1 install（它自己會跳 UAC、問完會停在那裡讓你看結果）。"""
+        script = self.paths.root / "scripts" / "windows" / "service" / "service.ps1"
+        try:
+            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                              "-Action", "install", "-Target", self.program.key],
+                             cwd=self.paths.root, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        except OSError as exc:
+            self._toast(f"開不起來：{exc}")
+        self._kick()
 
     def _toast(self, text: str) -> None:
         try:
