@@ -397,10 +397,32 @@ def cmd_set_webhook(paths: Paths, args: argparse.Namespace) -> int:
 
 def cmd_tunnel(paths: Paths, args: argparse.Namespace) -> int:
     """免費模式：開 Cloudflare 臨時網址 + 自動登記到 LINE，一直開著直到關掉視窗或 Ctrl+C（見 tunnel.py）。"""
+    from church_bot import runctl
     from church_bot.tunnel import register_webhook, run_tunnel
 
+    if not os.environ.get("CHURCH_BOT_SERVICE") and _service_running(runctl.WEBHOOK.service):
+        # 兩條臨時網址會輪流把自己登記成 LINE 的 Webhook，後開的贏、先開的那條就收不到了
+        _print("⚠️ LINE 指令已經註冊成 Windows 服務，而且正在跑，不用再雙擊 3-open-webhook。")
+        _print("   要停它請用 scripts\\windows\\3-service-stop.bat，或右下角小圖示。")
+        return PORT_IN_USE
+
     command = [args.cloudflared, "tunnel", "--url", f"http://localhost:{args.port}"]
-    return run_tunnel(command, lambda url: register_webhook(paths, url, _print), _print)
+    holder: dict = {}
+
+    def end_from_tray() -> None:
+        holder["ended"] = True
+        if proc := holder.get("proc"):
+            proc.terminate()
+
+    runctl.ignore_logoff_when_service()
+    runctl.mark_running(paths, runctl.WEBHOOK)
+    runctl.listen_for_end(paths, runctl.WEBHOOK, end_from_tray)
+    try:
+        code = run_tunnel(command, lambda url: register_webhook(paths, url, _print), _print,
+                          started=lambda proc: holder.update(proc=proc))
+    finally:
+        runctl.mark_stopped(paths, runctl.WEBHOOK)
+    return runctl.ENDED_FROM_TRAY if holder.get("ended") else code
 
 
 # --------------------------------------------------------------------------- web
@@ -440,12 +462,12 @@ def _port_owner(port: int) -> str:
 SERVICE_NAME = "church-bot"  # 註冊成 Windows 服務時的名字（見 scripts/windows/service/service.ps1）
 
 
-def _service_running() -> bool:
-    """後台是不是以 Windows 服務的身分在跑。查詢服務狀態不用系統管理員權限。"""
+def _service_running(name: str = SERVICE_NAME) -> bool:
+    """後台（或 name 那個服務）是不是以 Windows 服務的身分在跑。查詢服務狀態不用系統管理員權限。"""
     if sys.platform != "win32":
         return False
     try:
-        out = subprocess.run(["sc", "query", SERVICE_NAME], capture_output=True, timeout=10,
+        out = subprocess.run(["sc", "query", name], capture_output=True, timeout=10,
                              creationflags=subprocess.CREATE_NO_WINDOW).stdout
     except (OSError, subprocess.SubprocessError):
         return False
@@ -460,8 +482,15 @@ RESTART_LIMIT = 5  # 一分鐘內重開超過這麼多次就停下來（一直�
 def cmd_web(paths: Paths, args: argparse.Namespace) -> int:
     """開管理網頁。外面這一層只負責「開網頁、網頁說要重新啟動就再開一次」，真正的網頁在子程式裡跑
     （``--child``），所以按「重新啟動」會載入新的程式，例如更新過程式之後。2-start、免費模式、開機自動執行都一樣。"""
+    from church_bot import runctl
+
+    runctl.ignore_logoff_when_service()  # 外面那一層、網頁那一層都要：任何一層被登出關掉，服務就斷了
     if not getattr(args, "child", False):
-        return _supervise(paths, args)
+        # 「在跑」的紀錄由子程式確定 port 拿到了才寫（見 _serve）；外面這一層結束時收掉
+        try:
+            return _supervise(paths, args)
+        finally:
+            runctl.mark_stopped(paths, runctl.WEB)
     return _serve(paths, args)
 
 
@@ -550,6 +579,13 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
     app = create_app(paths)
     server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="warning"))
     app.state.server = server  # 「重新啟動」按鈕靠它讓網頁停下來（見 web/app.py）
+    # 右下角小圖示：看這個知道後台在跑、怎麼開的。記外面那一層的 pid——它活多久，後台就算開著多久。
+    # 寫在 port 檢查之後：服務開著時又雙擊 2-start，那一個不會蓋掉服務的紀錄。
+    from church_bot import runctl
+
+    runctl.mark_running(paths, runctl.WEB, pid=os.getppid(), detail=url)
+    # 「結束程式」：跟 Ctrl+C 走同一條路收工（「已關閉」那一則照樣送）
+    runctl.listen_for_end(paths, runctl.WEB, lambda: setattr(server, "should_exit", True))
 
     church = app.state.web.church
     notifier = notify.Notifier(paths)

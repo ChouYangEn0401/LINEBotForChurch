@@ -74,18 +74,31 @@
 ### 讓它自己活著：註冊成 Windows 服務（建議，Windows）
 
 雙擊 `2-start.bat` 的缺點是那個黑色視窗一關、當掉、或電腦重開機，提醒就不會發了，而且**沒有人會知道**。
-把後台註冊成 Windows 服務就沒有這個問題——跟 nginx 在 Windows 上的做法一樣：
+把它們註冊成 Windows 服務就沒有這個問題——跟 nginx 在 Windows 上的做法一樣。兩個程式各是一個服務：
+
+| 程式 | 雙擊開（跟以前一樣） | 服務 | 服務名稱 |
+|---|---|---|---|
+| 後台（管理網頁＋每週提醒） | `2-start.bat` | `2-service-start` / `2-service-stop` / `2-service-restart` | `church-bot` |
+| LINE 指令（臨時網址，群組打 `/提醒` 才會回） | `3-open-webhook.bat` | `3-service-start` / `3-service-stop` / `3-service-restart` | `church-bot-webhook` |
 
 **雙擊 `scripts\windows\service\install.bat`**（會跳一次「是否允許變更你的裝置」，按「是」）。
+兩個一起註冊；沒裝 cloudflared 的話只註冊後台。如果 2-start／3-open-webhook 的黑色視窗開著，它會請你先關掉。
 
 跑完之後：
 
-- 電腦**重新開機就自己起來**，不用登入 Windows、不用有人去點
+- 電腦**重新開機就自己起來**，不用登入 Windows、不用有人去點（LINE 指令會等後台起來才開）
 - 程式**當掉 10 秒後自己再開一次**
-- 以後要手動操作，用同一個資料夾裡的
-  `start.bat`（啟動）、`stop.bat`（停止）、`restart.bat`（更新程式後重開）、
-  `status.bat`（看服務狀態＋所有牧區的狀況）、`uninstall.bat`（取消註冊，改回雙擊 2-start）
-- `sc start church-bot`、`sc stop church-bot`、`net stop church-bot`、「服務」管理員（`services.msc`）也都認得它
+- **右下角有兩個小圖示**：「後」＝後台、「令」＝LINE 指令。顏色就是狀態——
+  綠＝服務在跑、藍＝雙擊開的在跑、黃＝正在啟動／停止、紅＝服務開著但程式不在（正在重開或一直起不來）、灰＝沒在跑。
+  **右鍵**：結束程式（服務模式下 nssm 會在 10 秒後把它開回來）、服務：停止／啟動／重新啟動。
+  在跑的變成不在、又不是你按的，會跳一個通知。登入 Windows 時自己出現；雙擊 2-start／3-open-webhook 時也會出現
+- 停／開／重開**不用再跳 UAC**：install.bat 把這兩個服務的「啟動／停止／查詢」權限開給你的 Windows 帳號（只有這兩個）
+- 這個資料夾裡的 `start.bat`、`stop.bat`、`restart.bat` 是兩個一起；`status.bat` 看服務狀態＋所有牧區的狀況；
+  `uninstall.bat` 取消註冊（改回雙擊的用法，登入時開小圖示的捷徑也一起拿掉）
+- `sc start church-bot`、`net stop church-bot-webhook`、「服務」管理員（`services.msc`）也都認得它們
+
+> 小圖示每 5 秒在自己程式裡問一次 Windows「服務開著沒、那個程式還在不在」——不開新程式、不連網，一次不到 1 毫秒。
+> 「結束程式」不是砍程式：它按一個 Windows 事件，程式收到後照 Ctrl+C 的路收工（「已關閉」照樣送到 Telegram）。
 
 > 背後是 [nssm](https://nssm.cc)（公有領域的小工具，`install.bat` 第一次會自己用 winget 下載到 `tools\`）。
 > Python 這種程式不會跟 Windows 的服務控制器對話，直接 `sc create` 會在啟動時卡住跳 error 1053，所以中間要包這一層。

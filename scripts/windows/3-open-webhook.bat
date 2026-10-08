@@ -28,6 +28,9 @@ if not defined CLOUDFLARED (
   exit /b 1
 )
 
+rem Tray icons (bottom right): already-open ones stay as they are
+if exist "%ROOT%\.venv\Scripts\pythonw.exe" start "" "%ROOT%\.venv\Scripts\pythonw.exe" "%~dp0tray.pyw"
+
 call :webup
 if not errorlevel 1 goto webready
 echo 管理網頁還沒開，幫你在這個視窗裡開起來...
@@ -50,6 +53,8 @@ echo 正在建立臨時網址，並自動登記到 LINE，請稍等十幾秒...
 echo （用完請關掉這個視窗；每週自動提醒不受影響）
 echo.
 "%VENV_PY%" -m church_bot tunnel --port %PORT% --cloudflared "%CLOUDFLARED%"
+rem 5 = ended from the tray icon: close without waiting for a key press
+if errorlevel 5 if not errorlevel 6 exit /b 0
 echo.
 echo 臨時網址已關閉，LINE 指令暫時不會有回應。
 pause

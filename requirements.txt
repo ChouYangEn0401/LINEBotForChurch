@@ -11,3 +11,7 @@ gspread>=6.0
 google-auth>=2.28
 tzdata>=2024.1
 segno>=1.6
+# Tray icons (scripts/windows/tray.pyw): notification-area icon, drawing it, service/process state
+pystray>=0.19
+Pillow>=10
+psutil>=5.9
