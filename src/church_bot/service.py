@@ -107,7 +107,7 @@ def build_admin_alert(report: RunReport, limit: int = 8) -> str:
 def build_summary(report: RunReport, ministry: str = "", limit: int = 8) -> str:
     """一次發送的完整彙總：成功了幾則、每一則去了哪裡、還有什麼要處理。
 
-    主責同工的 LINE 彙報（settings.notify）和伺服器管理員的 Telegram 播報用的是同一份，
+    管理員的 LINE 彙報（settings.notify）和伺服器管理員的 Telegram 播報用的是同一份，
     所以兩邊看到的內容一模一樣，對帳的時候不用猜。
     """
     icon = {"error": "❌", "warning": "⚠️", "ok": "✅"}[report.status]
@@ -329,9 +329,9 @@ class BotService:
 
         * Telegram（免費）：傳給伺服器管理員。自動排程那一次**一定**傳，就算全部略過也報一聲
           ——沒收到就代表後台當時沒在跑，這正是要抓的事。
-        * LINE（要算則數）：成功送出而且沒事要處理時，把同一份彙總傳給主責同工
-          （``notify.report_target_id``，沒填就是「出問題通知誰」那一批）。有錯誤或提醒事項時不傳，
-          因為 ``_alert_admin`` 已經通知過同一批人了，不要為了同一件事扣兩則。
+        * LINE（要算則數）：成功送出而且沒事要處理時，把同一份彙總傳給**管理員**（就是「出問題通知誰」
+          那一批人，不另外設第二組名單）。有錯誤或提醒事項時不傳，因為 ``_alert_admin`` 已經通知過
+          同一批人了，不要為了同一件事扣兩則。
         """
         summary = build_summary(report, self.name)
         if settings.notify.telegram and self._telegram_worth_saying(report):
@@ -341,26 +341,24 @@ class BotService:
             return
         if report.has_errors or report.has_warnings:
             return
-        explicit = settings.notify.report_target_id.strip()
-        targets = [explicit] if explicit else self.admin_targets(settings)
+        targets = self.admin_targets(settings)
         if not targets or messenger is None:
             return
         try:
             for target in targets:
                 messenger.send(target, OutgoingMessage(text=summary))
-            log.info("已把發送彙總傳給主責同工（%d 位）", len(targets))
+            log.info("已把發送彙總傳給管理員（%d 位）", len(targets))
         except ChurchBotError as exc:
             # 彙報本身失敗不算這一次發送失敗：提醒已經送到群組了，這只是「回報」沒傳成功
-            log.warning("傳發送彙總給主責同工失敗：%s", exc)
+            log.warning("傳發送彙總給管理員失敗：%s", exc)
 
     def _report_check(self, settings: Settings, admin_targets: list[str]) -> CheckItem:
         """系統檢查那一頁的「發完之後的彙報」：講清楚這個設定每週會多花幾則 LINE。"""
         where: list[str] = []
         if settings.notify.report_on_success:
-            lead = settings.notify.report_target_id.strip()
-            count = 1 if lead else len(admin_targets)
-            where.append(f"LINE 傳給主責同工（{lead or '出問題通知誰那一批'}，每次發送多算 {count} 則）"
-                         if count else "LINE：想傳，但還沒有人可以傳（沒有管理員也沒填主責同工）")
+            count = len(admin_targets)
+            where.append(f"LINE 傳給管理員（{count} 位，每次發送多算 {count} 則）"
+                         if count else "LINE：想傳，但還沒有管理員可以傳")
         if settings.notify.telegram:
             where.append("Telegram 傳給伺服器管理員（免費）"
                          if self.notifier.enabled else
