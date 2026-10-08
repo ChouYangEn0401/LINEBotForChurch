@@ -271,3 +271,11 @@ def test_the_icon_cannot_be_closed_from_its_own_menu():
     assert 'Item("關掉' not in source and not hasattr(tray.Tray, "_quit")
     assert "uninstall" not in source
     assert "安裝成服務（nssm install" in source
+
+
+@on_windows
+def test_service_control_reports_windows_error_codes_not_text():
+    """2026-10-09：nssm 印的「存取被拒」在中文 Windows 上是亂碼（OpenService(): ?????），認不出來就沒退回 UAC。
+    現在直接問服務控制器、看錯誤代碼（數字）。用一個不存在的服務驗，不碰真的服務。"""
+    ok, text, code = tray._scm_control("church-bot-no-such-service", "restart", wait_seconds=1)
+    assert not ok and code == 1060 and "1060" in text
