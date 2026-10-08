@@ -168,14 +168,18 @@ def test_menu_follows_the_state():
         return tray.menu_state(tray.describe(runctl.WEB, *args, **kwargs))
 
     assert can("running", SERVICE_RUN) == {"end": True, "stop": True, "start": False, "restart": True,
-                                           "launch": False}
-    assert can("stopped", None) == {"end": False, "stop": False, "start": True, "restart": True, "launch": False}
+                                           "launch": False, "install": False}
+    # 服務停著：可以用服務開，也可以手動（雙擊的方式）開——擁有者：「如果服務沒開我可以自己手動啟動」
+    assert can("stopped", None) == {"end": False, "stop": False, "start": True, "restart": True, "launch": True,
+                                    "install": False}
     # 服務開著、程式沒回應：啟動按不了（已經開著），但重新啟動、停止都可以
-    assert can("running", None) == {"end": False, "stop": True, "start": False, "restart": True, "launch": False}
+    assert can("running", None) == {"end": False, "stop": True, "start": False, "restart": True, "launch": False,
+                                    "install": False}
     # 沒註冊成服務、雙擊開的：只能結束
-    assert can(None, MANUAL_RUN) == {"end": True, "stop": False, "start": False, "restart": False, "launch": False}
+    assert can(None, MANUAL_RUN) == {"end": True, "stop": False, "start": False, "restart": False, "launch": False,
+                                     "install": True}
     # 什麼都沒有：可以用雙擊的方式開起來
-    assert can(None, None)["launch"] is True
+    assert can(None, None)["launch"] is True and can(None, None)["install"] is True
     # 服務停著、但雙擊開的那一份開著：不給啟動服務（會搶 port）
     assert can("stopped", MANUAL_RUN)["start"] is False
     # 正在停止：先灰掉；卡住了就把停止、重新啟動還回來
@@ -258,3 +262,12 @@ def test_tunnel_can_be_ended_from_the_tray(paths, monkeypatch, tmp_path):
     worker.join(15)
     assert result["code"] == runctl.ENDED_FROM_TRAY  # 3-open-webhook.bat 看到這個就直接關、不等按鍵
     assert runctl.running(paths, runctl.WEBHOOK) is None
+
+
+def test_the_icon_cannot_be_closed_from_its_own_menu():
+    """擁有者 2026-10-09：小圖示是小主管程式，不可以不見（不然要怎麼開回來）；取消註冊也不放選單（避免誤觸）。"""
+    import inspect
+    source = inspect.getsource(tray.Tray._menu)
+    assert 'Item("關掉' not in source and not hasattr(tray.Tray, "_quit")
+    assert "uninstall" not in source
+    assert "安裝成服務（nssm install" in source
