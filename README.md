@@ -91,9 +91,28 @@
 > Python 這種程式不會跟 Windows 的服務控制器對話，直接 `sc create` 會在啟動時卡住跳 error 1053，所以中間要包這一層。
 >
 > ⚠️ 服務在背景跑，**看不到黑色視窗，也不會跳出 `--popup` 的小提示**。
-> 所以註冊成服務之後，請一定要把 **Telegram** 設好（首頁 → ⚙️ 全教會設定 → 伺服器管理員）：
-> 開機、關機、當掉、每次發送都會傳一則給你，機器人有沒有活著一看就知道。
+> 所以註冊成服務之後，狀態播報就是你的眼睛——開機、關機、當掉、每次發送都會傳一則到你的 Telegram。
 > 想主動問：雙擊 `status.bat`，或在 Telegram 呼叫 `cli.bat 狀態 --telegram`。
+
+### 狀態播報走 Notifier_TB（這個專案不保管 Telegram 金鑰）
+
+這台電腦上已經有一支專門「把東西送到 Telegram」的機器人：**`Notifier_TB`**（跟本專案並排的資料夾）。
+任何本地程式都可以推進去，`ISDStockProject` 的 live monitor 就是這樣用的，所以這裡照同一套走：
+
+```
+{"sig": <socket_secret>, "payload": <要送的文字>}   →  TCP 127.0.0.1:9999
+```
+
+要講話的時候才連一次、送完就關——**不連 api.telegram.org、沒有任何輪詢**。token、收件人、
+訊息追蹤全部是 Notifier 的事，這個專案一個金鑰都不用保管。
+
+- 預設自己去隔壁找 `../Notifier_TB/config.json`，所以通常**什麼都不用設定**
+- Notifier 放在別的地方 → `.env` 填 `NOTIFIER_TB_HOME`
+- 完全不想接 → `.env` 填 `NOTIFIER_DISABLED=1`
+- Notifier 是「要用才開」的，剛好沒開著時訊息會先存進 `data/notify_outbox.jsonl`，
+  下次送得出去（或後台重開）時一起補送，不會不見
+
+> `.env` 裡的 `TELEGRAM_BOT_TOKEN` 從此只跟「從外面登入伺服器管理員的一次性驗證碼」有關，跟播報無關。
 
 ---
 
@@ -225,6 +244,7 @@
 | `data/ministries/m1/send.lock` | 發送時排隊用的鎖（避免兩個程式同時發） | 不用，也不用刪 |
 | `data/service.log` | 註冊成 Windows 服務時，程式畫面上的訊息（超過 1 MB 自動換一份） | 不用；出問題時連同 `church_bot.log` 一起傳 |
 | `tools/nssm.exe` | 把後台包成 Windows 服務的小工具，`service\install.bat` 自己下載的 | 不用；刪掉再跑一次 install.bat 就有 |
+| `data/notify_outbox.jsonl` | Notifier_TB 沒開著時先存下來的通知，之後自動補送 | 不用；刪掉就是放棄那些還沒送出去的通知 |
 
 > 🔒 `.env`、`settings.yaml`、`config/` 底下所有 CSV、`service-account.json`、`data/` 都設定成**不會上傳到 git**，範例檔（`*.example.*`）才會。
 

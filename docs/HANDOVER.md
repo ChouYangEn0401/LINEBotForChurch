@@ -82,9 +82,10 @@
 - **備份**：整個 `config/` 資料夾（`church.yaml` 和每個牧區的 `ministries/<編號>/`），`data/church_bot.db`（變更紀錄），還有 `.env`（機密，另外保管）。改錯東西先看牧區裡的「變更紀錄」，通常一鍵就能還原。
   有在收集 LINE 帳號的話也備份 `data/church_bot.db`（刪掉會忘記送過什麼、收集到但還沒對應的 LINE 帳號；已經對應到同工名單的不受影響）。
 - **出問題**：把 `data/church_bot.log` 傳給維護的人。
-- **後台還活著嗎**：設好 Telegram（`.env` 的 `TELEGRAM_BOT_TOKEN`、`SERVER_MANAGER_TELEGRAM_ID`，或在
-  「全教會設定 → 伺服器管理員」填）之後，後台開了、關了、意外停掉都會傳一則給伺服器管理員；
-  每週自動發送那一次也一定會傳彙總——**該收到卻沒收到，就是後台當時沒在跑**。
+- **後台還活著嗎**：狀態播報走這台電腦上的 **`Notifier_TB`**（`../Notifier_TB/config.json` 裡的
+  `socket_host` / `socket_port` / `socket_secret`，本專案不保管 Telegram 金鑰）。後台開了、關了、
+  意外停掉都會傳一則給伺服器管理員；每週自動發送那一次也一定會傳彙總——**該收到卻沒收到，
+  就是後台當時沒在跑**。Notifier 沒開著時訊息先存在 `data/notify_outbox.jsonl`，之後補送。
   想主動問：`cli.bat 狀態 --telegram`（所有牧區：服事表排到哪、上次發送、下次發送）。
 
 ## 8. 已知限制

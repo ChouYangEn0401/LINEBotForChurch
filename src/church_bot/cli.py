@@ -574,6 +574,7 @@ def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, bef
     """後台開起來了。順便講「上一次有沒有正常關閉」——伺服器自己不見的時候，就是靠這一行發現的。"""
     from church_bot import status as status_mod
 
+    notifier.flush()  # Notifier 沒開著時積下來的，趁現在補送（只在啟動這一刻做一次，不是輪詢）
     head = "🔄 服事提醒機器人：後台已重新啟動" if restarted else "✅ 服事提醒機器人：後台已啟動"
     lines = [f"{head}（v{__version__}）", f"管理網頁：{url}"]
     if os.environ.get("CHURCH_BOT_SERVICE"):

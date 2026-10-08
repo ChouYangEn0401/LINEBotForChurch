@@ -43,3 +43,4 @@ tools/
 # 服務模式下程式畫面上的訊息（nssm 幫忙寫的，會自動輪替）
 data/service.log
 data/service.log.*
+data/notify_outbox.jsonl
