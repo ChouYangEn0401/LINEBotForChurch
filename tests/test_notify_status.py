@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import secrets
 import socket
 import threading
 import time
@@ -50,11 +51,11 @@ class FakeNotifier:
     跟 Notifier_TB 的 test_socket.py 收到的會是同一個東西。
     """
 
-    def __init__(self) -> None:
+    def __init__(self, port: int = 0) -> None:
         self.received: list[dict] = []
         self._srv = socket.socket()
         self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self._srv.bind(("127.0.0.1", 0))
+        self._srv.bind(("127.0.0.1", port))
         self._srv.listen(8)
         self.port = self._srv.getsockname()[1]
         self._stop = False
@@ -211,6 +212,79 @@ def test_the_backlog_does_not_grow_for_ever(paths, monkeypatch):
     assert notifier.pending() == notify.OUTBOX_LIMIT  # 只留最後那些，最舊的丟掉
     kept = notifier.outbox.read_text(encoding="utf-8")
     assert "第 19 則" not in kept and "第 20 則" in kept  # 丟掉的是最舊的那幾則
+
+
+# --------------------------------------------------------------------------- 要用才開
+
+
+@pytest.fixture
+def notifier_program(paths, monkeypatch):
+    """Notifier_TB 關著、但開得起來：資料夾裡有它的 venv python 和 main.py。
+
+    真的開的那一步（launch_notifier）換成測試自己的，記下被叫了幾次。
+    放在每個測試自己的資料夾（NOTIFIER_TB_HOME）：專案隔壁那個 Notifier_TB 是所有測試共用的。
+    """
+    port = dead_port()
+    home = write_notifier_config(paths, port=port, folder=f"Notifier_TB_{secrets.token_hex(4)}")
+    write(paths.root / ".env", f"NOTIFIER_TB_HOME={home}\n")
+    (home / ".venv" / "Scripts").mkdir(parents=True)
+    (home / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
+    (home / "main.py").write_text("", encoding="utf-8")
+    monkeypatch.setattr(notify, "_last_wake", float("-inf"))  # 別的測試開過不算
+    calls: list = []
+    servers: list[FakeNotifier] = []
+    state = {"comes_up": True}
+
+    def launch(folder, python):
+        calls.append((folder, python))
+        if state["comes_up"]:
+            servers.append(FakeNotifier(port))  # Notifier 起來了，聽它 config.json 寫的那個埠
+
+    monkeypatch.setattr(notify, "launch_notifier", launch)
+    yield {"home": home, "calls": calls, "servers": servers, "state": state}
+    for server in servers:
+        server.close()
+
+
+def test_a_closed_notifier_is_opened_and_the_message_goes_out_at_once(paths, notifier_program):
+    """跟 ClawBot 一樣「要用才開」：Notifier 不用註冊成服務，要送的時候幫它開起來。"""
+    notifier = notify.Notifier(paths)
+    assert notifier.send("後台開起來了", wait=5) is True
+    server = notifier_program["servers"][0]
+    server.wait(1)
+    assert server.payloads == ["後台開起來了"]  # 當場送到，不是「補送」
+    assert notifier.pending() == 0
+    folder, python = notifier_program["calls"][0]
+    assert folder == notifier_program["home"] and python.name == "python.exe"
+
+
+def test_the_backlog_also_opens_notifier_at_start_up(paths, notifier_program):
+    notifier_program["state"]["comes_up"] = False
+    notifier = notify.Notifier(paths)
+    notifier.send("上次關機那一則", wait=0)  # wait=0：不開，只存起來
+    assert notifier.pending() == 1 and notifier_program["calls"] == []
+
+    notifier_program["state"]["comes_up"] = True
+    assert notifier.flush(wait=5) == 1
+    notifier_program["servers"][0].wait(1)
+    assert "上次關機那一則" in notifier_program["servers"][0].payloads[0]
+
+
+def test_if_notifier_never_comes_up_the_message_is_kept_and_it_is_not_reopened(paths, notifier_program):
+    notifier_program["state"]["comes_up"] = False
+    notifier = notify.Notifier(paths)
+    assert notifier.send("第一則", wait=1.5) is False
+    assert notifier.send("第二則", wait=1.5) is False
+    assert notifier.pending() == 2  # 不會不見，下次送得出去時補送
+    assert len(notifier_program["calls"]) == 1  # 剛開過就不再開第二個，等它就好
+
+
+def test_nothing_is_opened_when_notifier_tb_cannot_be_started(paths):
+    """資料夾裡只有 config.json（沒有它的程式）→ 不開、不等，直接存起來。"""
+    write_notifier_config(paths, port=dead_port())
+    started = time.monotonic()
+    assert notify.Notifier(paths).send("開不起來") is False
+    assert time.monotonic() - started < 5
 
 
 # --------------------------------------------------------------------------- 上一次有沒有正常關閉

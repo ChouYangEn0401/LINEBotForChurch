@@ -85,7 +85,8 @@
 - **後台還活著嗎**：狀態播報走這台電腦上的 **`Notifier_TB`**（`../Notifier_TB/config.json` 裡的
   `socket_host` / `socket_port` / `socket_secret`，本專案不保管 Telegram 金鑰）。後台開了、關了、
   意外停掉都會傳一則給伺服器管理員；每週自動發送那一次也一定會傳彙總——**該收到卻沒收到，
-  就是後台當時沒在跑**。Notifier 沒開著時訊息先存在 `data/notify_outbox.jsonl`，之後補送。
+  就是後台當時沒在跑**。Notifier 沒開著就幫它開（要用才開，閒置 3 分鐘自己關，所以它不是服務）；
+  真的開不起來時訊息先存在 `data/notify_outbox.jsonl`，之後補送。
   想主動問：`cli.bat 狀態 --telegram`（所有牧區：服事表排到哪、上次發送、下次發送）。
 
 ## 8. 已知限制

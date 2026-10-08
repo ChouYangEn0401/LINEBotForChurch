@@ -15,9 +15,11 @@
 只存在一個地方）。Notifier 搬家就在 ``.env`` 填 ``NOTIFIER_TB_HOME``；完全不想接就填
 ``NOTIFIER_DISABLED=1``，播報會安靜地不做事，其他功能照常。
 
-**Notifier 沒開著的時候**（它是「要用才開」、閒置 180 秒自己關的）：訊息不會丟掉，寫進
+**Notifier 沒開著的時候**（它是「要用才開」、閒置 180 秒自己關的）：跟 ClawBot 一樣，**幫它開**
+（``wake_notifier``，用 Notifier 自己的 ``--until-idle`` 模式，送完沒事做就自己關），等它起來再送。
+這樣 Notifier 不用註冊成服務。真的開不起來、等不到，訊息也不會丟掉：寫進
 ``data/notify_outbox.jsonl``，等下一次送得出去時一起補送（見 ``_spool`` / ``_flush``）。
-補送只發生在「本來就要送東西」或「後台剛啟動」那一刻，不是背景輪詢。
+等待和補送都只發生在「本來就要送東西」或「後台剛啟動」那一刻，不是背景輪詢。
 """
 
 from __future__ import annotations
@@ -27,7 +29,9 @@ import json
 import logging
 import os
 import socket
+import subprocess
 import threading
+import time
 from pathlib import Path
 
 from church_bot.config import Paths, read_env_file
@@ -41,6 +45,9 @@ DEFAULT_DIR_NAME = "Notifier_TB"  # 跟本專案並排的那個資料夾
 TIMEOUT = 5.0  # 跟 ISDStockProject 的 post_event_socket 一樣
 OUTBOX_NAME = "notify_outbox.jsonl"
 OUTBOX_LIMIT = 200  # 積太多就丟掉最舊的；這是通知，不是帳本
+WAKE_WAIT = 30.0  # Notifier 沒開著：幫它開，最多等這麼久讓它的 socket 起來
+STOP_WAIT = 15.0  # 關機、當掉那幾則等短一點：nssm 停服務只給 25 秒，當掉時要等這裡結束才重開
+IDLE_SECONDS = 180  # 幫它開的那一個閒置多久自己關（跟 launcher_ondemand.bat 一樣）
 RUNTIME_KEY = "service_runtime"  # 共用資料庫裡的那一格：後台現在開著沒、上一次是怎麼結束的
 
 
@@ -124,39 +131,58 @@ class Notifier:
 
     # ------------------------------------------------------------------ 送
 
-    def send(self, text: str) -> bool:
+    def send(self, text: str, *, wait: float = WAKE_WAIT) -> bool:
         """送一則給伺服器管理員。永遠不丟例外；回傳有沒有真的送出去。
 
-        送不出去（Notifier 沒開著）不是錯誤，會先存進 outbox，之後補送。
+        Notifier 沒開著 → 幫它開（要用才開），最多等 ``wait`` 秒讓它起來再送。
+        還是送不出去也不是錯誤，會先存進 outbox，之後補送。
         """
         target = self.target
         if target is None:
             return False
         with self._lock:
-            delivered = self._post(target, text)
+            delivered = self._post_waking(target, text, wait)
             if delivered:
                 self._flush(target)  # 既然通了，順手把積欠的補送掉
             else:
                 self._spool(text)
             return delivered
 
-    def flush(self) -> int:
+    def flush(self, *, wait: float = WAKE_WAIT) -> int:
         """把積欠的補送出去，回傳補送了幾則。後台啟動時呼叫一次。"""
         target = self.target
         if target is None:
             return 0
         with self._lock:
-            return self._flush(target)
+            return self._flush(target, wait)
+
+    def _post_waking(self, target: NotifierTarget, text: str, wait: float) -> bool:
+        """送；Notifier 沒開著就開它，等它的 socket 起來再送。
+
+        這是「這一則要送」才發生的一次性等待（最多 ``wait`` 秒），不是背景輪詢。
+        """
+        if self._post(target, text):
+            return True
+        if wait <= 0 or not wake_notifier(target):
+            return False
+        deadline = time.monotonic() + wait
+        while time.monotonic() < deadline:
+            time.sleep(1.0)
+            if self._post(target, text, quiet=True):
+                return True
+        log.warning("開了 Notifier_TB 但 %d 秒內沒起來，通知先存起來之後補送", wait)
+        return False
 
     @staticmethod
-    def _post(target: NotifierTarget, text: str) -> bool:
+    def _post(target: NotifierTarget, text: str, quiet: bool = False) -> bool:
         """一個 TCP 連線、一個封包、關掉。格式跟 Notifier_TB 的 test_socket.py 一模一樣。"""
         packet = json.dumps({"sig": target.secret, "payload": text}, ensure_ascii=False)
         try:
             with socket.create_connection((target.host, target.port), timeout=TIMEOUT) as conn:
                 conn.sendall(packet.encode("utf-8"))
         except ConnectionRefusedError:
-            log.info("Notifier_TB 現在沒開著（%s），通知先存起來之後補送", target)
+            if not quiet:
+                log.info("Notifier_TB 現在沒開著（%s）", target)
             return False
         except OSError as exc:
             log.warning("推給 Notifier_TB 失敗（%s）：%s", target, exc)
@@ -182,7 +208,7 @@ class Notifier:
         except OSError:
             return []
 
-    def _flush(self, target: NotifierTarget) -> int:
+    def _flush(self, target: NotifierTarget, wait: float = 0) -> int:
         lines = self._read_spool()
         if not lines:
             return 0
@@ -194,8 +220,9 @@ class Notifier:
                 sent += 1  # 壞掉的那一行直接當作處理完，不要卡住後面的
                 continue
             text = f"（補送・{entry.get('at', '')}）\n{entry.get('text', '')}"
-            if not self._post(target, text):
+            if not self._post_waking(target, text, wait):
                 break  # 又不通了，剩下的留著下次再說
+            wait = 0  # 只有第一則需要等 Notifier 起來
             sent += 1
         rest = lines[sent:]
         try:
@@ -208,6 +235,60 @@ class Notifier:
         if sent:
             log.info("補送了 %d 則之前沒送出去的通知", sent)
         return sent
+
+
+# --------------------------------------------------------------------------- 要用才開
+
+_wake_lock = threading.Lock()
+_last_wake = float("-inf")  # 這個程式上一次開 Notifier 的時間（time.monotonic）
+
+
+def wake_notifier(target: NotifierTarget) -> bool:
+    """Notifier_TB 沒開著：幫它開起來，跟 ClawBot 的 ``Notifier.ensure()`` 同一個做法。
+
+    開的是 Notifier 自己的「要用才開」模式（``main.py --until-idle 180``，就是 launcher_ondemand.bat
+    裡那一行）：沒事做 3 分鐘自己正常關掉。所以這裡**不需要**把 Notifier 註冊成服務——
+    擁有者 2026-10-09：服務只留給真的常常要用的那幾個，其他的要想辦法在執行的時候配合。
+
+    - 已經有一個 Notifier 在跑（擁有者自己開的、或剛被叫起來的）→ 新開的那個會自己退出（它的
+      ``other_instance()`` 擋），不會有兩個。
+    - 經 ``cmd /c start`` 開：中間那層 cmd 馬上結束，Notifier 不掛在後台底下，所以 nssm 停服務時
+      收拾程式樹不會把它一起帶走（剛送進去的「後台已關閉」才送得出去）。
+    - 不直接開 launcher_ondemand.bat：它出錯時會 ``pause`` 等人按鍵，在服務那個看不到的桌面上
+      就會永遠卡著。
+    """
+    global _last_wake
+    folder = Path(target.source).parent
+    python = folder / ".venv" / "Scripts" / "python.exe"
+    if not (python.exists() and (folder / "main.py").exists()):
+        log.warning("Notifier_TB 沒開著，也找不到可以把它開起來的程式（%s）", python)
+        return False
+    with _wake_lock:
+        now = time.monotonic()
+        if now - _last_wake < WAKE_WAIT:
+            return True  # 剛剛才開過，還在起來，等它就好
+        _last_wake = now
+    try:
+        launch_notifier(folder, python)
+    except OSError as exc:
+        log.warning("開不起 Notifier_TB：%s", exc)
+        return False
+    log.info("Notifier_TB 沒開著，已經幫它開起來（要用才開，閒置 %d 秒自己關）", IDLE_SECONDS)
+    return True
+
+
+def launch_notifier(folder: Path, python: Path) -> None:
+    """真的開。獨立出來是為了測試可以換掉它。"""
+    # 這個專案的 PYTHONPATH、CHURCH_BOT_* 不要帶過去：Notifier 是另一個程式，用它自己的 venv
+    env = {key: value for key, value in os.environ.items()
+           if key not in ("PYTHONPATH", "VIRTUAL_ENV") and not key.startswith("CHURCH_BOT_")}
+    env["PYTHONIOENCODING"] = "utf-8"
+    subprocess.Popen(
+        ["cmd.exe", "/c", "start", "Notifier_TB (on demand)", "/min",
+         str(python), "main.py", "--until-idle", str(IDLE_SECONDS)],
+        cwd=folder, env=env,
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 # --------------------------------------------------------------------------- 後台開著沒

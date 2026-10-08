@@ -200,7 +200,7 @@ class NotifySettings(_Base):
     # 會多算 LINE 則數：每位管理員每次發送各 1 則
     report_on_success: bool = True
     # 每次發送後也把同一份彙總傳到伺服器管理員的 Telegram。不佔 LINE 額度，所以預設開著；
-    # 要收得到還得先在「全教會設定 → 伺服器管理員」填 Telegram（見 core/notify.py）
+    # 經由這台電腦上的 Notifier_TB 送，不用另外設定（見 core/notify.py）
     telegram: bool = True
 
 

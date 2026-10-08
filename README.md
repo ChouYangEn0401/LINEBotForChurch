@@ -109,7 +109,10 @@
 - 預設自己去隔壁找 `../Notifier_TB/config.json`，所以通常**什麼都不用設定**
 - Notifier 放在別的地方 → `.env` 填 `NOTIFIER_TB_HOME`
 - 完全不想接 → `.env` 填 `NOTIFIER_DISABLED=1`
-- Notifier 是「要用才開」的，剛好沒開著時訊息會先存進 `data/notify_outbox.jsonl`，
+- Notifier 是「要用才開」的：**沒開著就幫它開**（跟 ClawBot 同一個做法：它自己的 `main.py --until-idle 180`，
+  送完沒事做 3 分鐘自己關），所以 Notifier **不用**註冊成服務。後台以服務身分跑時，它是在看不到的桌面上被叫起來的，
+  這時你自己雙擊 Notifier 的 `launcher.bat` 會說「已經有一個在跑」——等 3 分鐘它自己關掉再開就好
+- 真的開不起來（例如 Notifier 的 `.venv` 不見了）時，訊息先存進 `data/notify_outbox.jsonl`，
   下次送得出去（或後台重開）時一起補送，不會不見
 
 > `.env` 裡的 `TELEGRAM_BOT_TOKEN` 從此只跟「從外面登入伺服器管理員的一次性驗證碼」有關，跟播報無關。
@@ -242,7 +245,6 @@
 | `data/church_bot.db` | 整個教會共用：LINE 用量、對外網址、還沒分配的群組、**變更紀錄** | 不用；刪掉會忘記變更紀錄 |
 | `config/_before_ministries/`、`config/_deleted/` | 升級前的舊檔、移除的牧區（都沒有真的刪掉） | 確認不需要了可以刪 |
 | `data/ministries/m1/send.lock` | 發送時排隊用的鎖（避免兩個程式同時發） | 不用，也不用刪 |
-| `data/service.log` | 註冊成 Windows 服務時，程式畫面上的訊息（超過 1 MB 自動換一份） | 不用；出問題時連同 `church_bot.log` 一起傳 |
 | `tools/nssm.exe` | 把後台包成 Windows 服務的小工具，`service\install.bat` 自己下載的 | 不用；刪掉再跑一次 install.bat 就有 |
 | `data/notify_outbox.jsonl` | Notifier_TB 沒開著時先存下來的通知，之後自動補送 | 不用；刪掉就是放棄那些還沒送出去的通知 |
 
