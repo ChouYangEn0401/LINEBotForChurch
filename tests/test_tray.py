@@ -112,30 +112,76 @@ def test_a_service_ignores_somebody_logging_off(service, expected):
 
 # --------------------------------------------------------------------------- 小圖示看到什麼
 
+SERVICE_RUN = {"mode": "service"}
+MANUAL_RUN = {"mode": "manual"}
 
-@pytest.mark.parametrize("service, run, color, alive, words", [
-    ("running", {"mode": "service"}, "service", True, "Windows 服務"),
-    (None, {"mode": "manual"}, "manual", True, "2-start.bat 開的"),
-    ("stopped", {"mode": "manual"}, "manual", True, "2-start.bat 開的"),  # 服務停著、自己雙擊開的
-    ("start_pending", None, "busy", False, "正在啟動"),
-    ("stop_pending", None, "busy", False, "正在停止"),
-    ("running", None, "trouble", False, "程式沒在跑"),  # nssm 正在重開它
-    ("stopped", None, "down", False, "服務已停止"),
-    (None, None, "down", False, "沒在跑"),
+
+@pytest.mark.parametrize("service, run, app, stuck, color, alive, words", [
+    ("running", SERVICE_RUN, True, False, "service", True, "Windows 服務"),
+    # 2026-10-09 擁有者看到的那一種：服務開著、程式是舊版（沒寫紀錄）——nssm 底下有程式就算在跑
+    ("running", None, True, False, "service", True, "Windows 服務"),
+    (None, MANUAL_RUN, False, False, "manual", True, "2-start.bat 開的"),
+    ("stopped", MANUAL_RUN, False, False, "manual", True, "2-start.bat 開的"),  # 服務停著、自己雙擊開的
+    ("start_pending", None, False, False, "busy", False, "正在啟動"),
+    ("stop_pending", None, False, False, "busy", False, "正在停止"),
+    ("stop_pending", None, False, True, "busy", False, "超過 1 分鐘"),  # 卡在正在停止（真的發生過）
+    ("running", None, False, False, "busy", False, "程式沒回應"),  # nssm 正在重開它
+    ("paused", None, False, False, "busy", False, "已暫停"),
+    ("stopped", None, False, False, "down", False, "服務已停止"),
+    (None, None, False, False, "down", False, "還沒註冊成服務"),
 ])
-def test_what_the_icon_shows(service, run, color, alive, words):
-    status = tray.describe(runctl.WEB, service, run)
+def test_what_the_icon_shows(service, run, app, stuck, color, alive, words):
+    status = tray.describe(runctl.WEB, service, run, service_app=app, stuck=stuck)
     assert (status.color, status.alive) == (color, alive)
-    assert words in status.line and status.line.startswith(runctl.WEB.title)
+    assert words in status.line and status.line.startswith("LINE · 後台")
+
+
+ALL_STATES = [(service, run, app, stuck)
+              for service in (None, "running", "stopped", "paused", "start_pending", "stop_pending")
+              for run in (None, SERVICE_RUN, MANUAL_RUN)
+              for app in (False, True) if not (app and service != "running")
+              for stuck in (False, True) if not (stuck and service not in tray.PENDING)]
+
+
+@pytest.mark.parametrize("service, run, app, stuck", ALL_STATES)
+def test_no_state_leaves_you_without_something_to_press(service, run, app, stuck):
+    """看得到狀態、卻什麼都不能按，這個圖示就沒用了。唯一例外：正在起停的頭 1 分鐘先灰掉免得連按。"""
+    status = tray.describe(runctl.WEB, service, run, service_app=app, stuck=stuck)
+    can = tray.menu_state(status)
+    if service in tray.PENDING and not stuck and not status.alive:
+        return
+    assert any(can.values()), (status.line, can)
+
+
+@pytest.mark.parametrize("service, run, app, stuck", ALL_STATES)
+def test_the_sentence_and_the_menu_agree(service, run, app, stuck):
+    """那一句話叫你按什麼，那個選項就一定按得到。"""
+    status = tray.describe(runctl.WEB, service, run, service_app=app, stuck=stuck)
+    can = tray.menu_state(status)
+    for words, key in (("「服務：啟動」", "start"), ("「服務：重新啟動」", "restart"), ("「開起來」", "launch")):
+        if words in status.line:
+            assert can[key], (status.line, can)
 
 
 def test_menu_follows_the_state():
-    running = tray.menu_state(tray.describe(runctl.WEB, "running", {"mode": "service"}))
-    assert running == {"end": True, "stop": True, "start": False, "restart": True}
-    stopped = tray.menu_state(tray.describe(runctl.WEB, "stopped", None))
-    assert stopped == {"end": False, "stop": False, "start": True, "restart": True}
-    manual_only = tray.menu_state(tray.describe(runctl.WEB, None, {"mode": "manual"}))
-    assert manual_only == {"end": True, "stop": False, "start": False, "restart": False}  # 沒註冊成服務
+    def can(*args, **kwargs):
+        return tray.menu_state(tray.describe(runctl.WEB, *args, **kwargs))
+
+    assert can("running", SERVICE_RUN) == {"end": True, "stop": True, "start": False, "restart": True,
+                                           "launch": False}
+    assert can("stopped", None) == {"end": False, "stop": False, "start": True, "restart": True, "launch": False}
+    # 服務開著、程式沒回應：啟動按不了（已經開著），但重新啟動、停止都可以
+    assert can("running", None) == {"end": False, "stop": True, "start": False, "restart": True, "launch": False}
+    # 沒註冊成服務、雙擊開的：只能結束
+    assert can(None, MANUAL_RUN) == {"end": True, "stop": False, "start": False, "restart": False, "launch": False}
+    # 什麼都沒有：可以用雙擊的方式開起來
+    assert can(None, None)["launch"] is True
+    # 服務停著、但雙擊開的那一份開著：不給啟動服務（會搶 port）
+    assert can("stopped", MANUAL_RUN)["start"] is False
+    # 正在停止：先灰掉；卡住了就把停止、重新啟動還回來
+    assert not any(can("stop_pending", None).values())
+    stuck = can("stop_pending", None, stuck=True)
+    assert stuck["stop"] and stuck["restart"]
 
 
 @pytest.mark.parametrize("color", list(tray.COLORS))
@@ -144,6 +190,19 @@ def test_every_state_has_an_icon(color):
         image = tray.render(program, color)
         assert image.size == (64, 64)
         assert image.getpixel((32, 6))[:3] == tray.COLORS[color]  # 顏色就是狀態
+
+
+def test_names_follow_the_family_convention():
+    """擁有者 2026-10-09：圖示＝專案字母＋元件記號，提示文字以「專案 · 元件」開頭。"""
+    assert tray.GLYPHS == {"web": "L", "webhook": "Lw"}
+    assert runctl.WEB.title == "LINE · 後台" and runctl.WEBHOOK.title == "LINE · webhook"
+
+
+@on_windows
+def test_service_app_check_does_not_need_the_programs_own_record():
+    """沒註冊的服務：不在（也不會丟例外）。"""
+    ghost = runctl.Program("ghost", "church-bot-no-such-service", "LINE · ghost", "x.bat")
+    assert runctl.service_app_alive(ghost) is False
 
 
 def test_service_control_explains_when_nothing_is_registered(paths):

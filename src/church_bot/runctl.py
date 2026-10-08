@@ -40,8 +40,10 @@ class Program:
     launcher: str   # 雙擊開的那個 .bat
 
 
-WEB = Program("web", "church-bot", "服事提醒・後台", "2-start.bat")
-WEBHOOK = Program("webhook", "church-bot-webhook", "服事提醒・LINE 指令", "3-open-webhook.bat")
+# 名字照擁有者 2026-10-09 定的家族慣例：圖示上是「專案字母＋元件記號」，提示文字以「專案 · 元件」開頭
+# （這個專案是 LINE；ClawBot 那邊是 H／T）。以後別的專案也照這個排。
+WEB = Program("web", "church-bot", "LINE · 後台", "2-start.bat")
+WEBHOOK = Program("webhook", "church-bot-webhook", "LINE · webhook", "3-open-webhook.bat")
 PROGRAMS = {p.key: p for p in (WEB, WEBHOOK)}
 
 ENDED_FROM_TRAY = 5  # 臨時網址被小圖示結束：3-open-webhook.bat 看到這個就不停下來等按鍵
@@ -118,6 +120,24 @@ def service_state(program: Program) -> str | None:
         return psutil.win_service_get(program.service).status()
     except Exception:  # noqa: BLE001 - 沒註冊（NoSuchProcess）、看不到，都當作沒有
         return None
+
+
+def service_app_alive(program: Program) -> bool:
+    """服務開著的時候，nssm 底下真的有程式在跑嗎（不靠程式自己寫的紀錄）。
+
+    只看 data/run/*.json 的話，舊版程式、或還沒寫好紀錄的那幾秒，都會被誤判成「沒在跑」——
+    2026-10-09 擁有者就看到「服務開著、小圖示卻說沒在跑、又按不了啟動」。nssm 是服務的那個 pid，
+    我們的程式是它的子程式；有子程式在＝程式在。看程式清單不用系統管理員權限。
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import psutil
+
+        pid = psutil.win_service_get(program.service).pid()
+        return bool(pid) and any(child.is_running() for child in psutil.Process(pid).children())
+    except Exception:  # noqa: BLE001 - 看不到就當作不知道＝不在
+        return False
 
 
 # --------------------------------------------------------------------------- 有人登出 Windows
