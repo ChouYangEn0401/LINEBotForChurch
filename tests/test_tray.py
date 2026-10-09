@@ -356,3 +356,11 @@ def test_once_installed_it_never_asks_to_install_again(service, run, app, stuck)
     status = tray.describe(runctl.WEB, service, run, service_app=app, stuck=stuck)
     assert tray.menu_state(status)["install"] is False
     assert "還沒註冊" not in status.line
+
+
+@pytest.mark.parametrize("service, words", [(None, "還沒註冊"), ("running", "已註冊，在跑"), ("stopped", "已註冊，停著"),
+                                            ("stop_pending", "已註冊，正在停止")])
+def test_menu_says_plainly_whether_it_is_installed(service, words):
+    """擁有者 2026-10-09：裝了沒要直接寫出來，不要從有沒有「安裝成服務」去猜。"""
+    line = tray.service_line(tray.describe(runctl.WEB, service, None))
+    assert line.startswith("Windows 服務：") and words in line

@@ -138,13 +138,27 @@ function Get-Nssm([switch]$Fetch) {
     return $NssmPath
 }
 
+function Join-Arguments([string[]]$items) {
+    # 自己組命令列、每個參數都加引號（裡面的 " 與結尾的 \ 照 Windows 的規則跳脫）。
+    # Windows PowerShell 5.1 呼叫外部程式時不會好好處理：有空白的路徑被切成好幾段、參數裡的引號不見。
+    ($items | ForEach-Object { '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"' }) -join ' '
+}
 function Invoke-Nssm([string]$nssm, [string[]]$arguments) {
-    # 錯誤訊息（例如「拒絕存取」）nssm 寫在 stderr，要一起收；5.1 把 stderr 包成錯誤物件，
-    # 在 'Stop' 底下會直接中斷，所以這一段改成 Continue，再把每一行轉回純文字
-    $ErrorActionPreference = 'Continue'
-    $output = & $nssm @arguments 2>&1 | ForEach-Object { "$_" }
-    # nssm 的輸出是 UTF-16，透過管線回來會夾雜 \0；真正要看的是結束代碼
-    return [pscustomobject]@{ Code = $LASTEXITCODE; Text = ((($output | Out-String) -replace "`0", '').Trim()) }
+    # 2026-10-09：church-bot-webhook 的 AppParameters 是 --cloudflared "C:\Program Files (x86)\..."，
+    # 用 & $nssm @arguments 交給 nssm 時 Windows PowerShell 5.1 把引號弄丟，路徑被空白切成三段，
+    # 服務一啟動就 exit 2、被 nssm 一直重開（卡在 PAUSED）。所以命令列自己組（Join-Arguments），不靠 5.1。
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $nssm
+    $psi.Arguments = Join-Arguments $arguments
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+    $proc = [System.Diagnostics.Process]::Start($psi)
+    $text = $proc.StandardOutput.ReadToEnd() + $proc.StandardError.ReadToEnd()
+    $proc.WaitForExit()
+    # nssm 的輸出是 UTF-16，讀回來會夾雜 \0；真正要看的是結束代碼
+    return [pscustomobject]@{ Code = $proc.ExitCode; Text = (($text -replace "`0", '').Trim()) }
 }
 
 function Test-Denied([string]$text) {

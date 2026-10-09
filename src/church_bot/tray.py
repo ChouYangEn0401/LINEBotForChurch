@@ -96,6 +96,18 @@ def describe(program: runctl.Program, service: str | None, run: dict | None, *,
     return Status("down", f"{title}：沒在跑（還沒註冊成服務）——可以按「開起來」", False, service)
 
 
+def service_line(status: Status) -> str:
+    """選單裡固定的一行：這個程式「裝成服務了沒」。擁有者 2026-10-09：「明明好像已經安裝了，但是它還是顯示我可以
+    再安裝」——只靠「安裝成服務」那一項有沒有出現來猜太不清楚，要直接寫出來。"""
+    if status.service is None:
+        return "Windows 服務：還沒註冊（電腦重開機不會自己起來）"
+    if status.service == "running":
+        return "Windows 服務：已註冊，在跑（開機自己起來）"
+    if status.service == "stopped":
+        return "Windows 服務：已註冊，停著（開機會自己起來）"
+    return f"Windows 服務：已註冊，{PENDING.get(status.service, status.service)}"
+
+
 def menu_state(status: Status) -> dict[str, bool]:
     """每個選項現在能不能按。跟 describe 用同一份判斷。
 
@@ -311,6 +323,7 @@ class Tray:
             Item(lambda item: "結束程式（服務會自己再開起來）" if under_service() else "結束程式",
                  self._end, enabled=can("end")),
             Menu.SEPARATOR,
+            Item(lambda item: service_line(self.status), None, enabled=False),
             Item("服務：停止（nssm stop）", self._service("stop"), enabled=can("stop")),
             Item("服務：啟動（nssm start）", self._service("start"), enabled=can("start")),
             Item("服務：重新啟動（nssm restart）", self._service("restart"), enabled=can("restart")),
