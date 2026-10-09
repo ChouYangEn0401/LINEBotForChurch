@@ -15,7 +15,7 @@
 
 **狀態和能按什麼來自同一個判斷**（``describe`` → ``Status`` → ``menu_state``），而且**任何狀態都至少有一個能按的**——
 2026-10-09 擁有者看到「服務開著、小圖示說沒在跑、又按不了啟動」，那個圖示等於沒用。
-顏色：綠＝服務在跑；藍＝雙擊開的在跑；黃＝服務開著但程式沒回應、或正在啟動／停止；灰＝沒在跑。
+顏色（擁有者 2026-10-09 改的）：綠＝自己開的（雙擊）在跑；藍＝Windows 服務在跑；黃＝服務開著但程式沒回應、或正在啟動／停止；灰＝沒在跑。
 
 **程式在不在**：服務開著時看 nssm 底下有沒有子程式（``runctl.service_app_alive``，不靠程式自己寫的紀錄，
 所以舊版程式也認得）；雙擊開的看 ``data/run/*.json``。
@@ -48,8 +48,9 @@ log = logging.getLogger(__name__)
 REFRESH_SECONDS = 5.0
 STUCK_SECONDS = 60  # 「正在啟動／停止」超過這麼久＝卡住了，把停止、重新啟動還給你
 COLORS = {
-    "service": (46, 160, 67),    # 綠
-    "manual": (31, 111, 235),    # 藍
+    # 擁有者 2026-10-09：「自己開是綠色、背後服務是藍色」（第一版相反）。MyFirstTelegramClawBot 的 docs/tray-standard.html
+    "service": (31, 111, 235),   # 藍：Windows 服務在跑
+    "manual": (46, 160, 67),     # 綠：自己開的（雙擊）在跑
     "busy": (210, 153, 34),      # 黃
     "down": (140, 140, 140),     # 灰
 }
@@ -408,14 +409,27 @@ class Tray:
             os.startfile(log_file)  # noqa: S606 - 用記事本之類打開，跟雙擊一樣
 
     def _install(self, icon, item) -> None:
-        """註冊成服務：開一個看得到的視窗跑 service.ps1 install（它自己會跳 UAC、問完會停在那裡讓你看結果）。"""
+        """註冊成服務：開一個看得到的視窗跑 service.ps1 install（它自己會跳 UAC、問完會停在那裡讓你看結果），
+        **等它做完、跳通知說成功或失敗**——2026-10-09 ClawBot 那邊同一個按鈕失敗時什麼都沒說，擁有者完全不知道發生什麼。"""
         script = self.paths.root / "scripts" / "windows" / "service" / "service.ps1"
-        try:
-            subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
-                              "-Action", "install", "-Target", self.program.key],
-                             cwd=self.paths.root, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-        except OSError as exc:
-            self._toast(f"開不起來：{exc}")
+
+        def work() -> None:
+            try:
+                proc = subprocess.Popen(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script),
+                                         "-Action", "install", "-Target", self.program.key],
+                                        cwd=self.paths.root, creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+                code = proc.wait(timeout=1800)
+            except subprocess.TimeoutExpired:
+                self._toast("安裝的視窗開了 30 分鐘還沒結束，去看一下那個視窗")
+                return
+            except OSError as exc:
+                self._toast(f"開不起來：{exc}")
+                return
+            self._toast("安裝好了，在背景跑了" if code == 0
+                        else f"沒有安裝成功（代碼 {code}）：看剛剛那個視窗寫的原因，或 data\\church_bot.log")
+            self._kick()
+
+        threading.Thread(target=work, daemon=True).start()
         self._kick()
 
     def _toast(self, text: str) -> None:

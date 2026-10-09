@@ -342,3 +342,9 @@ def test_menu_has_live_log_and_webhook_copy():
     import inspect
     source = inspect.getsource(tray.Tray._menu)
     assert '"看即時紀錄"' in source and "複製網址" in source
+
+
+def test_colors_follow_the_owners_rule():
+    """擁有者 2026-10-09：「自己開是綠色、背後服務是藍色」。"""
+    green, blue = tray.COLORS["manual"], tray.COLORS["service"]
+    assert green[1] > green[2] and blue[2] > blue[1]
