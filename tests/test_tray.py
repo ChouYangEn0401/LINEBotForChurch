@@ -348,3 +348,11 @@ def test_colors_follow_the_owners_rule():
     """擁有者 2026-10-09：「自己開是綠色、背後服務是藍色」。"""
     green, blue = tray.COLORS["manual"], tray.COLORS["service"]
     assert green[1] > green[2] and blue[2] > blue[1]
+
+
+@pytest.mark.parametrize("service, run, app, stuck", [s for s in ALL_STATES if s[0] is not None])
+def test_once_installed_it_never_asks_to_install_again(service, run, app, stuck):
+    """擁有者 2026-10-09：裝好之後要看得出已經是服務，也不該再叫你安裝——不管在跑、停著、卡在中間。"""
+    status = tray.describe(runctl.WEB, service, run, service_app=app, stuck=stuck)
+    assert tray.menu_state(status)["install"] is False
+    assert "還沒註冊" not in status.line
