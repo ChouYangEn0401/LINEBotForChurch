@@ -418,8 +418,12 @@ def cmd_tunnel(paths: Paths, args: argparse.Namespace) -> int:
     runctl.mark_running(paths, runctl.WEBHOOK)
     runctl.listen_for_end(paths, runctl.WEBHOOK, end_from_tray)
     try:
-        code = run_tunnel(command, lambda url: register_webhook(paths, url, _print), _print,
-                          started=lambda proc: holder.update(proc=proc))
+        def registered(url: str) -> bool:
+            # 小圖示「Lw」的「複製網址」讀這裡（擁有者 2026-10-09：webhook 就是複製連結）
+            runctl.mark_running(paths, runctl.WEBHOOK, detail=url)
+            return register_webhook(paths, url, _print)
+
+        code = run_tunnel(command, registered, _print, started=lambda proc: holder.update(proc=proc))
     finally:
         runctl.mark_stopped(paths, runctl.WEBHOOK)
     return runctl.ENDED_FROM_TRAY if holder.get("ended") else code

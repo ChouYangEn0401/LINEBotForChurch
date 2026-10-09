@@ -106,8 +106,9 @@ def menu_state(status: Status) -> dict[str, bool]:
     return {
         "end": status.alive,
         "stop": installed and status.service != "stopped" and not settling,
-        # 雙擊開的那一份還開著時不給啟動：服務會跟它搶 port，起不來又被 nssm 一直重開
-        "start": installed and status.service in ("stopped", "paused") and not status.alive,
+        # 雙擊開的那一份還開著也可以按：會先請它好好收尾關掉，再啟動服務（擁有者 2026-10-09：
+        # 一個按鈕從黑色視窗換成服務）。見 Tray._handover
+        "start": installed and status.service in ("stopped", "paused"),
         "restart": installed and not settling,
         # 沒在跑、服務也沒開著（沒註冊，或註冊了但停著）：用雙擊的方式（2-start／3-open-webhook）開起來。
         # 擁有者 2026-10-09：「如果服務沒開我可以自己手動啟動」——服務停著時也要給，不是只有沒註冊才給
@@ -115,6 +116,22 @@ def menu_state(status: Status) -> dict[str, bool]:
         # 還沒註冊成服務：選單裡可以直接裝（nssm install；會跳 UAC）。取消註冊刻意不放選單（要去資料夾雙擊，避免誤觸）
         "install": not installed,
     }
+
+
+def webhook_url(paths) -> str:
+    """LINE 指令現在的臨時網址（3-open-webhook 登記到 LINE 時寫進 data/run/webhook.json）；不知道就空字串。"""
+    run = runctl.running(paths, runctl.WEBHOOK) or {}
+    return str(run.get("detail") or "")
+
+
+def copy_text(text: str) -> bool:
+    """放進剪貼簿（Windows 內建的 clip.exe；網址只有英數，不用煩惱編碼）。"""
+    try:
+        subprocess.run(["clip"], input=text.encode("ascii", errors="ignore"), timeout=10,
+                       creationflags=CREATE_NO_WINDOW, check=True)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return True
 
 
 # --------------------------------------------------------------------------- 服務控制
@@ -302,9 +319,13 @@ class Tray:
         ]
         if self.program is runctl.WEB:
             items.append(Item("打開管理網頁", self._open_web, default=True))
+        else:
+            # LINE 指令的臨時網址：擁有者 2026-10-09「webhook 就是複製連結」。不知道網址的時候灰掉
+            items.append(Item(lambda item: f"複製網址（{webhook_url(self.paths) or '還不知道'}）",
+                              self._copy_url, enabled=lambda item: bool(webhook_url(self.paths))))
         # 刻意沒有「關掉這個小圖示」（擁有者 2026-10-09）：圖示是小主管程式，服務停了也要在，不然沒地方開回來。
         # 它只在登出 Windows 時結束；登入時「啟動」資料夾的捷徑再把它開起來。
-        items.append(Item("打開紀錄檔", self._open_log))
+        items += [Item("看即時紀錄", self._open_logview), Item("打開紀錄檔", self._open_log)]
         return pystray.Menu(*items)
 
     def _launch(self, icon, item) -> None:
@@ -328,6 +349,9 @@ class Tray:
                 self._expect_down = True
 
             def work() -> None:
+                if action in ("start", "restart") and not self._handover():
+                    self._kick()
+                    return
                 ok, text = control_service(self.paths, self.program, action)
                 log.info("服務 %s %s：%s %s", self.program.service, action, "成功" if ok else "失敗", text)
                 if not ok:
@@ -338,6 +362,41 @@ class Tray:
             self._kick()
 
         return run
+
+    def _handover(self, wait_seconds: float = 30.0) -> bool:
+        """要啟動服務了：雙擊開的那一份（黑色視窗）還開著的話，先請它好好收尾關掉（跟按「結束程式」一樣，
+        不是砍）。關好了（或本來就沒有）回 True；關不掉回 False 並跳通知，不啟動服務（兩個會搶同一個 port）。"""
+        run = runctl.running(self.paths, self.program)
+        if not run or run.get("mode") == "service":
+            return True
+        self._expect_down = True
+        if not runctl.request_end(self.paths, self.program):
+            self._toast(f"雙擊開的那一份沒有回應「結束」（比較舊的版本開的？）——先把 {self.program.launcher} "
+                        "的黑色視窗關掉，再按一次「服務：啟動」")
+            return False
+        deadline = time.monotonic() + wait_seconds
+        while time.monotonic() < deadline:
+            if not runctl.running(self.paths, self.program):
+                return True
+            time.sleep(0.5)
+        self._toast(f"等了 {int(wait_seconds)} 秒，雙擊開的那一份還沒關好，先不啟動服務")
+        return False
+
+    def _copy_url(self, icon, item) -> None:
+        url = webhook_url(self.paths)
+        if url and copy_text(url):
+            self._toast(f"複製好了：{url}")
+
+    def _open_logview(self, icon, item) -> None:
+        """開一個視窗一直印最新的紀錄（church_bot.logview）。小圖示是 pythonw，要換成有黑色視窗的 python.exe。"""
+        exe = Path(sys.executable).with_name("python.exe")
+        env = dict(os.environ, PYTHONPATH=str(self.paths.root / "src"))
+        try:
+            subprocess.Popen([str(exe if exe.exists() else sys.executable), "-m", "church_bot.logview",
+                              self.program.key], cwd=self.paths.root, env=env,
+                             creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+        except OSError as exc:
+            self._toast(f"開不起來：{exc}")
 
     def _open_web(self, icon, item) -> None:
         run = runctl.running(self.paths, runctl.WEB) or {}

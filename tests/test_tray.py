@@ -181,7 +181,8 @@ def test_menu_follows_the_state():
     # 什麼都沒有：可以用雙擊的方式開起來
     assert can(None, None)["launch"] is True and can(None, None)["install"] is True
     # 服務停著、但雙擊開的那一份開著：不給啟動服務（會搶 port）
-    assert can("stopped", MANUAL_RUN)["start"] is False
+    # 服務停著、雙擊開的那一份開著：也可以按「服務：啟動」——會先請黑色視窗收尾關掉再啟動（Tray._handover）
+    assert can("stopped", MANUAL_RUN)["start"] is True
     # 正在停止：先灰掉；卡住了就把停止、重新啟動還回來
     assert not any(can("stop_pending", None).values())
     stuck = can("stop_pending", None, stuck=True)
@@ -279,3 +280,65 @@ def test_service_control_reports_windows_error_codes_not_text():
     現在直接問服務控制器、看錯誤代碼（數字）。用一個不存在的服務驗，不碰真的服務。"""
     ok, text, code = tray._scm_control("church-bot-no-such-service", "restart", wait_seconds=1)
     assert not ok and code == 1060 and "1060" in text
+
+
+# --------------------------------------------------------------------------- 黑色視窗 → 服務、看即時紀錄、複製網址
+
+
+def _bare_tray(paths, program):
+    t = tray.Tray.__new__(tray.Tray)
+    t.paths, t.program, t._expect_down, t.icon = paths, program, False, None
+    return t
+
+
+def test_starting_the_service_first_closes_the_double_clicked_copy(paths, monkeypatch):
+    """擁有者 2026-10-09：按「服務：啟動」就從黑色視窗換成服務——先請黑色視窗好好收尾（不是砍），關好了才啟動。"""
+    state = {"run": {"mode": "manual"}, "ended": 0}
+
+    def request_end(p, program):
+        state["ended"] += 1
+        state["run"] = None
+        return True
+
+    monkeypatch.setattr(runctl, "running", lambda p, program: state["run"])
+    monkeypatch.setattr(runctl, "request_end", request_end)
+    assert _bare_tray(paths, runctl.WEB)._handover(wait_seconds=1) is True and state["ended"] == 1
+
+    # 沒有雙擊開的那一份、或那一份就是服務：什麼都不做
+    state.update(run={"mode": "service"}, ended=0)
+    assert _bare_tray(paths, runctl.WEB)._handover(wait_seconds=1) is True and state["ended"] == 0
+
+    # 舊版開的、不理「結束」：不啟動服務（兩個會搶同一個 port），跳通知請人關視窗
+    state.update(run={"mode": "manual"})
+    monkeypatch.setattr(runctl, "request_end", lambda p, program: False)
+    toasts = []
+    t = _bare_tray(paths, runctl.WEB)
+    t._toast = toasts.append
+    assert t._handover(wait_seconds=1) is False and "黑色視窗關掉" in toasts[0]
+
+
+def test_logview_reads_only_new_text_and_survives_rotation(tmp_path):
+    from church_bot import logview
+
+    log = tmp_path / "church_bot.log"
+    log.write_bytes("一\n二\n".encode())
+    text, offset = logview.read_from(log, 0)
+    with open(log, "ab") as fh:
+        fh.write("三\n".encode())
+    more, offset = logview.read_from(log, offset)
+    assert (text, more) == ("一\n二\n", "三\n")
+    log.write_bytes("新\n".encode())  # 換過檔（church_bot.log → .1）：比上次讀到的短
+    assert logview.read_from(log, offset)[0] == "新\n"
+
+
+def test_webhook_url_comes_from_the_run_record(paths, monkeypatch):
+    monkeypatch.setattr(runctl, "running", lambda p, program: {"mode": "manual", "detail": "https://x.trycloudflare.com"})
+    assert tray.webhook_url(paths) == "https://x.trycloudflare.com"
+    monkeypatch.setattr(runctl, "running", lambda p, program: None)
+    assert tray.webhook_url(paths) == ""
+
+
+def test_menu_has_live_log_and_webhook_copy():
+    import inspect
+    source = inspect.getsource(tray.Tray._menu)
+    assert '"看即時紀錄"' in source and "複製網址" in source
