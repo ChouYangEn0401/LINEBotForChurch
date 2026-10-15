@@ -237,8 +237,10 @@ function Set-Bot([string]$nssm, [string]$key, [string]$cloudflared) {
           "CHURCH_BOT_HOME=$Root", 'CHURCH_BOT_SERVICE=1'),
         @('DisplayName', $bot.Display),
         @('Description', $bot.Description),
-        # 延遲自動啟動：開機後等網路就緒才起來，比較不會一開機就讀不到 Google 服事表
-        @('Start', 'SERVICE_DELAYED_AUTO_START'),
+        # 後台：延遲自動啟動，開機後等網路就緒才起來，比較不會一開機就讀不到 Google 服事表。
+        # LINE 指令：手動啟動（擁有者 2026-10-15）——要用才開（Telegram、小圖示「服務：啟動」），
+        # 開幾個小時自己關（config/church.yaml 的 webhook.hours），開機不會自己起來
+        @('Start', $(if ($key -eq 'web') { 'SERVICE_DELAYED_AUTO_START' } else { 'SERVICE_DEMAND_START' })),
         # 刻意不設 AppStdout／AppStderr（輸出重導向）：2026-10-09 實測，開了它加上線上輪替，
         # nssm 停服務時程式早就結束了，自己卻卡在等 pipe 讀完，服務一直停在「正在停止」。
         # 要看的紀錄程式自己會寫在 data\church_bot.log，不需要 nssm 再抄一份。
@@ -324,7 +326,9 @@ function Install-Bots {
 
     Write-Host ''
     Write-Ok '完成。從現在起：'
-    Write-Host '     ・這台電腦重新開機後，會自己起來（不用登入 Windows）'
+    Write-Host '     ・後台：這台電腦重新開機後，會自己起來（不用登入 Windows）'
+    Write-Host '     ・LINE 指令（臨時網址）：要用才開，開幾個小時自己關（預設 3 小時），開機不會自己起來'
+    Write-Host '       開：右下角 Lw 小圖示「服務：啟動」、3-service-start.bat、或 Telegram 叫 ClawBot'
     Write-Host '     ・程式當掉的話，10 秒後自己再開一次'
     Write-Host '     ・右下角有小圖示（綠＝服務在跑），右鍵可以結束程式、停／開／重開服務'
     Write-Host '     ・管理網頁：http://127.0.0.1:8787'

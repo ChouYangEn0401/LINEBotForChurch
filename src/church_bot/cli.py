@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import logging
 import os
 import shutil
@@ -24,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from church_bot import __version__
-from church_bot.config import Paths, load_settings
+from church_bot.config import Paths, load_settings, load_webhook_settings
 from church_bot.core import notify, versions
 from church_bot.core.planner import Plan
 from church_bot.errors import ChurchBotError
@@ -406,27 +407,201 @@ def cmd_tunnel(paths: Paths, args: argparse.Namespace) -> int:
         _print("   要停它請用 scripts\\windows\\3-service-stop.bat，或右下角小圖示。")
         return PORT_IN_USE
 
+    from church_bot import webhook_window as window_mod
+    from church_bot.config import load_webhook_settings
+
     command = [args.cloudflared, "tunnel", "--url", f"http://localhost:{args.port}"]
     holder: dict = {}
+    under_service = bool(os.environ.get("CHURCH_BOT_SERVICE"))
 
     def end_from_tray() -> None:
         holder["ended"] = True
         if proc := holder.get("proc"):
             proc.terminate()
 
+    def close_by_time() -> None:
+        """開到時間了（webhook_window.watch 已經通知過「已關閉」）。"""
+        holder["announced"] = True
+        if under_service:
+            # 請 Windows 停掉自己這個服務：直接結束的話 nssm 會以為當掉了，10 秒後又開起來
+            threading.Thread(target=_stop_own_webhook_service, args=(paths, end_from_tray), daemon=True).start()
+        else:
+            end_from_tray()
+
     runctl.ignore_logoff_when_service()
     runctl.mark_running(paths, runctl.WEBHOOK)
     runctl.listen_for_end(paths, runctl.WEBHOOK, end_from_tray)
+    window = window_mod.begin(paths, load_webhook_settings(paths))
+    if window.until:
+        _print(f"⏱ 開到 {window_mod.clock(window.until)} 會自己關（{window_mod.hours_text(window.hours)}）。"
+               "要延長：cli.bat webhook on --hours 小時數")
+    watching = window_mod.start_watch(paths, close_by_time)
+    code = 0
     try:
         def registered(url: str) -> bool:
             # 小圖示「Lw」的「複製網址」讀這裡（擁有者 2026-10-09：webhook 就是複製連結）
             runctl.mark_running(paths, runctl.WEBHOOK, detail=url)
-            return register_webhook(paths, url, _print)
+            ok = register_webhook(paths, url, _print)
+            # 另開執行緒去通知：Notifier 沒開著時要等它起來，不能卡住讀 cloudflared 輸出的這一條
+            threading.Thread(target=window_mod.announce, args=(paths, window_mod.OPENED, window_mod.read(paths) or window),
+                             kwargs={"url": url.removesuffix("/line/webhook"), "ok": ok}, daemon=True).start()
+            return ok
 
         code = run_tunnel(command, registered, _print, started=lambda proc: holder.update(proc=proc))
     finally:
+        watching.set()
+        _tunnel_closed(paths, holder, code, under_service)
         runctl.mark_stopped(paths, runctl.WEBHOOK)
     return runctl.ENDED_FROM_TRAY if holder.get("ended") else code
+
+
+def _tunnel_closed(paths: Paths, holder: dict, code: int, under_service: bool) -> None:
+    """臨時網址關了：記下來、通知（時間到的那一種 watch 已經通知過了）。
+
+    服務模式下除非是「服務正在停」，不然 nssm 等一下就會把它開回來（當掉、小圖示「結束程式」）——
+    那不算關掉：時間照舊，不發「已關閉」；當掉的話跟開發者講一聲。
+    """
+    from church_bot import runctl
+    from church_bot import webhook_window as window_mod
+
+    if holder.get("announced"):
+        return
+    if under_service and runctl.service_state(runctl.WEBHOOK) not in ("stop_pending", "stopped"):
+        if not holder.get("ended"):
+            window = window_mod.read(paths)
+            text = (f"⚠️ LINE webhook 的臨時網址斷了（cloudflared 結束代碼 {code}），nssm 10 秒後會再開起來"
+                    + (f"，時間照舊到 {window_mod.clock(window.until)}" if window and window.until else ""))
+            window_mod.tell_dev(paths, load_webhook_settings(paths),
+                                window_mod.event_payload("restarting", text, window), wait=notify.STOP_WAIT)
+        return
+    if holder.get("ended"):
+        reason = "小圖示或 Telegram 按了結束"
+    elif code == 0:
+        reason = "服務停止或按了 Ctrl+C" if under_service else "關掉視窗或按了 Ctrl+C"
+    else:
+        reason = f"臨時網址自己斷了（cloudflared 結束代碼 {code}）"
+    closed = window_mod.finish(paths, reason)
+    if closed is not None:
+        window_mod.announce(paths, window_mod.CLOSED, closed, reason=closed.reason, wait=notify.STOP_WAIT)
+
+
+def _stop_own_webhook_service(paths: Paths, fallback) -> None:  # noqa: ANN001 - fallback: () -> None
+    from church_bot import runctl
+    from church_bot import webhook_window as window_mod
+    from church_bot.tray import _scm_control
+
+    try:
+        ok, text, code = _scm_control(runctl.WEBHOOK.service, "stop", wait_seconds=60)
+    except OSError as exc:
+        ok, text, code = False, str(exc), -1
+    if ok or code == 0:  # code 0 + 沒成功 = 等太久；Windows 已經在停了
+        return
+    log.error("時間到了，但沒辦法停掉 %s：%s", runctl.WEBHOOK.service, text)
+    window_mod.tell_dev(paths, load_webhook_settings(paths), window_mod.event_payload(
+        "stop_failed", f"⚠️ LINE webhook 時間到了，但沒辦法停掉服務（{text}），先直接結束；nssm 可能會再把它開起來",
+        window_mod.read(paths)), wait=notify.STOP_WAIT)
+    fallback()
+
+
+def _webhook_state(paths: Paths) -> dict:
+    """LINE 指令的臨時網址現在怎樣：有沒有在跑、怎麼開的、網址、開到幾點。"""
+    from church_bot import runctl
+    from church_bot import webhook_window as window_mod
+
+    service = runctl.service_state(runctl.WEBHOOK)
+    run = runctl.running(paths, runctl.WEBHOOK)
+    by_service = service == "running" and (runctl.service_app_alive(runctl.WEBHOOK) or bool(run and run.get("mode") == "service"))
+    running = by_service or bool(run)
+    window = window_mod.read(paths)
+    return {"running": running, "mode": "service" if by_service else ("manual" if run else None), "service": service,
+            "url": str((run or {}).get("detail") or "").removesuffix("/line/webhook") if running else "",
+            "window": window if window and window.is_open and running else None, "last": window}
+
+
+def cmd_webhook(paths: Paths, args: argparse.Namespace) -> int:
+    """LINE 指令的臨時網址：``on``（開；已經開著就是延長）、``off``（關）、``status``（看）。
+
+    擁有者 2026-10-15：要用才開、開幾小時自己關；Telegram 叫 ClawBot 呼叫這個（``--json`` 印一行 JSON 給它看）。
+    註冊成服務的話用 Windows 服務開關（install.bat 給過你的帳號啟動／停止的權限，不會跳 UAC）；
+    沒註冊的話跟雙擊 3-open-webhook 一樣開一個視窗。後台（church-bot）不歸這個指令管，它一直開著。
+    """
+    from church_bot import runctl
+    from church_bot import webhook_window as window_mod
+    from church_bot.config import load_webhook_settings
+    from church_bot.tray import ERROR_ACCESS_DENIED, _scm_control
+
+    settings = load_webhook_settings(paths)
+    action = args.action or "status"
+    by = (args.by or "指令列").strip()[:40]
+    state = _webhook_state(paths)
+    ok, message = True, ""
+
+    if action == "on":
+        hours = settings.hours if args.hours is None else args.hours
+        if not 0 <= hours <= 72:
+            ok, message = False, "小時數要在 0（不自動關）到 72 之間"
+        elif state["running"]:
+            window = window_mod.extend(paths, hours, by)
+            window_mod.announce(paths, window_mod.EXTENDED, window, settings=settings)
+            message = f"已經開著，改成到 {window_mod.clock(window.until)} 自動關" if window.until else "已經開著，改成不自動關"
+        else:
+            window_mod.request(paths, hours, by)
+            if state["service"] is not None:
+                if state["service"] in ("stop_pending", "start_pending"):
+                    window_mod.wait_for(lambda: runctl.service_state(runctl.WEBHOOK) in ("stopped", "running"), 30)
+                done, text, code = _scm_control(runctl.WEBHOOK.service, "start", wait_seconds=60)
+                if not done:
+                    ok = False
+                    message = ("你的帳號沒有啟動這個服務的權限：重跑一次 scripts\\windows\\service\\install.bat 就會開給你"
+                               if code == ERROR_ACCESS_DENIED else f"服務啟動失敗：{text}")
+            elif sys.platform == "win32":
+                bat = paths.church.root / "scripts" / "windows" / runctl.WEBHOOK.launcher
+                subprocess.Popen(["cmd.exe", "/c", "start", "", str(bat)], cwd=paths.church.root,
+                                 creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                ok, message = False, "這台電腦不是 Windows，請自己執行 church-bot tunnel"
+            if ok:
+                if args.wait and window_mod.wait_for(lambda: bool(_webhook_state(paths)["url"]), args.wait):
+                    message = "開好了"
+                else:
+                    message = "正在開（臨時網址建好、登記到 LINE 大約要半分鐘到一分鐘）"
+    elif action == "off":
+        if not state["running"]:
+            message = "本來就沒開"
+        else:
+            window_mod.mark_closing(paths, f"{by} 關的")
+            if state["mode"] == "service":
+                done, text, code = _scm_control(runctl.WEBHOOK.service, "stop", wait_seconds=60)
+                if not done:
+                    ok = False
+                    message = ("你的帳號沒有停止這個服務的權限：重跑一次 scripts\\windows\\service\\install.bat 就會開給你"
+                               if code == ERROR_ACCESS_DENIED else f"服務停止失敗：{text}")
+            elif not runctl.request_end(paths, runctl.WEBHOOK):
+                ok, message = False, f"它沒有回應「結束」：請直接關掉 {runctl.WEBHOOK.launcher} 的黑色視窗"
+            if ok:
+                window_mod.wait_for(lambda: not _webhook_state(paths)["running"], 30)
+                message = "已關閉" if not _webhook_state(paths)["running"] else "已經叫它關了，還在收尾"
+            else:
+                window_mod.mark_closing(paths, "")  # 沒關成：之後時間到關掉時，原因不要寫成「○○ 關的」
+
+    final = _webhook_state(paths)
+    window = final["window"]
+    summary = window_mod.describe(window if final["running"] else final["last"])
+    if args.json:
+        left = window.remaining() if window else None
+        _print(json.dumps({
+            "ok": ok, "action": action, "message": message, "running": final["running"], "mode": final["mode"],
+            "service": final["service"], "url": final["url"],
+            "until": window.until.isoformat(timespec="seconds") if window and window.until else None,
+            "until_text": window_mod.clock(window.until) if window else "",
+            "remaining_minutes": int(left // 60) if left is not None else None,
+            "summary": summary, "hours_default": settings.hours,
+        }, ensure_ascii=False))
+    else:
+        if message:
+            _print(("✅ " if ok else "❌ ") + message)
+        _print(f"LINE 指令（臨時網址）：{summary}" + (f"\n網址：{final['url']}" if final["url"] else ""))
+    return 0 if ok else 1
 
 
 # --------------------------------------------------------------------------- web
@@ -683,12 +858,20 @@ def build_parser() -> argparse.ArgumentParser:
     tunnel = sub.add_parser("tunnel", help="免費模式：開臨時網址並自動登記到 LINE（開著的時候群組指令才會回）")
     tunnel.add_argument("--port", type=int, default=8787, help="管理網頁的 port")
     tunnel.add_argument("--cloudflared", default="cloudflared", help="cloudflared 的位置")
+    window = sub.add_parser("webhook", help="LINE 指令的臨時網址：on（開／延長）、off（關）、status（看）；開幾小時自己關")
+    window.add_argument("action", nargs="?", choices=("on", "off", "status"), default="status",
+                        help="on = 開（已經開著就是延長，從現在起算）、off = 關、status = 看（預設）")
+    window.add_argument("--hours", type=float, default=None,
+                        help="開幾小時就自己關（預設照 church.yaml 的 webhook.hours，沒寫是 3；0 = 不自動關）")
+    window.add_argument("--wait", type=float, default=0, help="on：最多等幾秒，等到臨時網址建好才回來（預設不等）")
+    window.add_argument("--by", default="", help="誰要開／關的（寫進通知，例如 telegram）")
+    window.add_argument("--json", action="store_true", help="印一行 JSON（給 Telegram 機器人之類的程式看）")
     return parser
 
 
 COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd_preview, "send": cmd_send,
             "quota": cmd_quota, "牧區": cmd_ministries, "ministries": cmd_ministries, "set-webhook": cmd_set_webhook,
-            "tunnel": cmd_tunnel, "狀態": cmd_status, "status": cmd_status}
+            "tunnel": cmd_tunnel, "webhook": cmd_webhook, "狀態": cmd_status, "status": cmd_status}
 
 
 def main(argv: list[str] | None = None) -> int:

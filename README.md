@@ -134,7 +134,8 @@
 
 跑完之後：
 
-- 電腦**重新開機就自己起來**，不用登入 Windows、不用有人去點（LINE 指令會等後台起來才開）
+- 後台：電腦**重新開機就自己起來**，不用登入 Windows、不用有人去點
+- LINE 指令（臨時網址）：**要用才開，開幾個小時自己關**（預設 3 小時，見下面「LINE 指令開多久」）。開機不會自己起來
 - 程式**當掉 10 秒後自己再開一次**
 - **右下角有兩個小圖示**：「L」＝LINE · 後台、「Lw」＝LINE · webhook（LINE 指令）。顏色就是狀態——
   藍＝服務在跑、綠＝雙擊開的在跑、黃＝服務開著但程式沒回應，或正在啟動／停止、灰＝沒在跑。
@@ -157,6 +158,33 @@
 > ⚠️ 服務在背景跑，**看不到黑色視窗，也不會跳出 `--popup` 的小提示**。
 > 所以註冊成服務之後，狀態播報就是你的眼睛——開機、關機、當掉、每次發送都會傳一則到你的 Telegram。
 > 想主動問：雙擊 `status.bat`，或在 Telegram 呼叫 `cli.bat 狀態 --telegram`。
+
+### LINE 指令開多久（臨時網址自己關）
+
+臨時網址開著的時候，外面的人連得到這台電腦的管理網頁（還是要密碼），群組打 `/提醒` 這類指令才會回。
+不用的時候沒必要開著，所以它**開幾個小時就自己關**，關之前 10 分鐘先預告一次。每週提醒不受影響：那是後台在發，不靠這條網址。
+
+- **開**：右下角 **Lw** 小圖示「服務：啟動」（服務停著時也按得到）、`3-service-start.bat`、雙擊 `3-open-webhook.bat`，
+  或 `cli.bat webhook on --hours 2`（Telegram 機器人就是呼叫這個）。已經開著再 `webhook on` 就是延長（從現在起算）
+- **關**：`cli.bat webhook off`、小圖示「服務：停止」；**看**：`cli.bat webhook status`（加 `--json` 印一行 JSON 給程式看）
+- **通知**：開好、快關、已關，預設經 Notifier_TB 傳 Telegram 給伺服器管理員（不佔 LINE 額度）。
+  牧區管理員的 LINE 私訊預設關（每人每次 1 則）；開了的話通知會寫「需要的話請聯絡伺服器管理員（○○）」，
+  ○○ 是同工名單裡勾了「**伺服器管理員**」的人（只有伺服器管理員自己能勾）
+- 設定在 `config/church.yaml`（整個教會一份）：
+
+```yaml
+webhook:
+  hours: 3                    # 開多久自己關；0 = 不自動關
+  warn_minutes: 10            # 關掉前幾分鐘預告；0 = 不預告
+  dev_notice: notifier_tb     # 通知伺服器管理員：notifier_tb / command / off
+  dev_command: []             # dev_notice: command 時執行的程式，例如 ["C:/tools/notify.exe", "{text}"]
+  line_admins_on_open: false  # 開好時 LINE 私訊每位牧區管理員
+  line_admins_on_close: false # 快關／已關時 LINE 私訊每位牧區管理員
+```
+
+> 不用 Telegram 的話把 `dev_notice` 改成 `command`：每次開、延長、快關、已關都會執行 `dev_command` 一次，
+> 裡面的 `{event}`（opened／extended／closing_soon／closed）、`{text}`、`{until}`、`{url}` 會換成這次的內容，
+> 環境變數 `CHURCH_BOT_EVENT_JSON` 是整份事件。不經過命令列，所以空白、引號都不用跳脫。
 
 ### 狀態播報走 Notifier_TB（這個專案不保管 Telegram 金鑰）
 
