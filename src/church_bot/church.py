@@ -81,6 +81,7 @@ class Ministry:
 class ChurchConfig:
     ministries: list[Ministry] = field(default_factory=list)
     web: dict = field(default_factory=dict)  # host、port：整個教會一份（見 config.load_settings）
+    webhook: dict = field(default_factory=dict)  # LINE 指令的臨時網址開多久、要通知誰（見 config.WebhookSettings）
 
     def get(self, ministry_id: str) -> Ministry | None:
         return next((m for m in self.ministries if m.id == ministry_id), None)
@@ -122,7 +123,8 @@ def load_church(paths: Paths) -> ChurchConfig:
                                    note=str(raw.get("note") or ""), password_hash=str(raw.get("password_hash") or ""),
                                    password_temporary=bool(raw.get("password_temporary"))))
     web = data.get("web") if isinstance(data.get("web"), dict) else {}
-    return ChurchConfig(ministries, web)
+    webhook = data.get("webhook") if isinstance(data.get("webhook"), dict) else {}
+    return ChurchConfig(ministries, web, webhook)
 
 
 def save_church(paths: Paths, cfg: ChurchConfig) -> None:
@@ -133,6 +135,8 @@ def save_church(paths: Paths, cfg: ChurchConfig) -> None:
     ]}
     if cfg.web:
         data["web"] = cfg.web
+    if cfg.webhook:
+        data["webhook"] = cfg.webhook
     header = ("# 教會服事提醒機器人 — 牧區清單（建議在管理網頁首頁修改）\n"
               "# 每個牧區的設定與名單在 config/ministries/<編號>/；編號建立後不要改\n\n")
     write_text(paths.church_file, header + yaml.safe_dump(data, allow_unicode=True, sort_keys=False, width=100))

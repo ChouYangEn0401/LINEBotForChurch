@@ -270,6 +270,8 @@ class MemberTable(CsvTable[Member]):
         Column("active", "啟用", ("active", "在職", "服事中")),
         Column("admin", "管理員", ("admin", "是管理員")),
         Column("note", "備註", ("note", "說明")),
+        # 放最後：舊的 CSV 沒有這一欄也讀得懂，用 Excel 打開時原本的欄位位置都不變
+        Column("server_admin", "伺服器管理員", ("server_admin", "server管理員")),
     )
 
     def from_row(self, row: dict[str, str], line_no: int, issues: list[Issue]) -> Member | None:
@@ -286,13 +288,16 @@ class MemberTable(CsvTable[Member]):
             uid = ""
         active = parse_bool(row.get("active", ""), default=True)
         admin = parse_bool(row.get("admin", ""), default=False)
+        server_admin = parse_bool(row.get("server_admin", ""), default=False)
         return Member(
             name=name, aliases=parse_list(row.get("aliases", "")), line_user_id=uid,
             active=True if active is None else active, note=row.get("note", ""), admin=bool(admin),
+            server_admin=bool(server_admin),
         )
 
     def to_row(self, m: Member) -> list[str]:
-        return [m.name, fmt_list(m.aliases), m.line_user_id, fmt_bool(m.active), fmt_bool(m.admin), m.note]
+        return [m.name, fmt_list(m.aliases), m.line_user_id, fmt_bool(m.active), fmt_bool(m.admin), m.note,
+                fmt_bool(m.server_admin)]
 
     def validate_all(self, items: list[Member], issues: list[Issue]) -> None:
         owner: dict[str, str] = {}

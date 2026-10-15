@@ -96,16 +96,26 @@ def describe(program: runctl.Program, service: str | None, run: dict | None, *,
     return Status("down", f"{title}：沒在跑（還沒註冊成服務）——可以按「開起來」", False, service)
 
 
-def service_line(status: Status) -> str:
+def service_line(status: Status, program: runctl.Program | None = None) -> str:
     """選單裡固定的一行：這個程式「裝成服務了沒」。擁有者 2026-10-09：「明明好像已經安裝了，但是它還是顯示我可以
-    再安裝」——只靠「安裝成服務」那一項有沒有出現來猜太不清楚，要直接寫出來。"""
+    再安裝」——只靠「安裝成服務」那一項有沒有出現來猜太不清楚，要直接寫出來。
+
+    LINE 指令（webhook）的服務是手動啟動（擁有者 2026-10-15）：要用才開、開幾小時自己關，開機不會自己起來。"""
+    on_demand = program is runctl.WEBHOOK
     if status.service is None:
         return "Windows 服務：還沒註冊（電腦重開機不會自己起來）"
     if status.service == "running":
-        return "Windows 服務：已註冊，在跑（開機自己起來）"
+        return "Windows 服務：已註冊，在跑（時間到自己關）" if on_demand else "Windows 服務：已註冊，在跑（開機自己起來）"
     if status.service == "stopped":
-        return "Windows 服務：已註冊，停著（開機會自己起來）"
+        return "Windows 服務：已註冊，停著（要用時按「服務：啟動」）" if on_demand else "Windows 服務：已註冊，停著（開機會自己起來）"
     return f"Windows 服務：已註冊，{PENDING.get(status.service, status.service)}"
+
+
+def window_line(paths: Paths) -> str:
+    """LINE 指令開到幾點（webhook_window）。給選單第二行看。"""
+    from church_bot import webhook_window
+
+    return "時間：" + webhook_window.describe(webhook_window.read(paths))
 
 
 def menu_state(status: Status) -> dict[str, bool]:
@@ -323,7 +333,7 @@ class Tray:
             Item(lambda item: "結束程式（服務會自己再開起來）" if under_service() else "結束程式",
                  self._end, enabled=can("end")),
             Menu.SEPARATOR,
-            Item(lambda item: service_line(self.status), None, enabled=False),
+            Item(lambda item: service_line(self.status, self.program), None, enabled=False),
             Item("服務：停止（nssm stop）", self._service("stop"), enabled=can("stop")),
             Item("服務：啟動（nssm start）", self._service("start"), enabled=can("start")),
             Item("服務：重新啟動（nssm restart）", self._service("restart"), enabled=can("restart")),
@@ -337,6 +347,8 @@ class Tray:
             # LINE 指令的臨時網址：擁有者 2026-10-09「webhook 就是複製連結」。不知道網址的時候灰掉
             items.append(Item(lambda item: f"複製網址（{webhook_url(self.paths) or '還不知道'}）",
                               self._copy_url, enabled=lambda item: bool(webhook_url(self.paths))))
+            # 開到幾點（擁有者 2026-10-15：開幾小時自己關）。延長用 cli.bat webhook on 或 Telegram
+            items.append(Item(lambda item: window_line(self.paths), None, enabled=False))
         # 刻意沒有「關掉這個小圖示」（擁有者 2026-10-09）：圖示是小主管程式，服務停了也要在，不然沒地方開回來。
         # 它只在登出 Windows 時結束；登入時「啟動」資料夾的捷徑再把它開起來。
         items += [Item("看即時紀錄", self._open_logview), Item("打開紀錄檔", self._open_log)]
@@ -469,9 +481,19 @@ class Tray:
             if self._expect_down:
                 self._expect_down = False
             else:
-                self._toast(f"停了！{self.status.line}")
+                self._toast(self._down_text())
         elif self.status.alive:
             self._expect_down = False
+
+    def _down_text(self) -> str:
+        """不是你按的卻停了：LINE 指令開到時間、或 Telegram 關掉的，照實說，不要嚇人地寫「停了！」。"""
+        if self.program is runctl.WEBHOOK:
+            from church_bot import webhook_window
+
+            window = webhook_window.read(self.paths)
+            if window and window.closed_at and abs((webhook_window._now() - window.closed_at).total_seconds()) < 300:
+                return f"關了（{window.reason or '有人關掉'}）。要再開：「服務：啟動」或 Telegram"
+        return f"停了！{self.status.line}"
 
     def _loop(self, icon) -> None:
         icon.visible = True

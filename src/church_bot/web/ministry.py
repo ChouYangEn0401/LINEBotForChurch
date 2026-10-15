@@ -418,8 +418,9 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
                     team_issues=[*teams.issues, *validate_teams(teams.items, result.items)])
 
     @ui.post("/members/save")
-    def members_save(name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
-                     active: str = Form(""), note: str = Form(""), original_name: str = Form(""), admin: str = Form(""), m: MinistryView = Depends(web.ministry)):
+    def members_save(request: Request, name: str = Form(""), aliases: str = Form(""), line_user_id: str = Form(""),
+                     active: str = Form(""), note: str = Form(""), original_name: str = Form(""), admin: str = Form(""),
+                     server_admin: str = Form(""), m: MinistryView = Depends(web.ministry)):
         name, uid = name.strip(), line_user_id.strip()
         if not name:
             return m.redirect("/members", "請填名字", "error")
@@ -427,10 +428,14 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
             return m.redirect(f"/members?edit={quote(original_name)}",
                              f"LINE_userId 格式不對：「{uid}」。要是 U 開頭再加 32 個英數字", "error")
         member = Member(name=name, aliases=parse_list(aliases), line_user_id=uid, active=active == "on", note=note.strip(),
-                        admin=admin == "on")
+                        admin=admin == "on", server_admin=server_admin == "on")
         with TABLE_WRITE_LOCK:
             table = MemberTable(m.paths.members_file)
-            table.save(upsert(table.load().items, member, key=lambda x: x.name, original_key=original_name or None))
+            items = table.load().items
+            if not web.is_manager(request):  # 「伺服器管理員」只有伺服器管理員自己能勾；牧區的人存檔時保留原本的
+                before = next((x for x in items if x.name == (original_name or name)), None)
+                member = replace(member, server_admin=bool(before and before.server_admin))
+            table.save(upsert(items, member, key=lambda x: x.name, original_key=original_name or None))
         return m.redirect("/members", f"已儲存「{name}」")
 
     @ui.post("/members/admin")
@@ -449,6 +454,22 @@ def ministry_routes(web: Web) -> tuple[APIRouter, APIRouter]:
         if on and not member.line_user_id:
             return redirect(next_url, f"「{name}」已經是管理員，但還沒對應 LINE 帳號，所以在 LINE 上還認不出他", "warn")
         return redirect(next_url, f"「{name}」{'已經是管理員了' if on else '不再是管理員'}")
+
+    @ui.post("/members/server-admin", dependencies=[Depends(web.require_manager)])
+    def members_server_admin(name: str = Form(...), enabled: str = Form(""), m: MinistryView = Depends(web.ministry)):
+        """勾成（或取消）伺服器管理員：只是「有事要找誰」，不多給權限（見 models.Member.server_admin）。
+        只有伺服器管理員能按，不然牧區的人可以把自己寫成「有事找我」。"""
+        on = enabled == "1"
+        with TABLE_WRITE_LOCK:
+            table = MemberTable(m.paths.members_file)
+            items = table.load().items
+            member = next((x for x in items if x.name == name), None)
+            if member is None:
+                return m.redirect("/members", f"同工名單裡找不到「{name}」", "error")
+            table.save([replace(x, server_admin=on) if x is member else x for x in items])
+        if on:
+            return m.redirect("/members", f"「{name}」是伺服器管理員了：LINE 指令的臨時網址要關掉時，通知會寫「請聯絡{name}」")
+        return m.redirect("/members", f"「{name}」不再是伺服器管理員")
 
     @ui.post("/members/delete")
     def members_delete(name: str = Form(...), m: MinistryView = Depends(web.ministry)):

@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import threading
@@ -214,6 +215,41 @@ class Settings(_Base):
     web: WebSettings = Field(default_factory=WebSettings)
     chat: ChatSettings = Field(default_factory=ChatSettings)
     notify: NotifySettings = Field(default_factory=NotifySettings)
+
+
+class WebhookSettings(_Base):
+    """LINE 指令那條臨時網址（3-open-webhook／church-bot-webhook 服務）開多久、開關時通知誰。
+
+    整個教會一份，在 ``config/church.yaml`` 的 ``webhook:`` 那一段（擁有者 2026-10-15）：
+    要用的時候才開，開幾個小時自己關；關之前先講一聲。每週提醒不受影響（那是後台在發，不靠這條網址）。
+    """
+
+    # 開著多久自己關（小時）。0 = 不自動關，一直開到有人關掉
+    hours: float = Field(default=3, ge=0, le=72)
+    # 關掉前幾分鐘先通知一次（0 = 不預告，時間到直接關）
+    warn_minutes: int = Field(default=10, ge=0, le=180)
+    # 通知開發者（伺服器管理員）的方式：
+    #   notifier_tb = 經這台電腦上的 Notifier_TB 傳到 Telegram（預設；不佔 LINE 額度）
+    #   command     = 執行 dev_command 那個程式，事件內容自己處理（不想用 Telegram 的人用這個）
+    #   off         = 不通知
+    dev_notice: Literal["notifier_tb", "command", "off"] = "notifier_tb"
+    # dev_notice = command 時執行的程式，一個字一格（不經過命令列解析，所以不怕空白或特殊符號）。
+    # 裡面的 {event}、{text}、{until}、{url} 會換成這次的內容；環境變數 CHURCH_BOT_EVENT_JSON 是整份事件。
+    # 例：["C:/tools/notify.exe", "--title", "LINE webhook", "{text}"]
+    dev_command: list[str] = []
+    # 用 LINE 私訊每一位牧區管理員（每人每次算 1 則 LINE 額度，所以預設關）
+    line_admins_on_open: bool = False   # 開好的時候
+    line_admins_on_close: bool = False  # 快要關、已經關的時候
+
+
+def load_webhook_settings(paths: Paths) -> WebhookSettings:
+    """church.yaml 的 ``webhook:``。寫錯的話用預設值並記一筆——這段設定壞掉不能害臨時網址開不起來。"""
+    try:
+        return WebhookSettings.model_validate(read_church_section(paths.church, "webhook"))
+    except ValidationError as exc:
+        logging.getLogger(__name__).warning("church.yaml 的 webhook 設定有誤，先用預設值：%s",
+                                            _format_validation_error(exc))
+        return WebhookSettings()
 
 
 # 機密欄位：(區段, 欄位, 環境變數)。這些值只從 .env 讀，存檔時一律排除。
