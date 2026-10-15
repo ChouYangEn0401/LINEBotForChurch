@@ -454,7 +454,11 @@ def test_stopping_the_service_records_and_announces_the_close(paths, monkeypatch
 
 def test_the_tray_says_the_webhook_is_on_demand():
     stopped = tray.describe(runctl.WEBHOOK, "stopped", None)
-    assert "要用時按「服務：啟動」" in tray.service_line(stopped, runctl.WEBHOOK)
+    assert "要用時按下面的「▶ 開 webhook」" in tray.service_line(stopped, runctl.WEBHOOK)
+    # 擁有者 2026-10-15：「小格子按鈕的視窗裡面我也沒有看到啟動 webhook」——選單直接寫開／關 webhook 和開幾小時
+    assert tray.service_label(runctl.WEBHOOK, "start") == "▶ 開 webhook（3 小時後自己關；服務：啟動）"
+    assert tray.service_label(runctl.WEBHOOK, "stop").startswith("⏹ 關掉 webhook")
+    assert tray.service_label(runctl.WEB, "start") == "服務：啟動（nssm start）"
     assert "開機會自己起來" in tray.service_line(tray.describe(runctl.WEB, "stopped", None), runctl.WEB)
     assert tray.menu_state(stopped)["start"]  # 手動啟動的服務停著：照樣按得了「服務：啟動」
 

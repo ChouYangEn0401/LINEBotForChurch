@@ -107,7 +107,7 @@ def service_line(status: Status, program: runctl.Program | None = None) -> str:
     if status.service == "running":
         return "Windows 服務：已註冊，在跑（時間到自己關）" if on_demand else "Windows 服務：已註冊，在跑（開機自己起來）"
     if status.service == "stopped":
-        return "Windows 服務：已註冊，停著（要用時按「服務：啟動」）" if on_demand else "Windows 服務：已註冊，停著（開機會自己起來）"
+        return "Windows 服務：已註冊，停著（要用時按下面的「▶ 開 webhook」）" if on_demand else "Windows 服務：已註冊，停著（開機會自己起來）"
     return f"Windows 服務：已註冊，{PENDING.get(status.service, status.service)}"
 
 
@@ -116,6 +116,25 @@ def window_line(paths: Paths) -> str:
     from church_bot import webhook_window
 
     return "時間：" + webhook_window.describe(webhook_window.read(paths))
+
+
+SERVICE_LABELS = {"stop": "服務：停止（nssm stop）", "start": "服務：啟動（nssm start）",
+                  "restart": "服務：重新啟動（nssm restart）"}
+
+
+def service_label(program: runctl.Program, action: str, paths: Paths | None = None) -> str:
+    """選單上「服務：…」那三項的字。LINE 指令（webhook）直接寫開／關 webhook、開幾小時——擁有者 2026-10-15：
+    「小格子按鈕的視窗裡面我也沒有看到啟動 webhook」（以前只寫「服務：啟動（nssm start）」）。"""
+    if program is not runctl.WEBHOOK or action == "restart":
+        return SERVICE_LABELS[action]
+    if action == "stop":
+        return "⏹ 關掉 webhook（服務：停止）"
+    hours = 3.0
+    if paths is not None:
+        from church_bot.config import load_webhook_settings
+
+        hours = load_webhook_settings(paths).hours
+    return (f"▶ 開 webhook（{hours:g} 小時後自己關；服務：啟動）" if hours else "▶ 開 webhook（不會自動關；服務：啟動）")
 
 
 def menu_state(status: Status) -> dict[str, bool]:
@@ -334,9 +353,10 @@ class Tray:
                  self._end, enabled=can("end")),
             Menu.SEPARATOR,
             Item(lambda item: service_line(self.status, self.program), None, enabled=False),
-            Item("服務：停止（nssm stop）", self._service("stop"), enabled=can("stop")),
-            Item("服務：啟動（nssm start）", self._service("start"), enabled=can("start")),
-            Item("服務：重新啟動（nssm restart）", self._service("restart"), enabled=can("restart")),
+            Item(lambda item: service_label(self.program, "start", self.paths), self._service("start"),
+                 enabled=can("start")),
+            Item(service_label(self.program, "stop"), self._service("stop"), enabled=can("stop")),
+            Item(service_label(self.program, "restart"), self._service("restart"), enabled=can("restart")),
             Item("安裝成服務（nssm install；會跳「是否允許」）", self._install, enabled=can("install"),
                  visible=can("install")),
             Menu.SEPARATOR,
