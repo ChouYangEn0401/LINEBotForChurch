@@ -312,7 +312,12 @@ function Install-Bots {
         Write-Host '（順手取消了舊的「開機自動執行 2-start」捷徑，改由服務負責）'
     }
 
-    foreach ($key in $todo) {
+    # LINE 指令（webhook）是要用才開的（擁有者 2026-10-15）：註冊好就停著，不在安裝的時候順手打開
+    if ($todo -contains 'webhook') {
+        Write-Step "$($Bots.webhook.Label)：註冊好了，先停著（要用才開）"
+        Write-Host '   要用時：右下角 Lw 小圖示「▶ 開 webhook」、雙擊 3-service-start.bat、或 Telegram 打 /line_bot_on'
+    }
+    foreach ($key in @($todo | Where-Object { $_ -ne 'webhook' })) {
         Write-Step "正在啟動：$($Bots[$key].Label)…"
         $started = Invoke-Nssm $nssm @('start', $Bots[$key].Name)
         if ($started.Code -ne 0) {
@@ -328,9 +333,10 @@ function Install-Bots {
     Write-Ok '完成。從現在起：'
     Write-Host '     ・後台：這台電腦重新開機後，會自己起來（不用登入 Windows）'
     Write-Host '     ・LINE 指令（臨時網址）：要用才開，開幾個小時自己關（預設 3 小時），開機不會自己起來'
-    Write-Host '       開：右下角 Lw 小圖示「服務：啟動」、3-service-start.bat、或 Telegram 叫 ClawBot'
+    Write-Host '       開：右下角 Lw 小圖示「▶ 開 webhook」、3-service-start.bat、或 Telegram 打 /line_bot_on'
     Write-Host '     ・程式當掉的話，10 秒後自己再開一次'
-    Write-Host '     ・右下角有小圖示（綠＝服務在跑），右鍵可以結束程式、停／開／重開服務'
+    Write-Host '     ・右下角有小圖示 L、Lw（藍＝服務在跑、灰＝停著），右鍵可以停／開／重開'
+    Write-Host '     ・說明：docs\WEBHOOK.md'
     Write-Host '     ・管理網頁：http://127.0.0.1:8787'
     Write-Host ''
     Write-Host '     也可以雙擊 scripts\windows 裡的：'

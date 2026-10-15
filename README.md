@@ -161,11 +161,13 @@
 
 ### LINE 指令開多久（臨時網址自己關）
 
+> 完整說明（兩個服務各做什麼、新電腦裝了會怎樣、改完程式要不要重裝、現在的狀態）：[docs/WEBHOOK.md](docs/WEBHOOK.md)
+
 臨時網址開著的時候，外面的人連得到這台電腦的管理網頁（還是要密碼），群組打 `/提醒` 這類指令才會回。
 不用的時候沒必要開著，所以它**開幾個小時就自己關**，關之前 10 分鐘先預告一次。每週提醒不受影響：那是後台在發，不靠這條網址。
 
-- **開**：右下角 **Lw** 小圖示「服務：啟動」（服務停著時也按得到）、`3-service-start.bat`、雙擊 `3-open-webhook.bat`，
-  或 `cli.bat webhook on --hours 2`（Telegram 機器人就是呼叫這個）。已經開著再 `webhook on` 就是延長（從現在起算）
+- **開**：右下角 **Lw** 小圖示「▶ 開 webhook」（服務停著時也按得到）、`3-service-start.bat`、雙擊 `3-open-webhook.bat`，
+  Telegram 的 ClawBot `/line_bot_on`，或 `cli.bat webhook on --hours 2`（ClawBot 就是呼叫這個）。已經開著再 `webhook on` 就是延長（從現在起算）
 - **關**：`cli.bat webhook off`、小圖示「服務：停止」；**看**：`cli.bat webhook status`（加 `--json` 印一行 JSON 給程式看）
 - **通知**：開好、快關、已關，預設經 Notifier_TB 傳 Telegram 給伺服器管理員（不佔 LINE 額度）。
   牧區管理員的 LINE 私訊預設關（每人每次 1 則）；開了的話通知會寫「需要的話請聯絡伺服器管理員（○○）」，
