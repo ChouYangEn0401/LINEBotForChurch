@@ -127,6 +127,9 @@ class Member:
     # 管理員：可以用只有管理員能用的 LINE 指令（/別周測試）、拿得到「/設定」的驗證碼；
     # 設定裡沒填「出問題通知誰」時，出問題就通知每一位管理員。要有 line_user_id 才有作用。
     admin: bool = False
+    # 伺服器管理員：執行這台伺服器、維護程式的那個人（擁有者 2026-10-15）。不多給任何權限，
+    # 只是讓機器人知道「有事要找誰」：LINE 指令的臨時網址要關掉之前，通知裡寫的「請聯絡○○」就是他的名字。
+    server_admin: bool = False
 
 
 @dataclass(frozen=True, slots=True)
