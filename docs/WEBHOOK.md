@@ -62,7 +62,8 @@
 webhook:
   hours: 3                    # 開多久自己關；0 = 不自動關
   warn_minutes: 10            # 關掉前幾分鐘預告；0 = 不預告
-  dev_notice: notifier_tb     # 通知伺服器管理員：notifier_tb（Telegram）/ command（執行自己的程式）/ off
+  dev_notice: notifier_tb     # 誰收到通知：notifier_tb（只有你，經 Notifier_TB）/ clawbot（能開 webhook 的人都收到）
+                              #           / command（執行自己的程式）/ off（不通知）
   dev_command: []             # dev_notice: command 時執行的程式，例如 ["C:/tools/notify.exe", "{text}"]
   line_admins_on_open: false  # 開好時，LINE 私訊每位牧區管理員（每人 1 則額度）
   line_admins_on_close: false # 快關／已關時，LINE 私訊每位牧區管理員
@@ -75,6 +76,17 @@ webhook:
 - **伺服器管理員（你）**：開好、延長、快關、已關，都經這台電腦的 Notifier_TB 傳 Telegram。不佔 LINE 額度。
   不用 Telegram 的人把 `dev_notice` 改成 `command`：每次都執行 `dev_command` 一次，`{event}`、`{text}`、`{until}`、`{url}`
   會換成這次的內容，環境變數 `CHURCH_BOT_EVENT_JSON` 是整份事件。
+- **能開這條網址的人**（`dev_notice: clawbot`，2026-10-27）：這條臨時網址是大家共用的，所以**開好、延長、快關、已關**
+  改成經 [ClawBot](../../MyFirstTelegramClawBot) 送給「在它的服務 bot 上被開了『LINE 群組指令』權限的每一個人」，
+  外加擁有者。他們在那邊只開得了 webhook（看狀態、沒開的時候打開，一次最多 6 小時）——延長、關掉、換網址都只有擁有者，
+  所以他們需要知道現在到幾點、什麼時候要關。
+  - 怎麼接上的：讀旁邊 `MyFirstTelegramClawBot/data/gateway.json`（網址＋擁有者的 token，這個專案一個金鑰都不保管），
+    打它的 `POST /v1/service/broadcast` `{"grant": "line_bot"}`。ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；
+    完全不想接就填 `CLAWBOT_DISABLED=1`。
+  - **ClawBot 沒開著就退回 `notifier_tb`**（Notifier_TB 本來就會先存起來、之後補送），所以改成這個不會掉通知。
+  - **後台（church-bot）自己的事不走這條**：臨時網址斷了 nssm 會重開（`restarting`）、時間到卻停不掉服務
+    （`stop_failed`）講的是服務、nssm、cloudflared 的結束代碼，永遠只給伺服器管理員
+    （擁有者 2026-10-27：「他們不會有權限知道其他東西」）。
 - **牧區管理員**：LINE 私訊，兩個開關**預設關**（LINE 額度現在不夠；以後買了額度再開）。
   打開 `line_admins_on_close` 的話，快關時大家會收到：「再 10 分鐘…後台將停止訪問。需要繼續使用的話，請聯絡伺服器管理員（周暘恩）。每週的服事提醒照常會自動發送。」
 - 「請聯絡○○」的名字：同工名單裡勾了「**伺服器管理員**」那一欄的人。只有伺服器管理員（管理者登入）能勾。

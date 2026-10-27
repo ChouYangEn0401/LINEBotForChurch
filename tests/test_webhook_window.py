@@ -33,6 +33,18 @@ def set_webhook(paths, **values) -> None:
     update_church(paths.church, lambda cfg: cfg.webhook.update(values))
 
 
+def write_clawbot(paths, *, token: str, extra: dict | None = None, url: str = "http://127.0.0.1:8765") -> None:
+    """假裝旁邊有一份 ClawBot：它的 data/gateway.json（網址＋ token）。"""
+    from church_bot.core import notify
+
+    folder = paths.church.root.parent / notify.CLAWBOT_DIR_NAME / "data"
+    folder.mkdir(parents=True, exist_ok=True)
+    tokens = {token: {"user_id": 1, "name": "owner"}}
+    tokens.update(extra or {})
+    (folder / "gateway.json").write_text(json.dumps({"url": url, "tokens": tokens}, ensure_ascii=False),
+                                          encoding="utf-8")
+
+
 # --------------------------------------------------------------------------- 設定
 
 
@@ -213,6 +225,82 @@ def test_a_command_gets_the_event_as_arguments_and_json(paths, tmp_path):
     assert got["argv"][:2] == ["opened", "2026-10-15T18:00:00+08:00"] and "x.trycloudflare.com" in got["argv"][2]
     assert got["env"]["event"] == "opened" and got["env"]["url"] == "https://x.trycloudflare.com"
     assert got["env"]["source"] == "church-bot" and got["env"]["hours"] == 3
+
+
+def test_clawbot_tells_everyone_who_may_open_the_window(paths, monkeypatch):
+    """dev_notice: clawbot → 開好／延長／快關／已關送給「能開這條網址的人」＋擁有者，不經 Notifier_TB。"""
+    from church_bot.core import notify
+
+    posted: list[tuple[str, dict]] = []
+    monkeypatch.setattr(notify.ClawBotLink, "_post", lambda self, path, body: posted.append((path, body)) or
+                        {"sent": [111], "failed": [], "owner": True})
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: True)
+    monkeypatch.setattr(notify.Notifier, "send", lambda *a, **k: pytest.fail("有 ClawBot 就不該退回 Notifier_TB"))
+    write_clawbot(paths, token="t-owner")
+    set_webhook(paths, dev_notice="clawbot")
+    window = ww.begin(paths, WebhookSettings(), now=T0)
+    for event in ww.SHARED_EVENTS:
+        ww.announce(paths, event, window, url="https://x.trycloudflare.com", now=T0)
+    assert [p for p, _ in posted] == ["/v1/service/broadcast"] * 4
+    assert {b["grant"] for _p, b in posted} == {"line_bot"} and {b["source"] for _p, b in posted} == {"LINE"}
+    assert "x.trycloudflare.com" in posted[0][1]["text"] and "自動關" in posted[2][1]["text"]
+
+
+def test_the_back_office_s_own_troubles_stay_with_the_server_admin(paths, monkeypatch):
+    """網址斷了、停不掉服務：講的是服務、nssm、cloudflared，只給伺服器管理員（擁有者 2026-10-27）。"""
+    from church_bot.core import notify
+
+    monkeypatch.setattr(notify.ClawBotLink, "_post",
+                        lambda self, path, body: pytest.fail("後台自己的事不該送給有權限的人"))
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: True)
+    sent: list[str] = []
+    monkeypatch.setattr(notify.Notifier, "send", lambda self, text, **kw: sent.append(text) or True)
+    write_clawbot(paths, token="t-owner")
+    set_webhook(paths, dev_notice="clawbot")
+    window = ww.begin(paths, WebhookSettings(), now=T0)
+    for event in ("restarting", "stop_failed"):
+        ww.tell_dev(paths, load_webhook_settings(paths), ww.event_payload(event, f"⚠️ {event}", window))
+    assert len(sent) == 2 and all(e in "".join(sent) for e in ("restarting", "stop_failed"))
+    assert "restarting" not in ww.SHARED_EVENTS and "stop_failed" not in ww.SHARED_EVENTS
+
+
+def test_when_clawbot_is_not_running_the_notice_falls_back_to_notifier_tb(paths, monkeypatch):
+    """Host 沒開就退回舊路——這一條在，改成 clawbot 也不會掉通知。"""
+    from church_bot.core import notify
+
+    monkeypatch.setattr(notify.ClawBotLink, "_post", lambda self, path, body: None)   # 連不上
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: True)
+    sent: list[str] = []
+    monkeypatch.setattr(notify.Notifier, "send", lambda self, text, **kw: sent.append(text) or True)
+    write_clawbot(paths, token="t-owner")
+    set_webhook(paths, dev_notice="clawbot")
+    ww.announce(paths, ww.OPENED, ww.begin(paths, WebhookSettings(), now=T0), now=T0)
+    assert len(sent) == 1 and "開好了" in sent[0]
+
+
+def test_clawbot_is_only_looked_for_where_it_actually_is(paths, monkeypatch):
+    """沒有旁邊那個資料夾、或 .env 關掉了：find_clawbot 回 None，照舊走 Notifier_TB。"""
+    from church_bot.core import notify
+
+    assert notify.find_clawbot(paths) is None            # 還沒寫 gateway.json
+    write_clawbot(paths, token="t-owner")
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: True)
+    link = notify.find_clawbot(paths)
+    assert link is not None and link.url == "http://127.0.0.1:8765"
+    monkeypatch.setenv(notify.CLAWBOT_DISABLE_ENV, "1")
+    assert notify.find_clawbot(paths) is None            # .env／環境變數關掉
+
+
+def test_a_token_that_is_not_the_machine_owner_is_not_used(paths, monkeypatch):
+    """gateway.json 裡可能留著別的、名字也叫 owner 的舊 token：用 /v1/me 問 ClawBot 認哪一個。"""
+    from church_bot.core import notify
+
+    write_clawbot(paths, token="t-stale", extra={"t-owner": {"user_id": 999, "name": "owner"}})
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: self.token == "t-owner")
+    link = notify.find_clawbot(paths)
+    assert link is not None and link.token == "t-owner"
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: False)
+    assert notify.find_clawbot(paths) is None            # 一個都不是擁有者的
 
 
 def test_off_means_nobody_is_told(paths, monkeypatch):

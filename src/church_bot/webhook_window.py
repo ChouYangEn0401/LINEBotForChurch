@@ -20,6 +20,12 @@
 * 開發者（伺服器管理員）：預設經 Notifier_TB 傳 Telegram，不佔 LINE 額度。開源出去別人不一定用 Telegram，
   所以也可以換成「執行一個程式」（``dev_notice: command`` + ``dev_command``），事件內容當參數和環境變數給它，
   或乾脆關掉。
+* **能開這條網址的人**（``dev_notice: clawbot``）：這條臨時網址是大家共用的，所以開好、延長、快關、已關
+  四種事件經 ClawBot 送給「在它的服務 bot 上被開了『LINE 群組指令』權限的每一個人」，外加擁有者
+  （擁有者 2026-10-23：「之後傳遞訊息的也會回傳到這邊，那有權限的人就會收到」）。連不上 ClawBot（Host 沒開）
+  就退回 Notifier_TB，不會掉通知。**後台（church-bot）自己的事不走這條**：``restarting``（網址斷了 nssm 會重開）、
+  ``stop_failed``（時間到卻停不掉服務）講的是服務、nssm、cloudflared 的結束代碼，只給伺服器管理員
+  （擁有者 2026-10-27：「他們不會有權限知道其他東西」）。
 * 牧區管理員：用 LINE 私訊（每人每次 1 則），**預設關**——LINE 額度現在不夠用（擁有者 2026-10-15）。
   通知裡「請聯絡○○」的名字來自同工名單勾了「伺服器管理員」的人。
 """
@@ -52,6 +58,9 @@ COMMAND_TIMEOUT = 30     # dev_command 最多跑多久
 
 OPENED, EXTENDED, CLOSING_SOON, CLOSED = "opened", "extended", "closing_soon", "closed"
 EVENTS = (OPENED, EXTENDED, CLOSING_SOON, CLOSED)
+# dev_notice: clawbot 時，哪些事件可以送給「能開這條網址的人」。只有這四個——別的（restarting、stop_failed）
+# 講的是後台的服務、nssm、cloudflared，只給伺服器管理員（檔頭的「通知誰」）。
+SHARED_EVENTS = EVENTS
 
 REASON_TIME = "時間到"
 
@@ -308,7 +317,11 @@ def run_command(argv: list[str], payload: dict) -> bool:
 
 
 def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: float | None = None) -> bool:
-    """通知開發者。永遠不丟例外。"""
+    """通知該知道的人。永遠不丟例外。
+
+    ``dev_notice: clawbot`` 而且這個事件可以分享（``SHARED_EVENTS``）→ 經 ClawBot 送給「能開這條網址的人」
+    ＋擁有者；連不上 ClawBot 就退回 Notifier_TB（不會掉通知）。其他情況照舊只給伺服器管理員。
+    """
     try:
         if settings.dev_notice == "off":
             return False
@@ -316,6 +329,13 @@ def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: fl
             return run_command(settings.dev_command, payload)
         from church_bot.core import notify
 
+        if settings.dev_notice == "clawbot" and payload.get("event") in SHARED_EVENTS:
+            link = notify.find_clawbot(paths)
+            if link is not None:
+                told = link.tell_grant_holders(payload["text"])
+                if told is not None:          # True＝送出去了；False＝ClawBot 說不行（設定錯了，退回也不會變對）
+                    return told
+            log.info("ClawBot 那邊送不出去（%s），退回 Notifier_TB", payload.get("event"))
         notifier = notify.Notifier(paths)
         return notifier.send(payload["text"]) if wait is None else notifier.send(payload["text"], wait=wait)
     except Exception:  # noqa: BLE001 - 通知失敗不能害臨時網址開不起來／關不掉

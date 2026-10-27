@@ -2,6 +2,12 @@
 
 ## 未發佈
 
+- 新功能：**webhook 的開關通知可以送給「能開它的人」**（`dev_notice: clawbot`，擁有者 2026-10-23／10-27）。
+  這條臨時網址是大家共用的，所以開好、延長、快關、已關經 ClawBot 送給「在它的服務 bot 上被開了『LINE 群組指令』
+  權限的每一個人」＋擁有者（讀旁邊 `MyFirstTelegramClawBot/data/gateway.json` 的網址與 token，這個專案照舊
+  一個金鑰都不保管）。**ClawBot 沒開著就退回 Notifier_TB**，不會掉通知；**後台自己的事**（網址斷了 nssm 會重開、
+  時間到卻停不掉服務）講的是服務與 nssm，**永遠只給伺服器管理員**。預設還是 `notifier_tb`，
+  要用在 `config/church.yaml` 的 `webhook:` 寫 `dev_notice: clawbot`（見 [docs/WEBHOOK.md](docs/WEBHOOK.md)）
 - 變更：小圖示 **Lw** 的選單直接寫「▶ 開 webhook（3 小時後自己關）」「⏹ 關掉 webhook」（以前是「服務：啟動（nssm start）」，擁有者 2026-10-15：找不到啟動 webhook）
 - 變更：`service\install.bat` 註冊完**只啟動後台**，LINE 指令註冊好先停著（要用才開）
 - 文件：[docs/WEBHOOK.md](docs/WEBHOOK.md)——兩個服務各做什麼、新電腦裝了會怎樣、怎麼開關、改完程式要不要重裝、現在這台電腦的狀態
