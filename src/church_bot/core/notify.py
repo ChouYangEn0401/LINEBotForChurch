@@ -1,4 +1,15 @@
-"""把狀態播報交給 Notifier_TB：這台電腦上專門負責「送東西到 Telegram」的那支 bot。
+"""把狀態播報交給別人送：ClawBot（能開 webhook 的人都收到）或 Notifier_TB（只有伺服器管理員）。
+
+**兩條路，差在收件人**（``webhook_window.tell_dev`` 照 ``webhook.dev_notice`` 挑）：
+
+* ``ClawBotLink``（``dev_notice: clawbot``）：打 ClawBot 的本機入口 ``POST /v1/service/broadcast``
+  ``{"grant": "line_bot"}``——送給**在 ClawBot 的服務 bot 上被開了「LINE 群組指令」權限的每一個人**，
+  外加擁有者。webhook 這條臨時網址是大家共用的，誰開的、到幾點、什麼時候要關，他們也要知道
+  （擁有者 2026-10-23：「之後傳遞訊息的也會回傳到這邊，那有權限的人就會收到」）。
+  連不上 ClawBot（Host 沒開）就退回下面那條，所以不會因此掉通知。
+* ``Notifier``（``dev_notice: notifier_tb``，預設）：只給伺服器管理員。後台（church-bot）自己的事
+  ——臨時網址斷了 nssm 會重開、時間到卻停不掉服務——**永遠只走這條**：那幾則講的是服務、nssm、
+  cloudflared 的結束代碼，不是給別人看的。
 
 **這個檔案不會自己連 Telegram，也沒有任何輪詢。** 要講話的時候，往
 ``127.0.0.1`` 的 socket 丟一個封包就結束；平常完全不連網、不開執行緒、不跑迴圈。
@@ -32,6 +43,8 @@ import socket
 import subprocess
 import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from church_bot.config import Paths, read_env_file
@@ -49,6 +62,12 @@ WAKE_WAIT = 30.0  # Notifier 沒開著：幫它開，最多等這麼久讓它的
 STOP_WAIT = 15.0  # 關機、當掉那幾則等短一點：nssm 停服務只給 25 秒，當掉時要等這裡結束才重開
 IDLE_SECONDS = 180  # 幫它開的那一個閒置多久自己關（跟 launcher_ondemand.bat 一樣）
 RUNTIME_KEY = "service_runtime"  # 共用資料庫裡的那一格：後台現在開著沒、上一次是怎麼結束的
+
+CLAWBOT_HOME_ENV = "CLAWBOT_HOME"          # ClawBot 搬家了就在 .env 填這個
+CLAWBOT_DISABLE_ENV = "CLAWBOT_DISABLED"   # 填 1＝不經 ClawBot（照舊只給伺服器管理員）
+CLAWBOT_DIR_NAME = "MyFirstTelegramClawBot"  # 跟本專案並排的那個資料夾
+CLAWBOT_GRANT = "line_bot"                 # ClawBot 服務台授權表上「LINE 群組指令」那一組叫什麼
+CLAWBOT_TIMEOUT = 10.0
 
 
 def _env(paths: Paths, key: str) -> str:
@@ -93,6 +112,94 @@ def find_notifier(paths: Paths) -> NotifierTarget | None:
                             str(config.get("socket_secret") or "").strip(),
                             str(config_file))
     return target if target.ready else None
+
+
+class ClawBotLink:
+    """經 ClawBot 的本機入口，送給「能開這條 webhook 的人」（＋擁有者）。
+
+    ClawBot 從 2026-10-23 起是這台電腦上唯一往 Telegram 送東西的程式（別的程式不自己拿 bot token），
+    所以這裡只打它的 HTTP 入口。**永遠不丟例外**；送不出去回 False，呼叫端自己決定要不要退回舊路。
+    """
+
+    __slots__ = ("url", "token", "source", "_opener")
+
+    def __init__(self, url: str, token: str, source: str = "") -> None:
+        self.url, self.token, self.source = url.rstrip("/"), token, source
+        # 127.0.0.1 不走 proxy：開了 VPN／proxy 軟體時 urllib 預設會把本機的請求也送去 proxy
+        self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+    def __str__(self) -> str:
+        return f"{self.url}（{self.source}）"
+
+    def _post(self, path: str, body: dict) -> dict | None:
+        """回傳 ClawBot 的回覆；連不上回 None（＝可以退回 Notifier_TB）。
+        它收到了但說不行（400／403）回 {"error": …}：那是設定錯了，退回舊路也不會變對，所以照實回。"""
+        request = urllib.request.Request(
+            self.url + path, method="POST", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
+        try:
+            with self._opener.open(request, timeout=CLAWBOT_TIMEOUT) as resp:
+                return json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8") or "{}")
+            except (ValueError, OSError):
+                detail = {}
+            log.warning("ClawBot 的 %s 回 %s：%s", path, exc.code, detail.get("message") or detail)
+            return {"error": detail.get("error") or f"http_{exc.code}", "message": detail.get("message", "")}
+        except (urllib.error.URLError, OSError, ValueError) as exc:
+            log.info("連不上 ClawBot（%s）：%s", self, exc)
+            return None
+
+    def is_owner(self) -> bool:
+        """這個 token 真的是機器擁有者的嗎（gateway.json 裡可能有別的、名字也叫 owner 的舊 token）。"""
+        request = urllib.request.Request(self.url + "/v1/me",
+                                         headers={"Authorization": f"Bearer {self.token}"})
+        try:
+            with self._opener.open(request, timeout=CLAWBOT_TIMEOUT) as resp:
+                return bool(json.loads(resp.read().decode("utf-8") or "{}").get("owner"))
+        except (urllib.error.URLError, OSError, ValueError):
+            return False
+
+    def tell_grant_holders(self, text: str, grant: str = CLAWBOT_GRANT) -> bool | None:
+        """送給開了這一組權限的人（＋擁有者）。True＝送出去了；False＝ClawBot 說不行；
+        None＝連不上（呼叫端退回 Notifier_TB）。"""
+        got = self._post("/v1/service/broadcast", {"grant": grant, "text": text, "source": "LINE"})
+        if got is None:
+            return None
+        if got.get("error"):
+            return False
+        sent, failed = got.get("sent") or [], got.get("failed") or []
+        log.info("經 ClawBot 通知有 %s 權限的人：%d 人收到、%d 人沒送到、擁有者 %s",
+                 grant, len(sent), len(failed), got.get("owner"))
+        return True
+
+
+def find_clawbot(paths: Paths) -> ClawBotLink | None:
+    """讀出 ClawBot 的本機入口（它的 ``data/gateway.json``：網址＋機器擁有者的 token）。
+    被關掉、找不到、沒有擁有者的 token 就回 None。跟 ``find_notifier`` 一樣每次重讀，改完不用重開程式。"""
+    if _env(paths, CLAWBOT_DISABLE_ENV):
+        return None
+    home = _env(paths, CLAWBOT_HOME_ENV)
+    folder = Path(home).expanduser() if home else paths.church.root.parent / CLAWBOT_DIR_NAME
+    store_file = folder / "data" / "gateway.json"
+    try:
+        store = json.loads(store_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log.info("讀不到 ClawBot 的 gateway.json（%s）：%s", store_file, exc)
+        return None
+    if not isinstance(store, dict):
+        return None
+    url = str(store.get("url") or "http://127.0.0.1:8765")
+    tokens = store.get("tokens") if isinstance(store.get("tokens"), dict) else {}
+    # 名字叫 owner 的先試（可能有好幾個，只有一個是現在的機器擁有者），再試其他的；用 /v1/me 問它認誰
+    ordered = sorted(tokens, key=lambda t: 0 if (tokens[t] or {}).get("name") == "owner" else 1)
+    for token in ordered:
+        link = ClawBotLink(url, str(token), str(store_file))
+        if link.is_owner():
+            return link
+    log.info("ClawBot 的 gateway.json 裡沒有機器擁有者的 token（或 Host 沒開）：%s", store_file)
+    return None
 
 
 class Notifier:

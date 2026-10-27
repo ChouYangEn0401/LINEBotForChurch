@@ -230,9 +230,12 @@ class WebhookSettings(_Base):
     warn_minutes: int = Field(default=10, ge=0, le=180)
     # 通知開發者（伺服器管理員）的方式：
     #   notifier_tb = 經這台電腦上的 Notifier_TB 傳到 Telegram（預設；不佔 LINE 額度）
+    #   clawbot     = 經 ClawBot 送給「在它的服務 bot 上被開了 LINE 群組指令權限的每一個人」＋擁有者
+    #                 （這條網址是大家共用的，誰開的、到幾點他們也要知道）。連不上 ClawBot 就退回 notifier_tb；
+    #                 後台自己的事（網址斷了、停不掉服務）永遠只給伺服器管理員，不會送給他們
     #   command     = 執行 dev_command 那個程式，事件內容自己處理（不想用 Telegram 的人用這個）
     #   off         = 不通知
-    dev_notice: Literal["notifier_tb", "command", "off"] = "notifier_tb"
+    dev_notice: Literal["notifier_tb", "clawbot", "command", "off"] = "notifier_tb"
     # dev_notice = command 時執行的程式，一個字一格（不經過命令列解析，所以不怕空白或特殊符號）。
     # 裡面的 {event}、{text}、{until}、{url} 會換成這次的內容；環境變數 CHURCH_BOT_EVENT_JSON 是整份事件。
     # 例：["C:/tools/notify.exe", "--title", "LINE webhook", "{text}"]
