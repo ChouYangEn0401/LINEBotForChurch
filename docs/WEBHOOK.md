@@ -62,7 +62,7 @@
 webhook:
   hours: 3                    # 開多久自己關；0 = 不自動關
   warn_minutes: 10            # 關掉前幾分鐘預告；0 = 不預告
-  dev_notice: notifier_tb     # 誰收到通知：notifier_tb（只有你，經 Notifier_TB）/ clawbot（能開 webhook 的人都收到）
+  dev_notice: notifier_tb     # 誰收到通知：notifier_tb（只有你；先經 ClawBot、再 Notifier_TB）/ clawbot（能開 webhook 的人都收到）
                               #           / command（執行自己的程式）/ off（不通知）
   dev_command: []             # dev_notice: command 時執行的程式，例如 ["C:/tools/notify.exe", "{text}"]
   line_admins_on_open: false  # 開好時，LINE 私訊每位牧區管理員（每人 1 則額度）
@@ -73,7 +73,10 @@ webhook:
 
 ## 通知誰
 
-- **伺服器管理員（你）**：開好、延長、快關、已關，都經這台電腦的 Notifier_TB 傳 Telegram。不佔 LINE 額度。
+- **伺服器管理員（你）**：開好、延長、快關、已關，都傳 Telegram，不佔 LINE 額度。2026-11-02 起先經 ClawBot 的
+  `POST /v1/notify`（只送給擁有者，stream=system，ClawBot 照分流表挑 bot），ClawBot 沒開著才經 Notifier_TB。
+  後台自己的事（`restarting`、`stop_failed`）不管 `dev_notice` 是 `notifier_tb` 還是 `clawbot`，都走這一條、只給你。
+  預設沒改成 `clawbot`：那個會把開關通知也送給別人，要不要給別人是另一個決定。
   不用 Telegram 的人把 `dev_notice` 改成 `command`：每次都執行 `dev_command` 一次，`{event}`、`{text}`、`{until}`、`{url}`
   會換成這次的內容，環境變數 `CHURCH_BOT_EVENT_JSON` 是整份事件。
 - **能開這條網址的人**（`dev_notice: clawbot`，2026-10-27）：這條臨時網址是大家共用的，所以**開好、延長、快關、已關**

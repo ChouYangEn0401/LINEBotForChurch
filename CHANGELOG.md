@@ -2,6 +2,15 @@
 
 ## 未發佈
 
+- 變更：**給伺服器管理員（擁有者）的 Telegram 通知先經 ClawBot**（擁有者 2026-11-02：「全部都改，按照現在的分流架構，
+  決定應該要把訊息塞給誰」）。發送彙總、後台開／關／當掉、`狀態 --telegram`、webhook 斷了／停不掉、`notifier_tb` 的開關通知
+  都打 ClawBot 的 `POST /v1/notify`（`stream=system`；開關機問候 `kind=hello` 不響；乾淨的成功彙總與 `狀態 --telegram` 不響；
+  有失敗、略過或 0 則送出的彙總會響），由 ClawBot 照分流表挑 bot。**ClawBot 找不到、沒開或回錯誤就退回 Notifier_TB**，
+  兩邊都不通照舊存進 `data/notify_outbox.jsonl` 之後補送。`/v1/notify` 只送給擁有者，後台的事別人照樣看不到。
+- 變更：從外面登入的 **Telegram 登入碼**、設定頁的「傳測試訊息」先經 ClawBot（`important`＝一律主機 bot），
+  `.env` 的 `TELEGRAM_BOT_TOKEN` 變成退路（有填才用）；旁邊有 ClawBot 就不用填 token 也能用登入碼。
+  經 ClawBot 傳的登入碼訊息刪不掉（ClawBot 不回訊息編號），碼照樣 90 秒過期、用過就失效。
+- 測試：每個測試各自一個找 ClawBot 的地方（`CLAWBOT_HOME`）——以前共用 tmp 的上一層，寫過 gateway.json 之後別的測試會去敲真的 Host
 - 新功能：**給 ClawBot（Telegram `/line` 面板）呼叫的指令**，契約寫在 [docs/CLI.md](docs/CLI.md)
   （`--json` 最後一行一份 JSON、結束碼 0／1／2、兩個以上牧區要 `--ministry=`、寫入的要 `--by=`；參數看不懂時 `--json` 照樣印 JSON）：
   - `roster show`：上兩週＋下四週的服事表（跟 `/行事曆` 同一個範圍、同一條讀法），每一天的服事、服飾、哪裡被調換過

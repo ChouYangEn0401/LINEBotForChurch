@@ -17,7 +17,9 @@
 
 **通知誰**（``config/church.yaml`` 的 ``webhook:``，見 config.WebhookSettings）：
 
-* 開發者（伺服器管理員）：預設經 Notifier_TB 傳 Telegram，不佔 LINE 額度。開源出去別人不一定用 Telegram，
+* 開發者（伺服器管理員）：預設只給他一個人（``dev_notice: notifier_tb``），傳 Telegram、不佔 LINE 額度——
+  2026-11-02 起先經 ClawBot 的 ``POST /v1/notify``（照 ClawBot 的分流表挑 bot），連不上才退回 Notifier_TB
+  （core/notify.py 的 ``Notifier.send``）。開源出去別人不一定用 Telegram，
   所以也可以換成「執行一個程式」（``dev_notice: command`` + ``dev_command``），事件內容當參數和環境變數給它，
   或乾脆關掉。
 * **能開這條網址的人**（``dev_notice: clawbot``）：這條臨時網址是大家共用的，所以開好、延長、快關、已關
@@ -320,7 +322,8 @@ def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: fl
     """通知該知道的人。永遠不丟例外。
 
     ``dev_notice: clawbot`` 而且這個事件可以分享（``SHARED_EVENTS``）→ 經 ClawBot 送給「能開這條網址的人」
-    ＋擁有者；連不上 ClawBot 就退回 Notifier_TB（不會掉通知）。其他情況照舊只給伺服器管理員。
+    ＋擁有者；連不上 ClawBot 就退回 Notifier_TB（不會掉通知）。其他情況（``notifier_tb``，或後台自己的事）
+    只給伺服器管理員：``Notifier.send`` 先經 ClawBot 的 ``/v1/notify``（stream=system，會響），再退回 Notifier_TB。
     """
     try:
         if settings.dev_notice == "off":
@@ -329,15 +332,18 @@ def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: fl
             return run_command(settings.dev_command, payload)
         from church_bot.core import notify
 
+        clawbot_down = False
         if settings.dev_notice == "clawbot" and payload.get("event") in SHARED_EVENTS:
             link = notify.find_clawbot(paths)
             if link is not None:
                 told = link.tell_grant_holders(payload["text"])
                 if told is not None:          # True＝送出去了；False＝ClawBot 說不行（設定錯了，退回也不會變對）
                     return told
+            clawbot_down = True               # 剛試過、連不上：下面不用再試一次 /v1/notify
             log.info("ClawBot 那邊送不出去（%s），退回 Notifier_TB", payload.get("event"))
         notifier = notify.Notifier(paths)
-        return notifier.send(payload["text"]) if wait is None else notifier.send(payload["text"], wait=wait)
+        kwargs = {"via_clawbot": not clawbot_down, **({} if wait is None else {"wait": wait})}
+        return notifier.send(payload["text"], **kwargs)
     except Exception:  # noqa: BLE001 - 通知失敗不能害臨時網址開不起來／關不掉
         log.exception("通知開發者失敗（%s）", payload.get("event"))
         return False

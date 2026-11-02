@@ -169,7 +169,7 @@
 - **開**：右下角 **Lw** 小圖示「▶ 開 webhook」（服務停著時也按得到）、`3-service-start.bat`、雙擊 `3-open-webhook.bat`，
   Telegram 的 ClawBot `/line_bot_on`，或 `cli.bat webhook on --hours 2`（ClawBot 就是呼叫這個）。已經開著再 `webhook on` 就是延長（從現在起算）
 - **關**：`cli.bat webhook off`、小圖示「服務：停止」；**看**：`cli.bat webhook status`（加 `--json` 印一行 JSON 給程式看）
-- **通知**：開好、快關、已關，預設經 Notifier_TB 傳 Telegram 給伺服器管理員（不佔 LINE 額度）。
+- **通知**：開好、快關、已關，預設傳 Telegram 給伺服器管理員（先經 ClawBot、不行再經 Notifier_TB；不佔 LINE 額度）。
   牧區管理員的 LINE 私訊預設關（每人每次 1 則）；開了的話通知會寫「需要的話請聯絡伺服器管理員（○○）」，
   ○○ 是同工名單裡勾了「**伺服器管理員**」的人（只有伺服器管理員自己能勾）
 - 設定在 `config/church.yaml`（整個教會一份）：
@@ -188,9 +188,27 @@ webhook:
 > 裡面的 `{event}`（opened／extended／closing_soon／closed）、`{text}`、`{until}`、`{url}` 會換成這次的內容，
 > 環境變數 `CHURCH_BOT_EVENT_JSON` 是整份事件。不經過命令列，所以空白、引號都不用跳脫。
 
-### 狀態播報走 Notifier_TB（這個專案不保管 Telegram 金鑰）
+### 狀態播報：先經 ClawBot，不行再經 Notifier_TB（這個專案不保管 Telegram 金鑰）
 
-這台電腦上已經有一支專門「把東西送到 Telegram」的機器人：**`Notifier_TB`**（跟本專案並排的資料夾）。
+**2026-11-02 起先經 ClawBot**（擁有者：「全部都改，按照現在的分流架構，決定應該要把訊息塞給誰」）：
+只給伺服器管理員的每一則——每次發送的彙總、後台開了／關了／當掉、`cli.bat 狀態 --telegram`、webhook 斷了或停不掉、
+從外面登入的一次性登入碼——都打旁邊 ClawBot 的本機入口 `POST /v1/notify`（讀 `../MyFirstTelegramClawBot/data/gateway.json`
+的網址與擁有者 token），由 ClawBot 照它的分流表挑哪一支 bot：
+
+| 這一則 | 標成 | ClawBot 送到（分流表現在的設定） |
+|---|---|---|
+| 每次發送的彙總：乾淨的成功（有送出、沒失敗、沒略過、沒錯誤或提醒） | `system`、`silent` | 緩衝 bot、不響 |
+| 每次發送的彙總：有失敗、有略過、0 則送出 | `system` | 緩衝 bot、會響 |
+| 後台已啟動／正在重新啟動／已關閉 | `system.hello` | 緩衝 bot、不響 |
+| 後台意外停止、重開太多次、webhook 斷了、停不掉服務、webhook 開關（`notifier_tb`） | `system` | 緩衝 bot、會響 |
+| `cli.bat 狀態 --telegram` | `system`、`silent` | 緩衝 bot、不響 |
+| 伺服器管理員登入碼、測試訊息 | `important` | 主機 bot（一律） |
+
+`/v1/notify` 只送給機器擁有者，所以「後台的事別人看不到」（擁有者 2026-10-27）照舊成立。
+**ClawBot 找不到、Host 沒開、或它回錯誤**，就退回下面的 Notifier_TB，不會掉通知；`data/church_bot.log` 每一則寫一行走了哪一條。
+ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_DISABLED=1`（只走 Notifier_TB）。
+
+**退路：Notifier_TB。** 這台電腦上已經有一支專門「把東西送到 Telegram」的機器人：**`Notifier_TB`**（跟本專案並排的資料夾）。
 任何本地程式都可以推進去，`ISDStockProject` 的 live monitor 就是這樣用的，所以這裡照同一套走：
 
 ```
@@ -206,10 +224,11 @@ webhook:
 - Notifier 是「要用才開」的：**沒開著就幫它開**（跟 ClawBot 同一個做法：它自己的 `main.py --until-idle 180`，
   送完沒事做 3 分鐘自己關），所以 Notifier **不用**註冊成服務。後台以服務身分跑時，它是在看不到的桌面上被叫起來的，
   這時你自己雙擊 Notifier 的 `launcher.bat` 會說「已經有一個在跑」——等 3 分鐘它自己關掉再開就好
-- 真的開不起來（例如 Notifier 的 `.venv` 不見了）時，訊息先存進 `data/notify_outbox.jsonl`，
-  下次送得出去（或後台重開）時一起補送，不會不見
+- ClawBot 和 Notifier 都送不出去（例如 Host 沒開、Notifier 的 `.venv` 不見了）時，訊息先存進 `data/notify_outbox.jsonl`，
+  下次送得出去（或後台重開）時一起補送（經 ClawBot 或 Notifier，照原本那一流），不會不見
 
-> `.env` 裡的 `TELEGRAM_BOT_TOKEN` 從此只跟「從外面登入伺服器管理員的一次性驗證碼」有關，跟播報無關。
+> `.env` 裡的 `TELEGRAM_BOT_TOKEN` 只是「從外面登入伺服器管理員的一次性登入碼」的**退路**：登入碼先經 ClawBot 傳，
+> ClawBot 沒開著時才用這個機器人直接傳（沒填就請改用驗證器 App）。跟播報無關。旁邊有 ClawBot 的話可以不填。
 
 ---
 

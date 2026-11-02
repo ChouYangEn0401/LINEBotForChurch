@@ -52,12 +52,15 @@ class FakeMessenger:
 
 
 @pytest.fixture(autouse=True)
-def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # Telegram 那兩個一定要清掉：留著的話測試會真的去打 api.telegram.org，把通知傳到維護者手機上
     for key in ("LINE_CHANNEL_ACCESS_TOKEN", "LINE_CHANNEL_SECRET", "UI_PASSWORD", "CHURCH_BOT_HOME",
                 "TELEGRAM_BOT_TOKEN", "SERVER_MANAGER_TELEGRAM_ID", "CHURCH_BOT_SERVICE",
-                "NOTIFIER_TB_HOME", "NOTIFIER_DISABLED"):
+                "NOTIFIER_TB_HOME", "NOTIFIER_DISABLED", "CLAWBOT_HOME", "CLAWBOT_DISABLED"):
         monkeypatch.delenv(key, raising=False)
+    # ClawBot：每個測試自己一個（空的）地方。預設的「專案隔壁」是 tmp_path 的上一層，整場測試共用——
+    # 某個測試在那裡寫了 gateway.json，之後每一則通知都會去敲這台電腦上真的 ClawBot Host
+    monkeypatch.setenv("CLAWBOT_HOME", str(tmp_path / "_clawbot"))
 
     # 測試絕對不能真的把 Notifier_TB 開起來（會在擁有者的桌面上跳視窗）；要測的地方自己換掉它
     from church_bot.core import notify

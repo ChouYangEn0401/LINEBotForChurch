@@ -390,7 +390,7 @@ def cmd_status(paths: Paths, args: argparse.Namespace) -> int:
     text = status_mod.text(church, statuses, detail=not args.short)
     _print(text)
     if args.telegram:
-        ok = notify.Notifier(paths).send(text)
+        ok = notify.Notifier(paths).send(text, silent=True)  # 自己叫的，不用響
         _print("\n（已傳到 Telegram）" if ok else
                "\n（Telegram 還沒設定好、或這次傳不出去，所以只印在這裡）")
     return 1 if any(not s.ok for s in statuses) else 0
@@ -814,10 +814,10 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
     restarting = bool(getattr(app.state, "restart_requested", False))
     notify.record_stop(church.shared, clean=True, reason="重新啟動" if restarting else "正常關閉")
     if restarting:
-        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…", wait=notify.STOP_WAIT)
+        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…", wait=notify.STOP_WAIT, kind=notify.KIND_HELLO)
     else:
         notifier.send("⏹ 服事提醒機器人：後台已經正常關閉。\n"
-                      "在它重新開起來之前，每週提醒不會自動發送。", wait=notify.STOP_WAIT)
+                      "在它重新開起來之前，每週提醒不會自動發送。", wait=notify.STOP_WAIT, kind=notify.KIND_HELLO)
     return RESTART_CODE if restarting else 0
 
 
@@ -836,7 +836,7 @@ def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, bef
         lines += ["", *status_mod.lines(status_mod.collect(church, check_roster=False), detail=False)]
     except Exception:  # noqa: BLE001 - 通知裡少一段，絕對不能害後台開不起來
         log.exception("組啟動通知的牧區狀況時失敗")
-    notifier.send("\n".join(lines))
+    notifier.send("\n".join(lines), kind=notify.KIND_HELLO)  # 開機問候：ClawBot 的 system.hello（緩衝 bot、不響）
 
 
 # --------------------------------------------------------------------------- main

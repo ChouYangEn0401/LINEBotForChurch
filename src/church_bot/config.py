@@ -229,7 +229,10 @@ class WebhookSettings(_Base):
     # 關掉前幾分鐘先通知一次（0 = 不預告，時間到直接關）
     warn_minutes: int = Field(default=10, ge=0, le=180)
     # 通知開發者（伺服器管理員）的方式：
-    #   notifier_tb = 經這台電腦上的 Notifier_TB 傳到 Telegram（預設；不佔 LINE 額度）
+    #   notifier_tb = 只給伺服器管理員，傳到 Telegram（預設；不佔 LINE 額度）。2026-11-02 起先經 ClawBot 的
+    #                 POST /v1/notify（只送給機器擁有者），找不到或連不上 ClawBot 才經 Notifier_TB——
+    #                 預設值沒改成 clawbot，因為 clawbot 會把開關通知也送給別人；只給擁有者的那幾則
+    #                 不管這裡填哪一個（notifier_tb／clawbot）都先走 ClawBot
     #   clawbot     = 經 ClawBot 送給「在它的服務 bot 上被開了 LINE 群組指令權限的每一個人」＋擁有者
     #                 （這條網址是大家共用的，誰開的、到幾點他們也要知道）。連不上 ClawBot 就退回 notifier_tb；
     #                 後台自己的事（網址斷了、停不掉服務）永遠只給伺服器管理員，不會送給他們

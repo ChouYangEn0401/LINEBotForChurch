@@ -129,18 +129,22 @@ def test_failure_does_not_send_the_report_on_top_of_the_alert(service, fake):
 
 
 def test_telegram_report_is_sent_for_every_scheduled_run(service, fake, monkeypatch):
-    """自動排程那一次一定傳 Telegram，就算全部略過——沒收到就代表後台當時沒在跑。"""
+    """自動排程那一次一定傳 Telegram，就算全部略過——沒收到就代表後台當時沒在跑。
+    乾淨的成功不響（ClawBot 的 silent），全部略過的那一則要響。"""
     sent: list[str] = []
-    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    silent: list[bool] = []
+    monkeypatch.setattr(service.notifier, "send",
+                        lambda text, **kw: sent.append(text) or silent.append(kw.get("silent", False)) or True)
     service.run("schedule")
     assert len(sent) == 1 and sent[0].startswith("✅")
     service.run("schedule")  # 第二次全部略過，還是要報一聲（心跳）
     assert len(sent) == 2 and "略過 2 則" in sent[1]
+    assert silent == [True, False]
 
 
 def test_telegram_report_stays_quiet_when_nothing_happened(service, fake, monkeypatch):
     sent: list[str] = []
-    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    monkeypatch.setattr(service.notifier, "send", lambda text, **kw: sent.append(text) or True)
     service.run("cli")
     service.run("cli")  # 手動再跑一次，全部略過 → 不用吵
     assert len(sent) == 1
@@ -151,7 +155,7 @@ def test_telegram_report_can_be_turned_off(service, fake, monkeypatch):
     settings.notify.telegram = False
     save_settings(service.paths, settings)
     sent: list[str] = []
-    monkeypatch.setattr(service.notifier, "send", lambda text: sent.append(text) or True)
+    monkeypatch.setattr(service.notifier, "send", lambda text, **kw: sent.append(text) or True)
     service.run("schedule")
     assert sent == []
 

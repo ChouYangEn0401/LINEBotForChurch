@@ -1,20 +1,31 @@
-"""把狀態播報交給別人送：ClawBot（能開 webhook 的人都收到）或 Notifier_TB（只有伺服器管理員）。
+"""把狀態播報交給別人送：ClawBot（優先）或 Notifier_TB（退路）。這個專案自己不保管 Telegram 金鑰。
 
-**兩條路，差在收件人**（``webhook_window.tell_dev`` 照 ``webhook.dev_notice`` 挑）：
+**只給擁有者（伺服器管理員）的那幾則**（``Notifier.send``：發送彙總、後台開／關／當掉、``狀態 --telegram``、
+webhook 的 ``restarting``／``stop_failed``）：2026-11-02 起**先打 ClawBot 的 ``POST /v1/notify``**
+（``ClawBotLink.tell_owner``，只有機器擁有者的 token 能打、只送給擁有者），由 ClawBot 照它的分流表挑哪一支 bot
+（擁有者 2026-11-02：「全部都改，按照現在的分流架構，決定應該要把訊息塞給誰」）。每一則標 ``stream``／``kind``：
+都是 ``system``（緩衝 bot、會響）；開機／關機問候 ``system.hello``（不響）；乾淨的發送彙總、``狀態 --telegram``
+帶 ``silent``；伺服器管理員登入碼 ``important``（一律主機 bot，見 login_codes.py）。ClawBot 找不到、連不上、
+或它回錯誤，**退回 Notifier_TB**（下面那條），所以不會因此掉通知；log 一行寫這一則走了哪一條。
+擁有者 2026-10-27 說後台的事只給擁有者——「別人不知道後台的事」：``/v1/notify`` 也只送給擁有者，
+那個用意不變，只是換成 ClawBot 的 bot 送。
+
+**webhook 的開關通知，兩條路差在收件人**（``webhook_window.tell_dev`` 照 ``webhook.dev_notice`` 挑）：
 
 * ``ClawBotLink``（``dev_notice: clawbot``）：打 ClawBot 的本機入口 ``POST /v1/service/broadcast``
   ``{"grant": "line_bot"}``——送給**在 ClawBot 的服務 bot 上被開了「LINE 群組指令」權限的每一個人**，
   外加擁有者。webhook 這條臨時網址是大家共用的，誰開的、到幾點、什麼時候要關，他們也要知道
   （擁有者 2026-10-23：「之後傳遞訊息的也會回傳到這邊，那有權限的人就會收到」）。
   連不上 ClawBot（Host 沒開）就退回下面那條，所以不會因此掉通知。
-* ``Notifier``（``dev_notice: notifier_tb``，預設）：只給伺服器管理員。後台（church-bot）自己的事
-  ——臨時網址斷了 nssm 會重開、時間到卻停不掉服務——**永遠只走這條**：那幾則講的是服務、nssm、
-  cloudflared 的結束代碼，不是給別人看的。
+* ``Notifier``（``dev_notice: notifier_tb``，預設）：只給伺服器管理員（2026-11-02 起也是先經 ClawBot 的
+  ``/v1/notify``，再退回 Notifier_TB）。後台（church-bot）自己的事——臨時網址斷了 nssm 會重開、時間到卻停不掉
+  服務——**永遠只給擁有者**（不管 dev_notice 是哪一個）：那幾則講的是服務、nssm、cloudflared 的結束代碼，
+  不是給別人看的。
 
-**這個檔案不會自己連 Telegram，也沒有任何輪詢。** 要講話的時候，往
-``127.0.0.1`` 的 socket 丟一個封包就結束；平常完全不連網、不開執行緒、不跑迴圈。
+**這個檔案不會自己連 Telegram，也沒有任何輪詢。** 要講話的時候，打一次 ``127.0.0.1`` 的 ClawBot、
+或往 ``127.0.0.1`` 的 socket 丟一個封包就結束；平常完全不連網、不開執行緒、不跑迴圈。
 
-為什麼走 Notifier_TB（``C:\\Users\\user\\Documents\\Notifier_TB``）而不是自己打 api.telegram.org：
+為什麼（退路）走 Notifier_TB（``C:\\Users\\user\\Documents\\Notifier_TB``）而不是自己打 api.telegram.org：
 這台電腦已經有一支在做這件事了，任何本地程式都可以推進去——``ISDStockProject`` 的 live monitor
 （``post_event_socket``）、Notifier 自己的 ``test_socket.py`` 用的都是同一個封包格式::
 
@@ -68,6 +79,13 @@ CLAWBOT_DISABLE_ENV = "CLAWBOT_DISABLED"   # 填 1＝不經 ClawBot（照舊只�
 CLAWBOT_DIR_NAME = "MyFirstTelegramClawBot"  # 跟本專案並排的那個資料夾
 CLAWBOT_GRANT = "line_bot"                 # ClawBot 服務台授權表上「LINE 群組指令」那一組叫什麼
 CLAWBOT_TIMEOUT = 10.0
+CLAWBOT_NOTIFY_TIMEOUT = 5.0               # 給擁有者的那一則：短一點，Host 卡住時還來得及退回 Notifier_TB
+CLAWBOT_SOURCE = "LINE"                    # ClawBot 會把它寫在開頭「［LINE］…」
+CLAWBOT_TEXT_LIMIT = 4000                  # /v1/notify 只收這麼長的純文字
+
+# ClawBot 分流表（它的 src/clawbot/defaults/stream_routes.json）的流：這個專案只用 system
+STREAM_SYSTEM = "system"
+KIND_HELLO = "hello"                       # system.hello：開機／關機問候，緩衝 bot、不響
 
 
 def _env(paths: Paths, key: str) -> str:
@@ -121,10 +139,10 @@ class ClawBotLink:
     所以這裡只打它的 HTTP 入口。**永遠不丟例外**；送不出去回 False，呼叫端自己決定要不要退回舊路。
     """
 
-    __slots__ = ("url", "token", "source", "_opener")
+    __slots__ = ("url", "token", "source", "timeout", "_opener")
 
-    def __init__(self, url: str, token: str, source: str = "") -> None:
-        self.url, self.token, self.source = url.rstrip("/"), token, source
+    def __init__(self, url: str, token: str, source: str = "", timeout: float = CLAWBOT_TIMEOUT) -> None:
+        self.url, self.token, self.source, self.timeout = url.rstrip("/"), token, source, timeout
         # 127.0.0.1 不走 proxy：開了 VPN／proxy 軟體時 urllib 預設會把本機的請求也送去 proxy
         self._opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -138,7 +156,7 @@ class ClawBotLink:
             self.url + path, method="POST", data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
             headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"})
         try:
-            with self._opener.open(request, timeout=CLAWBOT_TIMEOUT) as resp:
+            with self._opener.open(request, timeout=self.timeout) as resp:
                 return json.loads(resp.read().decode("utf-8") or "{}")
         except urllib.error.HTTPError as exc:
             try:
@@ -156,7 +174,7 @@ class ClawBotLink:
         request = urllib.request.Request(self.url + "/v1/me",
                                          headers={"Authorization": f"Bearer {self.token}"})
         try:
-            with self._opener.open(request, timeout=CLAWBOT_TIMEOUT) as resp:
+            with self._opener.open(request, timeout=self.timeout) as resp:
                 return bool(json.loads(resp.read().decode("utf-8") or "{}").get("owner"))
         except (urllib.error.URLError, OSError, ValueError):
             return False
@@ -174,15 +192,46 @@ class ClawBotLink:
                  grant, len(sent), len(failed), got.get("owner"))
         return True
 
+    def tell_owner(self, text: str, *, stream: str = STREAM_SYSTEM, kind: str = "", important: bool = False,
+                   silent: bool = False) -> bool | None:
+        """``POST /v1/notify``：只送給機器擁有者，ClawBot 照它的分流表（stream＋kind；important＝主機）挑哪一支 bot。
+        True＝送出去了（主機還沒按 Start、ClawBot 先收著也算）；False＝ClawBot 說不行或沒送成；None＝連不上。
+        內容是純文字、最多 4000 字（多的截掉）。"""
+        if len(text) > CLAWBOT_TEXT_LIMIT:
+            text = text[:CLAWBOT_TEXT_LIMIT - 1] + "…"
+        body = {"text": text, "stream": stream, "kind": kind, "important": important, "silent": silent,
+                "source": CLAWBOT_SOURCE}
+        got = self._post("/v1/notify", body)
+        if got is None:
+            return None
+        if got.get("error") or not got.get("ok"):
+            return False
+        log.info("經 ClawBot 送給擁有者（%s → %s bot%s）", f"{stream}.{kind}" if kind else stream,
+                 got.get("bot", "?"), "；主機還沒按 Start，ClawBot 先收著" if got.get("held") else "")
+        return True
 
-def find_clawbot(paths: Paths) -> ClawBotLink | None:
-    """讀出 ClawBot 的本機入口（它的 ``data/gateway.json``：網址＋機器擁有者的 token）。
-    被關掉、找不到、沒有擁有者的 token 就回 None。跟 ``find_notifier`` 一樣每次重讀，改完不用重開程式。"""
+
+def _clawbot_store(paths: Paths) -> Path | None:
+    """ClawBot 的 ``data/gateway.json`` 在哪；被 ``CLAWBOT_DISABLED`` 關掉就回 None。不讀檔、不連線。"""
     if _env(paths, CLAWBOT_DISABLE_ENV):
         return None
     home = _env(paths, CLAWBOT_HOME_ENV)
     folder = Path(home).expanduser() if home else paths.church.root.parent / CLAWBOT_DIR_NAME
-    store_file = folder / "data" / "gateway.json"
+    return folder / "data" / "gateway.json"
+
+
+def clawbot_configured(paths: Paths) -> bool:
+    """旁邊有沒有 ClawBot（有它的 gateway.json）。只看檔案在不在、不連線——系統檢查那一頁、登入碼的開關用。"""
+    store_file = _clawbot_store(paths)
+    return store_file is not None and store_file.is_file()
+
+
+def find_clawbot(paths: Paths, *, timeout: float = CLAWBOT_TIMEOUT) -> ClawBotLink | None:
+    """讀出 ClawBot 的本機入口（它的 ``data/gateway.json``：網址＋機器擁有者的 token）。
+    被關掉、找不到、沒有擁有者的 token 就回 None。跟 ``find_notifier`` 一樣每次重讀，改完不用重開程式。"""
+    store_file = _clawbot_store(paths)
+    if store_file is None:
+        return None
     try:
         store = json.loads(store_file.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -195,7 +244,7 @@ def find_clawbot(paths: Paths) -> ClawBotLink | None:
     # 名字叫 owner 的先試（可能有好幾個，只有一個是現在的機器擁有者），再試其他的；用 /v1/me 問它認誰
     ordered = sorted(tokens, key=lambda t: 0 if (tokens[t] or {}).get("name") == "owner" else 1)
     for token in ordered:
-        link = ClawBotLink(url, str(token), str(store_file))
+        link = ClawBotLink(url, str(token), str(store_file), timeout=timeout)
         if link.is_owner():
             return link
     log.info("ClawBot 的 gateway.json 裡沒有機器擁有者的 token（或 Host 沒開）：%s", store_file)
@@ -203,7 +252,8 @@ def find_clawbot(paths: Paths) -> ClawBotLink | None:
 
 
 class Notifier:
-    """伺服器管理員的狀態播報。沒接上 Notifier_TB 就安靜地不做事，呼叫的人不用先檢查。"""
+    """伺服器管理員（＝機器擁有者）的狀態播報：先經 ClawBot 的 ``/v1/notify``，不行再經 Notifier_TB。
+    兩個都沒接上就安靜地不做事，呼叫的人不用先檢查。"""
 
     def __init__(self, paths: Paths) -> None:
         self.paths = paths.church
@@ -219,16 +269,18 @@ class Notifier:
 
     @property
     def enabled(self) -> bool:
-        return self.target is not None
+        return clawbot_configured(self.paths) or self.target is not None
 
     def describe(self) -> str:
-        """給系統檢查那一頁看的一句話。"""
-        target = self.target
-        if target is None:
-            return "還沒接上 Notifier_TB"
+        """給系統檢查那一頁看的一句話（不連線：ClawBot 只看它的 gateway.json 在不在）。"""
+        target, clawbot = self.target, clawbot_configured(self.paths)
+        if target is None and not clawbot:
+            return "還沒接上 ClawBot 或 Notifier_TB"
+        ways = (["先經 ClawBot"] if clawbot else []) + (
+            [f"{'不行再' if clawbot else ''}經由 Notifier_TB {target.host}:{target.port}"] if target else [])
         waiting = self.pending()
-        extra = f"；有 {waiting} 則還沒送出去（Notifier 沒開著時先存起來）" if waiting else ""
-        return f"經由 Notifier_TB {target.host}:{target.port} 送到 Telegram{extra}"
+        extra = f"；有 {waiting} 則還沒送出去（兩邊都沒開著時先存起來）" if waiting else ""
+        return f"{'，'.join(ways)}送到 Telegram{extra}"
 
     def pending(self) -> int:
         try:
@@ -238,30 +290,54 @@ class Notifier:
 
     # ------------------------------------------------------------------ 送
 
-    def send(self, text: str, *, wait: float = WAKE_WAIT) -> bool:
+    def send(self, text: str, *, wait: float = WAKE_WAIT, stream: str = STREAM_SYSTEM, kind: str = "",
+             silent: bool = False, important: bool = False, via_clawbot: bool = True) -> bool:
         """送一則給伺服器管理員。永遠不丟例外；回傳有沒有真的送出去。
 
+        先經 ClawBot（``/v1/notify``；``stream``／``kind``／``silent``／``important`` 交給它的分流表）；
+        ClawBot 找不到、連不上、回錯誤 → 退回 Notifier_TB。``via_clawbot=False``＝呼叫的人剛試過 ClawBot、
+        確定連不上，直接走 Notifier_TB。
         Notifier 沒開著 → 幫它開（要用才開），最多等 ``wait`` 秒讓它起來再送。
         還是送不出去也不是錯誤，會先存進 outbox，之後補送。
         """
+        link = find_clawbot(self.paths, timeout=CLAWBOT_NOTIFY_TIMEOUT) if via_clawbot else None
         target = self.target
-        if target is None:
+        if link is None and target is None:
+            log.info("通知沒送：ClawBot、Notifier_TB 都沒接上")
             return False
+        opts = {"stream": stream, "kind": kind, "silent": silent, "important": important}
         with self._lock:
-            delivered = self._post_waking(target, text, wait)
-            if delivered:
-                self._flush(target)  # 既然通了，順手把積欠的補送掉
+            way = self._deliver(link, target, text, opts, wait)
+            if way:
+                log.info("通知給擁有者：經 %s 送出", way)
+                self._flush(link, target)  # 既然通了，順手把積欠的補送掉
             else:
-                self._spool(text)
-            return delivered
+                log.info("通知給擁有者：ClawBot、Notifier_TB 都送不出去，先存起來之後補送")
+                self._spool(text, opts)
+            return bool(way)
 
     def flush(self, *, wait: float = WAKE_WAIT) -> int:
         """把積欠的補送出去，回傳補送了幾則。後台啟動時呼叫一次。"""
+        if not self._read_spool():
+            return 0  # 沒有積欠的就不用去找 ClawBot、Notifier
+        link = find_clawbot(self.paths, timeout=CLAWBOT_NOTIFY_TIMEOUT)
         target = self.target
-        if target is None:
+        if link is None and target is None:
             return 0
         with self._lock:
-            return self._flush(target, wait)
+            return self._flush(link, target, wait)
+
+    def _deliver(self, link: ClawBotLink | None, target: NotifierTarget | None, text: str, opts: dict,
+                 wait: float) -> str:
+        """送一則，回傳走了哪一條（"ClawBot"／"Notifier_TB"）；都不通回空字串。"""
+        if link is not None:
+            if link.tell_owner(text, **opts):
+                return "ClawBot"
+            if target is not None:
+                log.info("ClawBot 沒送成，退回 Notifier_TB")
+        if target is not None and self._post_waking(target, text, wait):
+            return "Notifier_TB"
+        return ""
 
     def _post_waking(self, target: NotifierTarget, text: str, wait: float) -> bool:
         """送；Notifier 沒開著就開它，等它的 socket 起來再送。
@@ -298,8 +374,8 @@ class Notifier:
 
     # ------------------------------------------------------------------ 積欠的
 
-    def _spool(self, text: str) -> None:
-        entry = json.dumps({"at": _now_text(), "text": text}, ensure_ascii=False)
+    def _spool(self, text: str, opts: dict | None = None) -> None:
+        entry = json.dumps({"at": _now_text(), "text": text, **(opts or {})}, ensure_ascii=False)
         try:
             self.outbox.parent.mkdir(parents=True, exist_ok=True)
             lines = self._read_spool()
@@ -315,7 +391,7 @@ class Notifier:
         except OSError:
             return []
 
-    def _flush(self, target: NotifierTarget, wait: float = 0) -> int:
+    def _flush(self, link: ClawBotLink | None, target: NotifierTarget | None, wait: float = 0) -> int:
         lines = self._read_spool()
         if not lines:
             return 0
@@ -327,7 +403,9 @@ class Notifier:
                 sent += 1  # 壞掉的那一行直接當作處理完，不要卡住後面的
                 continue
             text = f"（補送・{entry.get('at', '')}）\n{entry.get('text', '')}"
-            if not self._post_waking(target, text, wait):
+            opts = {"stream": str(entry.get("stream") or STREAM_SYSTEM), "kind": str(entry.get("kind") or ""),
+                    "silent": bool(entry.get("silent")), "important": bool(entry.get("important"))}
+            if not self._deliver(link, target, text, opts, wait):
                 break  # 又不通了，剩下的留著下次再說
             wait = 0  # 只有第一則需要等 Notifier 起來
             sent += 1
