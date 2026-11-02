@@ -328,14 +328,15 @@ class BotService:
         """發完之後的彙報。兩條路，互不影響，哪一條壞了都不准讓這一次的發送變成失敗。
 
         * Telegram（免費）：傳給伺服器管理員。自動排程那一次**一定**傳，就算全部略過也報一聲
-          ——沒收到就代表後台當時沒在跑，這正是要抓的事。
+          ——沒收到就代表後台當時沒在跑，這正是要抓的事。先經 ClawBot（stream=system），不行再經 Notifier_TB；
+          乾淨的成功（有送出、沒失敗、沒略過、沒錯誤或提醒事項）不響，其他的會響（``_telegram_silent``）。
         * LINE（要算則數）：成功送出而且沒事要處理時，把同一份彙總傳給**管理員**（就是「出問題通知誰」
           那一批人，不另外設第二組名單）。有錯誤或提醒事項時不傳，因為 ``_alert_admin`` 已經通知過
           同一批人了，不要為了同一件事扣兩則。
         """
         summary = build_summary(report, self.name)
         if settings.notify.telegram and self._telegram_worth_saying(report):
-            self.notifier.send(summary)
+            self.notifier.send(summary, silent=self._telegram_silent(report))
 
         if not settings.notify.report_on_success or not report.count_sent:
             return
@@ -362,12 +363,18 @@ class BotService:
         if settings.notify.telegram:
             where.append(f"Telegram 傳給伺服器管理員，免費（{self.notifier.describe()}）"
                          if self.notifier.enabled else
-                         "Telegram：開著，但找不到 Notifier_TB，所以傳不出去")
+                         "Telegram：開著，但找不到 ClawBot 或 Notifier_TB，所以傳不出去")
         if not where:
             return CheckItem("發完之後的彙報", None, "都關著：成功發送後不另外回報")
         ok = not any("還沒" in w for w in where)
         return CheckItem("發完之後的彙報", ok or None, "；".join(where),
                          "" if ok else "到「設定 → 發完之後的彙報」調整，或把用不到的那一項關掉。")
+
+    @staticmethod
+    def _telegram_silent(report: RunReport) -> bool:
+        """乾淨的成功不用響：有送出、沒有失敗也沒有略過、沒有錯誤或提醒事項。0 則送出、有失敗、有略過都要響。"""
+        return bool(report.count_sent and not report.count_failed and not report.count_skipped
+                    and not report.has_errors and not report.has_warnings)
 
     @staticmethod
     def _telegram_worth_saying(report: RunReport) -> bool:
