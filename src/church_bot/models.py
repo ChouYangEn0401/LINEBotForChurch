@@ -57,6 +57,17 @@ class ServiceDay:
     # 「照原樣顯示的欄位」（設定 → 服事表來源）：(欄位名, 內容)，例如 ("服飾", "深色西裝＋領帶")。
     # 刻意不放進 assignments：這些格子寫的是衣服不是人，不該被拆成名字、也不該去對同工名單。
     texts: tuple[tuple[str, str], ...] = ()
+    # 被「人員調換」（core/overrides.py）改過的地方：服事項目或欄位的名字；"*" = 整天對調過。
+    # 服事表（Google Sheet）本身沒有這個資訊，是疊上覆蓋層之後才有的；訊息會在這一天標「（已調整）」一次。
+    adjusted: tuple[str, ...] = ()
+
+    @property
+    def is_adjusted(self) -> bool:
+        return bool(self.adjusted)
+
+    def adjusted_on(self, key: str) -> bool:
+        """這一項服事（或這一欄）是不是被調換過。"""
+        return "*" in self.adjusted or key in self.adjusted
 
     def all_names(self) -> list[str]:
         seen: dict[str, None] = {}

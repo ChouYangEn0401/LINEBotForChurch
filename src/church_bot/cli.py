@@ -806,8 +806,23 @@ def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, bef
 # --------------------------------------------------------------------------- main
 
 
+class BadArguments(Exception):
+    """參數看不懂（argparse 本來會直接結束程式）。``--json`` 時要照樣印一行 JSON，呼叫的程式才知道發生什麼事。"""
+
+    def __init__(self, message: str, usage: str) -> None:
+        super().__init__(message)
+        self.message, self.usage = message, usage
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message: str):  # noqa: ANN201 - 跟 argparse 一樣不回來
+        raise BadArguments(message, self.format_usage())
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="church-bot", description="教會服事表 LINE 自動提醒機器人")
+    from church_bot import cli_api
+
+    parser = _Parser(prog="church-bot", description="教會服事表 LINE 自動提醒機器人")
     parser.add_argument("-v", "--verbose", action="store_true", help="顯示更詳細的紀錄")
     parser.add_argument("--version", action="version", version=f"church-bot {__version__}")
     sub = parser.add_subparsers(dest="command", metavar="指令")
@@ -866,6 +881,7 @@ def build_parser() -> argparse.ArgumentParser:
     window.add_argument("--wait", type=float, default=0, help="on：最多等幾秒，等到臨時網址建好才回來（預設不等）")
     window.add_argument("--by", default="", help="誰要開／關的（寫進通知，例如 telegram）")
     window.add_argument("--json", action="store_true", help="印一行 JSON（給 Telegram 機器人之類的程式看）")
+    cli_api.add_parsers(sub)  # swap、roster、remind：給 ClawBot 呼叫的（見 docs/CLI.md）
     return parser
 
 
@@ -874,11 +890,28 @@ COMMANDS = {"init": cmd_init, "web": cmd_web, "check": cmd_check, "preview": cmd
             "tunnel": cmd_tunnel, "webhook": cmd_webhook, "狀態": cmd_status, "status": cmd_status}
 
 
+def _api_commands() -> dict:
+    from church_bot import cli_api
+
+    return cli_api.COMMANDS
+
+
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    from church_bot import cli_api
+
+    argv = sys.argv[1:] if argv is None else list(argv)
+    parser = build_parser()
+    try:
+        args = parser.parse_args(argv)
+    except BadArguments as exc:
+        sys.stderr.write(exc.usage)
+        sys.stderr.write(f"church-bot: error: {exc.message}\n")
+        if "--json" in argv:
+            cli_api.emit_json({"ok": False, "message": f"參數看不懂：{exc.message}", "hint": "見 docs/CLI.md"})
+        return 2
     paths = Paths.discover()
     setup_logging(paths, verbose=args.verbose)
-    command = COMMANDS.get(args.command or "web")
+    command = COMMANDS.get(args.command or "web") or _api_commands().get(args.command)
     try:
         with versions.source("指令列"):
             return command(paths, args)  # type: ignore[misc]

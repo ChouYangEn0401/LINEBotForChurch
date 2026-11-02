@@ -17,7 +17,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from church_bot.config import MessageSettings, Paths, Settings, load_settings
-from church_bot.core import calendar
+from church_bot.core import calendar, overrides
 from church_bot.core.accounts import build_accounts
 from church_bot.core.dates import format_date
 from church_bot.core.directory import Directory, validate_teams
@@ -190,6 +190,16 @@ class BotService:
         return dt.datetime.now(ZoneInfo(settings.schedule.timezone))
 
     def fetch_roster(self, settings: Settings, today: dt.date, *, use_cache: bool = False) -> Roster:
+        """讀服事表，**疊上人員調換**（core/overrides.py）。所有會用到服事表的地方都經過這裡：
+        每週推播、/提醒、/行事曆、/點名、管理網頁的預覽、指令列的 preview／send／roster。
+
+        快取的是 Sheet 讀回來的原始內容；調換每次都重新疊（讀一個小 JSON），
+        所以別的程式（cli.bat swap）剛加的調換，下一次預覽馬上就看得到，不用等快取過期。
+        """
+        return overrides.apply(self.paths, self.fetch_raw_roster(settings, today, use_cache=use_cache))
+
+    def fetch_raw_roster(self, settings: Settings, today: dt.date, *, use_cache: bool = False) -> Roster:
+        """Sheet 讀回來、parser 解析完的原始服事表（**沒有**疊人員調換）。平常用 fetch_roster。"""
         key = settings.source.model_dump_json() + today.isoformat()
         if use_cache:
             with self._cache_lock:

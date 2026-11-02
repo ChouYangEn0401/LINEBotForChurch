@@ -8,7 +8,8 @@
   先補一筆「直接改檔案」，所以那次修改一樣看得到、也能還原。
 * 刻意**不記是誰改的**（擁有者決定），只記來源：管理網頁、LINE 指令、機器人自己、指令列、還原。
 
-所有寫檔都走 files.write_text，那裡會呼叫 ``record``；只記 config/ 底下的設定和三張表、牧區清單。
+所有寫檔都走 files.write_text，那裡會呼叫 ``record``；只記 config/ 底下的設定和三張表、牧區清單，
+以及每個牧區的人員調換（data/ministries/<id>/overrides.json，見 core/overrides.py）。
 資料放在整個教會共用的資料庫（data/church_bot.db），移除牧區之後紀錄也還在。
 """
 
@@ -34,7 +35,9 @@ import yaml
 log = logging.getLogger(__name__)
 
 TRACKED = {"settings.yaml": "設定", "targets.csv": "LINE 群組", "members.csv": "同工名單", "teams.csv": "小團",
-           "church.yaml": "牧區清單"}
+           "church.yaml": "牧區清單", "overrides.json": "人員調換"}
+# config/ 以外也要記的：人員調換（core/overrides.py）放在 data/ministries/<id>/，因為它是「疊在服事表上的資料」不是設定
+DATA_TRACKED = {"overrides.json"}
 SECTION_ZH = {"source": "服事表來源", "schedule": "什麼時候發", "message": "訊息", "behavior": "發送行為",
               "chat": "LINE 聊天室指令", "line": "出問題通知誰", "messenger": "發送方式", "web": "網站",
               "ministries": "牧區"}
@@ -139,7 +142,9 @@ class VersionStore:
         except ValueError:
             return None
         parts = rel.parts
-        if not parts or parts[0] != "config" or rel.name not in TRACKED:
+        if len(parts) == 4 and parts[0] == "data" and parts[1] == "ministries" and rel.name in DATA_TRACKED:
+            return parts[2], rel.as_posix()
+        if not parts or parts[0] != "config" or rel.name not in TRACKED or rel.name in DATA_TRACKED:
             return None
         if len(parts) == 4 and parts[1] == "ministries":
             return parts[2], rel.as_posix()
@@ -228,6 +233,10 @@ def _mask_line(line: str) -> str:
 
 def summarize(name: str, before: bytes | None, after: bytes) -> str:
     try:
+        if name == "overrides.json":
+            from church_bot.core.overrides import describe_change
+
+            return describe_change(before, after)
         if before is None:
             return "建立"
         if name.endswith(".csv"):

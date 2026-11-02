@@ -39,6 +39,8 @@ from church_bot.errors import ConfigError
 from church_bot.models import Assignment, Member, OutgoingMessage, Person, ServiceDay, Target, Team
 
 LINE_TEXT_LIMIT = 5000
+# 這一天有人員調換（core/overrides.py）：日期後面標一次就好，不要每個名字都標
+ADJUSTED_MARK = "（已調整）"
 MAX_MENTIONS = 20  # LINE 上限更高，但一則提醒 @ 太多人反而是騷擾
 _TRUNCATED = "\n…（訊息太長，已截斷）"
 
@@ -78,6 +80,13 @@ def _tidy(text: str) -> str:
     if len(tidy) > LINE_TEXT_LIMIT:
         tidy = tidy[: LINE_TEXT_LIMIT - len(_TRUNCATED)] + _TRUNCATED
     return tidy
+
+
+def _mark_adjusted(day: ServiceDay, text: str) -> str:
+    """有人員調換的那一天，訊息裡一定看得到「（已調整）」：模板沒用到日期的話，補在最後一行。"""
+    if not day.is_adjusted or ADJUSTED_MARK in text:
+        return text
+    return _tidy(f"{text}\n\n🔁 {ADJUSTED_MARK}這一天的服事有人員調換，以這則為準")
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +212,7 @@ class Renderer:
             "title": (target.title if target and target.title else self.cfg.title),
             "footer": (target.footer if target and target.footer else self.cfg.footer),
             "date": day.date,
-            "date_text": format_date(day.date, self.cfg.date_format),
+            "date_text": format_date(day.date, self.cfg.date_format) + (ADJUSTED_MARK if day.is_adjusted else ""),
             "weekday": weekday_zh(day.date),
             "label": day.label,
             "note": day.note,
@@ -227,11 +236,11 @@ class Renderer:
                       "群組名稱": context["target_name"]}
             rows = [(a["role"], a["names"]) for a in context["assignments"]]
             source = target.template if owner else self.cfg.template
-            return _tidy(message_template.fill(source, values, rows))
+            return _mark_adjusted(day, _tidy(message_template.fill(source, values, rows)))
         where = f"「{owner}」自己的訊息模板" if owner else "訊息模板"
         fix = f"到「LINE 群組」頁編輯「{owner}」，或把它的模板清空改用牧區的設定。" if owner else "到「設定」頁按「恢復預設模板」。"
         try:
-            return _tidy(compiled.render(**context))
+            return _mark_adjusted(day, _tidy(compiled.render(**context)))
         except jinja2.UndefinedError as exc:
             raise ConfigError(
                 f"{where}用了不存在的變數：{exc.message}",
