@@ -81,13 +81,14 @@ class Entry:
     value: str
     past: bool
     this_week: bool
+    adjusted: bool = False  # 這一欄被人員調換改過（core/overrides.py）
 
     @property
     def when(self) -> str:
         return f"{self.date.month}/{self.date.day}（{weekday_zh(self.date)}）"
 
     def meta(self) -> str:
-        parts = [self.when, self.label, "本週" if self.this_week else ""]
+        parts = [self.when, self.label, "本週" if self.this_week else "", "已調整" if self.adjusted else ""]
         return "ㆍ".join(p for p in parts if p)
 
 
@@ -98,7 +99,7 @@ def collect(days: Iterable[ServiceDay], column: str, today: dt.date,
     this_week = week_start(today)
     entries = [
         Entry(date=day.date, label=day.label, value=value, past=day.date < today,
-              this_week=this_week <= day.date < this_week + dt.timedelta(days=7))
+              this_week=this_week <= day.date < this_week + dt.timedelta(days=7), adjusted=day.adjusted_on(column))
         for day in sorted(days, key=lambda d: d.date)
         if start <= day.date <= end and (value := day.text_of(column))
     ]
