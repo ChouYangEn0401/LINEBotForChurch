@@ -8,6 +8,7 @@
  Sheet/CSV  └──────────────────────────────────┘
                  │
                  ▼ core/parser.py      自動判斷 wide / long / matrix → Roster（日期 × 服事 × 人）
+                 ▼ core/overrides.py   疊上人員調換（BotService.fetch_roster，所有讀服事表的地方都經過這裡）
                  ▼ core/planner.py     挑出這次的聚會、依 LINE 群組產生訊息、找出所有問題（Issue）
                  │    ├ core/directory.py  名字 → 同工名單（別名、全形半形、括號註記、猜測）
                  │    └ core/renderer.py   Jinja2 模板 → 純文字 + LINE textV2（@ 人）
@@ -39,6 +40,7 @@
 | `core/parser.py` | 表格 → Roster，三種排法自動判斷 |
 | `core/directory.py` | 名字對照（一人多名；服事表寫小團名稱就展開成團員） |
 | `core/renderer.py` | 訊息排版（Jinja2、textV2 mention） |
+| `core/overrides.py` | 人員調換（覆蓋層）：`data/ministries/<id>/overrides.json`，疊在 parser 之後；Sheet 改成一樣了自動退掉（見 [CLI.md](CLI.md)） |
 | `core/planner.py` | 決定發給誰、發什麼；產生所有 Issue |
 | `core/dispatcher.py` | 防重複、額度檢查、發送、失敗處理 |
 | `core/history.py` | SQLite：執行紀錄、發送紀錄、Webhook 看到的群組與人（LINE 名稱、本人登記的名字與暱稱、群組成員關係）、跨程式共用的小狀態（`state` 表）；舊資料庫開啟時自動補欄位 |
@@ -47,6 +49,7 @@
 | `core/message_template.py` | 罐頭訊息的【中文標籤】寫法：標籤、【服事名單】一項一行、沒資料就拿掉（舊的 Jinja2 寫法在 renderer 照樣能用） |
 | `core/totp.py` | 驗證器 App 的 6 位數（RFC 6238，標準函式庫），QR code 用 segno（沒裝就顯示金鑰） |
 | `core/login_codes.py` | Telegram 一次性登入碼（照 CSP：碼＋頁面上的 nonce、90 秒、錯 3 次作廢、速率限制） |
+| `cli_api.py`、`roster_view.py`、`roster_image.py` | 給程式呼叫的指令（`roster`、`swap`、`remind`，`--json`）、看服事表、畫成 PNG（Pillow）；契約在 [CLI.md](CLI.md) |
 | `core/versions.py` | 變更紀錄：內容定址（SHA-256、zlib、相同內容只存一份）、來源、摘要、差異、還原；直接用 Excel 改的也抓得到 |
 | `core/public_url.py` | 目前對外的網址（免費模式每次重開都會變）：從 Webhook 請求的 Host 認出來，供 LINE 指令「/服務網址」回覆 |
 | `messengers/` | 發送端：`line`（Messaging API）、`console`（測試模式） |
