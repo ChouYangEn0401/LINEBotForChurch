@@ -1,4 +1,5 @@
-"""給別的程式呼叫的指令（ClawBot 的 `/line` 面板就是呼叫這些）：``swap``、``roster``、``remind``。
+"""給別的程式呼叫的指令（ClawBot 的 `/line` 面板就是呼叫這些）：``swap``、``roster``、``remind``；
+``quota``、``ministries`` 的 ``--json`` 也用這裡的 ``emit_json``。
 
 契約（給人看的完整版在 docs/CLI.md）跟 ``webhook`` 指令一樣：
 
@@ -220,6 +221,45 @@ def _swap_list(unit: "Unit", args: argparse.Namespace, head: dict) -> Result:
 cmd_swap = run_json(_swap)
 
 
+# --------------------------------------------------------------------------- roster
+
+
+def _roster(paths: "Paths", args: argparse.Namespace) -> Result:
+    """看服事表：show（JSON／文字）、image（畫成 PNG）。範圍跟 /行事曆 一樣，疊完人員調換。"""
+    from pathlib import Path
+
+    from church_bot import roster_view
+
+    _church, unit = one_unit(paths, args)
+    if args.weeks_back < 0 or args.weeks_back > roster_view.MAX_WEEKS_BACK:
+        raise CliFail(f"--weeks-back 要在 0 到 {roster_view.MAX_WEEKS_BACK} 之間")
+    if args.weeks_forward < 1 or args.weeks_forward > roster_view.MAX_WEEKS_FORWARD:
+        raise CliFail(f"--weeks-forward 要在 1 到 {roster_view.MAX_WEEKS_FORWARD} 之間")
+    view = roster_view.collect(unit.service, args.weeks_back, args.weeks_forward)
+    head = {"ok": True, "ministry": _ministry_json(unit)}
+    if args.action == "show":
+        return 0, {**head, **view.to_json()}, roster_view.as_text(view, unit.name)
+    from church_bot import roster_image
+
+    out = Path(args.out).expanduser()
+    if not out.is_absolute():
+        out = Path.cwd() / out
+    try:
+        font = roster_image.save(view, out, unit.name)
+    except OSError as exc:
+        raise CliFail(f"圖存不進去：{out}（{exc}）", "確認資料夾存在、可以寫入。") from exc
+    data = view.to_json()
+    payload = {**head, "path": str(out), "days": len(view.days), "font": font, "today": data["today"],
+               "window": data["window"], "column": view.column}
+    lines = [f"✅ 已畫好 {len(view.days)} 天的服事表：{out}"]
+    if font == "fallback":
+        lines.append("⚠️ 找不到中文字型，圖上的中文可能是方塊")
+    return 0, payload, lines
+
+
+cmd_roster = run_json(_roster)
+
+
 # --------------------------------------------------------------------------- 參數
 
 
@@ -257,5 +297,14 @@ def add_parsers(sub: argparse._SubParsersAction) -> None:  # noqa: SLF001
     undo = actions.add_parser("undo", parents=[parent], help="退回一筆調換")
     undo.add_argument("--id", required=True, help="調換的編號（swap list 看得到）")
 
+    roster = sub.add_parser("roster", help="看服事表（上兩週＋下四週，疊完人員調換）：show（文字／JSON）、image（PNG）")
+    views = roster.add_subparsers(dest="action", metavar="動作", required=True)
+    show = views.add_parser("show", parents=[parent], help="印出來（加 --json 給程式看）")
+    image = views.add_parser("image", parents=[parent], help="畫成一張 PNG（寬 1080px）")
+    image.add_argument("--out", required=True, help="PNG 存到哪裡")
+    for p in (show, image):
+        p.add_argument("--weeks-back", type=int, default=2, help="往前幾週（預設 2，跟 /行事曆 一樣）")
+        p.add_argument("--weeks-forward", type=int, default=4, help="往後幾週（預設 4）")
 
-COMMANDS = {"swap": cmd_swap}
+
+COMMANDS = {"swap": cmd_swap, "roster": cmd_roster}
