@@ -33,8 +33,8 @@ from church_bot import __version__
 from church_bot.church import MIN_MINISTRY_PASSWORD, add_ministry, check_password, edit_ministry, hash_password
 from church_bot.config import Paths, load_settings, read_env_file, update_env_file
 from church_bot.core import versions
-from church_bot.core import totp
-from church_bot.core.login_codes import LoginCodeError, TelegramSender
+from church_bot.core import notify, totp
+from church_bot.core.login_codes import LoginCodeError, OwnerCodeSender, can_send
 from church_bot.core.public_url import public_base
 from church_bot.errors import ChurchBotError, ConfigError
 from church_bot.web.common import (
@@ -310,7 +310,10 @@ def create_app(paths: Paths) -> FastAPI:
     def manager_status() -> dict[str, Any]:
         return {"password": bool(web.manager_password()), "totp": bool(web.env("SERVER_MANAGER_TOTP_SECRET")),
                 "telegram_token": mask(web.env("TELEGRAM_BOT_TOKEN")),
-                "telegram_id": web.env("SERVER_MANAGER_TELEGRAM_ID")}
+                "telegram_id": web.env("SERVER_MANAGER_TELEGRAM_ID"),
+                "clawbot": notify.clawbot_configured(web.paths),
+                "telegram_ready": can_send(web.paths, web.env("TELEGRAM_BOT_TOKEN"),
+                                           web.env("SERVER_MANAGER_TELEGRAM_ID"))}
 
     def new_totp() -> dict[str, Any]:
         secret = totp.new_secret()
@@ -391,11 +394,12 @@ def create_app(paths: Paths) -> FastAPI:
     def telegram_test(request: Request):
         if refused := local_only(request):
             return refused
-        if not (web.env("TELEGRAM_BOT_TOKEN") and web.env("SERVER_MANAGER_TELEGRAM_ID")):
-            return redirect("/settings#manager", "還沒填 Telegram 機器人 token 和你的 Telegram ID", "error")
+        chat_id = web.env("SERVER_MANAGER_TELEGRAM_ID")
+        if not can_send(web.paths, web.env("TELEGRAM_BOT_TOKEN"), chat_id):
+            return redirect("/settings#manager", "旁邊沒有 ClawBot，也還沒填 Telegram 機器人 token 和你的 Telegram ID", "error")
         try:
-            TelegramSender(web.env("TELEGRAM_BOT_TOKEN")).send(
-                web.env("SERVER_MANAGER_TELEGRAM_ID"), "✅ 服事提醒機器人：之後從外面登入伺服器管理員，登入碼會傳到這裡。")
+            OwnerCodeSender(web.paths, web.env("TELEGRAM_BOT_TOKEN"), chat_id).send(
+                chat_id, "✅ 服事提醒機器人：之後從外面登入伺服器管理員，登入碼會傳到這裡。")
         except LoginCodeError as exc:
             return redirect("/settings#manager", f"{exc.message}。{exc.hint}", "error")
         return redirect("/settings#manager", "已傳測試訊息到你的 Telegram")

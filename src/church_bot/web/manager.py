@@ -25,7 +25,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse
 
 from church_bot.core import totp
-from church_bot.core.login_codes import LoginCodeError, LoginCodes, TelegramSender
+from church_bot.core.login_codes import LoginCodeError, LoginCodes, OwnerCodeSender, can_send
 from church_bot.web.common import MANAGER_COOKIE, MANAGER_SESSION, SESSION_COOKIE, Web, is_local, redirect, safe_next
 
 log = logging.getLogger(__name__)
@@ -114,7 +114,8 @@ def manager_routes(web: Web) -> APIRouter:
 
     def factors() -> dict[str, bool]:
         return {"totp": bool(web.env("SERVER_MANAGER_TOTP_SECRET")),
-                "telegram": bool(web.env("TELEGRAM_BOT_TOKEN") and web.env("SERVER_MANAGER_TELEGRAM_ID"))}
+                # 經 ClawBot（旁邊有它）或自己的 Telegram 機器人（token＋ID 都填了）傳得出去就算有
+                "telegram": can_send(web.paths, web.env("TELEGRAM_BOT_TOKEN"), web.env("SERVER_MANAGER_TELEGRAM_ID"))}
 
     def show(request: Request, step: str, next_url: str, error: str = "", nonce: str = "", status: int = 200):
         response = web.templates.TemplateResponse(request, "manager_login.html", {
@@ -191,7 +192,8 @@ def manager_routes(web: Web) -> APIRouter:
         if not factors()["telegram"]:
             return show(request, "second", next, "Telegram 登入碼還沒設定好", status=400)
         try:
-            nonce = logins.codes.start(TelegramSender(web.env("TELEGRAM_BOT_TOKEN")), web.env("SERVER_MANAGER_TELEGRAM_ID"))
+            chat_id = web.env("SERVER_MANAGER_TELEGRAM_ID")
+            nonce = logins.codes.start(OwnerCodeSender(web.paths, web.env("TELEGRAM_BOT_TOKEN"), chat_id), chat_id)
         except LoginCodeError as exc:
             return show(request, "second", next, f"{exc.message}。{exc.hint}", status=503)
         return show(request, "telegram", next, nonce=nonce)

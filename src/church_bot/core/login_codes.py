@@ -7,9 +7,16 @@
 * 90 秒內有效、用過就失效；同時只有一筆（再按一次就換新的，舊的作廢）；按錯 3 次整筆作廢。
   拿錯 nonce 的人按錯不會用掉那 3 次（不然誰都能把你正在進行的登入弄掉）。
 * 要碼有速率限制（10 分鐘 5 次），避免有人一直按讓你的手機響個不停。
-* 碼只存在記憶體、只存雜湊；Telegram 那則訊息在碼用掉或過期時自動刪除。
+* 碼只存在記憶體、只存雜湊；用自己的 Telegram 機器人傳的那則訊息在碼用掉或過期時自動刪除
+  （經 ClawBot 傳的刪不掉——ClawBot 不回訊息編號——碼照樣 90 秒過期、用過就失效）。
 
-設定（.env）：TELEGRAM_BOT_TOKEN（跟排程用的那個 Telegram 機器人同一個就可以）、SERVER_MANAGER_TELEGRAM_ID（你的 Telegram 數字 ID）。
+**怎麼傳**（``OwnerCodeSender``，2026-11-02 起）：先經 ClawBot 的 ``POST /v1/notify``（``important``＝一律主機
+bot；擁有者 2026-11-02：「全部都改，按照現在的分流架構，決定應該要把訊息塞給誰」），這個專案不用保管 Telegram 金鑰。
+ClawBot 找不到、連不上、回錯誤時，**有設**自己的 TELEGRAM_BOT_TOKEN＋SERVER_MANAGER_TELEGRAM_ID 才退回直接打
+Telegram；都沒有就說傳不出去（改用驗證器 App）。
+
+設定（.env，只有退路要用）：TELEGRAM_BOT_TOKEN、SERVER_MANAGER_TELEGRAM_ID（你的 Telegram 數字 ID）。
+旁邊有 ClawBot（它的 data/gateway.json）的話兩個都可以不填。
 """
 
 from __future__ import annotations
@@ -17,7 +24,9 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 import hmac
+import html as html_lib
 import logging
+import re
 import secrets
 import threading
 from dataclasses import dataclass
@@ -70,6 +79,43 @@ class TelegramSender:
                        json={"chat_id": chat_id, "message_id": message_id})
         except httpx.HTTPError:
             pass  # 刪不掉就算了：碼本來就已經失效
+
+
+def plain_text(html: str) -> str:
+    """Telegram 的 HTML 變成純文字（ClawBot 的 /v1/notify 只收純文字）：拿掉標籤、還原 &amp; 之類。"""
+    return html_lib.unescape(re.sub(r"<[^>]+>", "", html))
+
+
+def can_send(paths, token: str, chat_id: str) -> bool:  # noqa: ANN001 - paths: config.Paths
+    """傳得出登入碼嗎：旁邊有 ClawBot，或自己的 token＋ID 都填了。不連線，只看設定。"""
+    from church_bot.core import notify
+
+    return notify.clawbot_configured(paths) or bool(token and chat_id)
+
+
+class OwnerCodeSender:
+    """登入碼、測試訊息：先經 ClawBot（``/v1/notify``，important＝主機 bot），不行才用自己的 Telegram 機器人（有設才用）。"""
+
+    def __init__(self, paths, token: str = "", chat_id: str = "") -> None:  # noqa: ANN001 - paths: config.Paths
+        self.paths, self.token, self.chat_id = paths, token, chat_id
+
+    def send(self, chat_id: str, html: str) -> int | None:
+        from church_bot.core import notify
+
+        link = notify.find_clawbot(self.paths, timeout=notify.CLAWBOT_NOTIFY_TIMEOUT)
+        if link is not None and link.tell_owner(plain_text(html), important=True):
+            log.info("伺服器管理員的登入碼／測試訊息：經 ClawBot 送出")
+            return None  # ClawBot 不回訊息編號，所以這一則刪不掉（碼照樣會過期）
+        target = chat_id or self.chat_id
+        if self.token and target:
+            log.info("伺服器管理員的登入碼／測試訊息：ClawBot 沒送成，改用自己的 Telegram 機器人")
+            return TelegramSender(self.token).send(target, html)
+        log.warning("伺服器管理員的登入碼／測試訊息：ClawBot 沒送成，也沒有設自己的 Telegram 機器人")
+        raise LoginCodeError("連不上 ClawBot，這次沒辦法傳到 Telegram", "改用驗證器 App 的 6 位數，或等一下再試。")
+
+    def delete(self, chat_id: str, message_id: int) -> None:
+        if self.token:
+            TelegramSender(self.token).delete(chat_id, message_id)
 
 
 def _digest(text: str) -> str:

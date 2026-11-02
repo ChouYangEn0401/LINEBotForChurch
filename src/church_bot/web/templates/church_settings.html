@@ -95,6 +95,9 @@
       </div>
     </div>
 
+    {% if mgr.clawbot %}
+    <p class="help" style="--span:12">登入碼先經這台電腦上的 ClawBot 傳到你的 Telegram（主機 bot），下面的機器人 token 不用填；只有 ClawBot 沒開著時才會改用下面填的那一個。</p>
+    {% endif %}
     <form method="post" action="/settings/telegram" class="fgrid-sub" style="--span:12">
       <div class="ffield" style="--span:5">
         <label for="tg_token">Telegram 機器人 token <span class="badge {{ 'ok' if mgr.telegram_token and mgr.telegram_id else '' }}">{{ "已設定" if mgr.telegram_token and mgr.telegram_id else "沒有設" }}</span></label>
@@ -109,7 +112,7 @@
       <div class="ffield" style="--span:3"><label>&nbsp;</label>
         <div class="row"><button type="submit" class="btn" {{ "disabled" if not local }}>儲存</button></div></div>
     </form>
-    {% if local and mgr.telegram_token and mgr.telegram_id %}
+    {% if local and mgr.telegram_ready %}
     <form method="post" action="/settings/telegram/test" class="fgrid-sub" style="--span:12">
       <div class="ffield" style="--span:12"><div class="row"><button type="submit" class="btn btn-sm">傳測試訊息</button>
         <span class="help">從外面登入時按「傳 6 位數到我的 Telegram」，90 秒內在同一頁輸入。</span></div></div>

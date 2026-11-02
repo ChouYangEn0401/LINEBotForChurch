@@ -34,7 +34,7 @@ def manager(client, paths, monkeypatch):
                                      "TELEGRAM_BOT_TOKEN": "bot-token", "SERVER_MANAGER_TELEGRAM_ID": "42"})
     edit_ministry(paths.church, "m1", password_hash=hash_password("abcd"))
     FakeTelegram.sent = []
-    monkeypatch.setattr("church_bot.web.manager.TelegramSender", FakeTelegram)
+    monkeypatch.setattr("church_bot.core.login_codes.TelegramSender", FakeTelegram)
     client.cookies.clear()
     return secret
 
@@ -170,7 +170,7 @@ def test_manager_keys_cannot_be_changed_from_outside(client, paths, manager):
 
 
 def test_telegram_settings_and_test_message(client, paths, manager, monkeypatch):
-    monkeypatch.setattr("church_bot.web.app.TelegramSender", FakeTelegram)
+    monkeypatch.setattr("church_bot.core.login_codes.TelegramSender", FakeTelegram)
     client.post(CHURCH + "/manager/login", data={"password": PASSWORD})
     r = client.post(CHURCH + "/settings/telegram", data={"chat_id": "not a number"}, follow_redirects=False)
     assert "level=error" in r.headers["location"]
