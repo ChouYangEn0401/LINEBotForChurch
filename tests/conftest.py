@@ -61,14 +61,8 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     # ClawBot：每個測試自己一個（空的）地方。預設的「專案隔壁」是 tmp_path 的上一層，整場測試共用——
     # 某個測試在那裡寫了 gateway.json，之後每一則通知都會去敲這台電腦上真的 ClawBot Host
     monkeypatch.setenv("CLAWBOT_HOME", str(tmp_path / "_clawbot"))
-
-    # 測試絕對不能真的把 Notifier_TB 開起來（會在擁有者的桌面上跳視窗）；要測的地方自己換掉它
-    from church_bot.core import notify
-
-    def refuse(folder, python):
-        raise AssertionError(f"測試想真的開 Notifier：{python}")
-
-    monkeypatch.setattr(notify, "launch_notifier", refuse)
+    # （以前這裡擋「測試真的把 Notifier_TB 開起來」；2026-11-02 起 core/notify.py 不會開任何程式了，
+    #   test_notify_status.py 的 no_child_process 驗這件事）
 
 
 @pytest.fixture

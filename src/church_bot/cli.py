@@ -478,7 +478,7 @@ def cmd_tunnel(paths: Paths, args: argparse.Namespace) -> int:
             # 小圖示「Lw」的「複製網址」讀這裡（擁有者 2026-10-09：webhook 就是複製連結）
             runctl.mark_running(paths, runctl.WEBHOOK, detail=url)
             ok = register_webhook(paths, url, _print)
-            # 另開執行緒去通知：Notifier 沒開著時要等它起來，不能卡住讀 cloudflared 輸出的這一條
+            # 另開執行緒去通知：ClawBot 卡住時最多要等幾秒，不能卡住讀 cloudflared 輸出的這一條
             threading.Thread(target=window_mod.announce, args=(paths, window_mod.OPENED, window_mod.read(paths) or window),
                              kwargs={"url": url.removesuffix("/line/webhook"), "ok": ok}, daemon=True).start()
             return ok
@@ -508,7 +508,7 @@ def _tunnel_closed(paths: Paths, holder: dict, code: int, under_service: bool) -
             text = (f"⚠️ LINE webhook 的臨時網址斷了（cloudflared 結束代碼 {code}），nssm 10 秒後會再開起來"
                     + (f"，時間照舊到 {window_mod.clock(window.until)}" if window and window.until else ""))
             window_mod.tell_dev(paths, load_webhook_settings(paths),
-                                window_mod.event_payload("restarting", text, window), wait=notify.STOP_WAIT)
+                                window_mod.event_payload("restarting", text, window))
         return
     if holder.get("ended"):
         reason = "小圖示或 Telegram 按了結束"
@@ -518,7 +518,7 @@ def _tunnel_closed(paths: Paths, holder: dict, code: int, under_service: bool) -
         reason = f"臨時網址自己斷了（cloudflared 結束代碼 {code}）"
     closed = window_mod.finish(paths, reason)
     if closed is not None:
-        window_mod.announce(paths, window_mod.CLOSED, closed, reason=closed.reason, wait=notify.STOP_WAIT)
+        window_mod.announce(paths, window_mod.CLOSED, closed, reason=closed.reason)
 
 
 def _stop_own_webhook_service(paths: Paths, fallback) -> None:  # noqa: ANN001 - fallback: () -> None
@@ -535,7 +535,7 @@ def _stop_own_webhook_service(paths: Paths, fallback) -> None:  # noqa: ANN001 -
     log.error("時間到了，但沒辦法停掉 %s：%s", runctl.WEBHOOK.service, text)
     window_mod.tell_dev(paths, load_webhook_settings(paths), window_mod.event_payload(
         "stop_failed", f"⚠️ LINE webhook 時間到了，但沒辦法停掉服務（{text}），先直接結束；nssm 可能會再把它開起來",
-        window_mod.read(paths)), wait=notify.STOP_WAIT)
+        window_mod.read(paths)))
     fallback()
 
 
@@ -737,7 +737,7 @@ def _supervise(paths: Paths, args: argparse.Namespace) -> int:
         if len(starts) > RESTART_LIMIT:
             _print("❌ 一分鐘內重新啟動太多次，先停下來。請把 data/church_bot.log 傳給維護的人，再雙擊 2-start。")
             notify.Notifier(paths).send("❌ 服事提醒機器人：後台一分鐘內重新啟動太多次，已經停下來不再重開。\n"
-                                        "請到那台電腦看 data/church_bot.log。", wait=notify.STOP_WAIT)
+                                        "請到那台電腦看 data/church_bot.log。")
             return 1
         _print("🔄 重新啟動管理網頁…")
         restarted = True
@@ -750,7 +750,7 @@ def _notify_crash(paths: Paths, code: int) -> None:
     else:
         text = (f"❌ 服事提醒機器人：後台意外停止（結束代碼 {code}）。\n"
                 "自動發送在它重新起來之前都不會動。請到那台電腦看 data/church_bot.log。")
-    notify.Notifier(paths).send(text, wait=notify.STOP_WAIT)  # 不能拖太久：服務要等這裡結束才重開
+    notify.Notifier(paths).send(text)  # 送不出去就立刻存起來（不叫醒、不等）：服務要等這裡結束才重開
 
 
 def _serve(paths: Paths, args: argparse.Namespace) -> int:
@@ -814,10 +814,10 @@ def _serve(paths: Paths, args: argparse.Namespace) -> int:
     restarting = bool(getattr(app.state, "restart_requested", False))
     notify.record_stop(church.shared, clean=True, reason="重新啟動" if restarting else "正常關閉")
     if restarting:
-        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…", wait=notify.STOP_WAIT, kind=notify.KIND_HELLO)
+        notifier.send("🔄 服事提醒機器人：後台正在重新啟動…", kind=notify.KIND_HELLO)
     else:
         notifier.send("⏹ 服事提醒機器人：後台已經正常關閉。\n"
-                      "在它重新開起來之前，每週提醒不會自動發送。", wait=notify.STOP_WAIT, kind=notify.KIND_HELLO)
+                      "在它重新開起來之前，每週提醒不會自動發送。", kind=notify.KIND_HELLO)
     return RESTART_CODE if restarting else 0
 
 
@@ -825,7 +825,7 @@ def _announce_start(notifier: "notify.Notifier", church: "Church", url: str, bef
     """後台開起來了。順便講「上一次有沒有正常關閉」——伺服器自己不見的時候，就是靠這一行發現的。"""
     from church_bot import status as status_mod
 
-    notifier.flush()  # Notifier 沒開著時積下來的，趁現在補送（只在啟動這一刻做一次，不是輪詢）
+    notifier.flush()  # ClawBot／9999 都不通時積下來的，趁現在補送（只在啟動這一刻做一次，不是輪詢）
     head = "🔄 服事提醒機器人：後台已重新啟動" if restarted else "✅ 服事提醒機器人：後台已啟動"
     lines = [f"{head}（v{__version__}）", f"管理網頁：{url}"]
     if os.environ.get("CHURCH_BOT_SERVICE"):

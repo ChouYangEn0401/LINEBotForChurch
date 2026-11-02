@@ -25,23 +25,24 @@ webhook 的 ``restarting``／``stop_failed``）：2026-11-02 起**先打 ClawBot
 **這個檔案不會自己連 Telegram，也沒有任何輪詢。** 要講話的時候，打一次 ``127.0.0.1`` 的 ClawBot、
 或往 ``127.0.0.1`` 的 socket 丟一個封包就結束；平常完全不連網、不開執行緒、不跑迴圈。
 
-為什麼（退路）走 Notifier_TB（``C:\\Users\\user\\Documents\\Notifier_TB``）而不是自己打 api.telegram.org：
-這台電腦已經有一支在做這件事了，任何本地程式都可以推進去——``ISDStockProject`` 的 live monitor
-（``post_event_socket``）、Notifier 自己的 ``test_socket.py`` 用的都是同一個封包格式::
+**退路：127.0.0.1:9999 的 socket（以前叫 Notifier_TB）。** 封包格式跟 ``ISDStockProject`` 的 live monitor
+（``post_event_socket``）、Notifier 自己的 ``test_socket.py`` 一樣::
 
-    {"sig": <socket_secret>, "payload": <要送的文字>}   →  TCP 127.0.0.1:9999
+    {"sig": <密鑰>, "payload": <要送的文字>}   →  TCP 127.0.0.1:9999
 
-好處是 token、收件人、角色、訊息追蹤全部是 Notifier 的事，這個專案一個金鑰都不用保管。
+Notifier_TB 已經併進 ClawBot 的 Host（2026-11-02，``feat/notifier-merge``）：**現在聽 9999 的是 Host**，
+同一個埠、同一把密鑰（搬家腳本把 Notifier 的 ``socket_secret`` 搬成 ClawBot 的 ``signal_socket_secret``）。
+所以這條退路只在「``/v1/notify`` 打不通、但 Host 的 socket 還收得到」或擁有者自己開著舊 Notifier 時有用。
 
-**設定**：預設去隔壁找 ``../Notifier_TB/config.json``（host、port、密鑰都讀那一份，所以密鑰
-只存在一個地方）。Notifier 搬家就在 ``.env`` 填 ``NOTIFIER_TB_HOME``；完全不想接就填
-``NOTIFIER_DISABLED=1``，播報會安靜地不做事，其他功能照常。
+**退路只試打一次、不叫醒任何程式。** 9999 沒人聽（Host 沒開）就**立刻**寫進 ``data/notify_outbox.jsonl``，
+不開 Notifier_TB、不開任何子程序、不等（2026-11-02 起；以前會「幫它開」舊的 Notifier，那只會在 Host 沒開時把
+一支退休的 bot 叫起來）。存起來的在下一次「本來就要送東西」或「後台剛啟動」（``flush``）時一起補送
+（見 ``_spool`` / ``_flush``）——Host 開回來之後的下一則就會把積欠的帶走。不是背景輪詢。
 
-**Notifier 沒開著的時候**（它是「要用才開」、閒置 180 秒自己關的）：跟 ClawBot 一樣，**幫它開**
-（``wake_notifier``，用 Notifier 自己的 ``--until-idle`` 模式，送完沒事做就自己關），等它起來再送。
-這樣 Notifier 不用註冊成服務。真的開不起來、等不到，訊息也不會丟掉：寫進
-``data/notify_outbox.jsonl``，等下一次送得出去時一起補送（見 ``_spool`` / ``_flush``）。
-等待和補送都只發生在「本來就要送東西」或「後台剛啟動」那一刻，不是背景輪詢。
+**設定（密鑰從哪來）**：ClawBot 的 ``config.json`` 有 ``signal_socket_secret`` 就用它（``../MyFirstTelegramClawBot``，
+搬家填 ``CLAWBOT_HOME``；Notifier_TB 資料夾之後可能被收掉）；沒有才讀 ``../Notifier_TB/config.json`` 的
+``socket_secret``（搬家填 ``NOTIFIER_TB_HOME``）。host、port 照 Notifier 那份寫的，沒有就是 127.0.0.1:9999。
+完全不想走這條退路就填 ``NOTIFIER_DISABLED=1``。密鑰只讀、不寫進 log。
 """
 
 from __future__ import annotations
@@ -51,9 +52,7 @@ import json
 import logging
 import os
 import socket
-import subprocess
 import threading
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -69,9 +68,8 @@ DEFAULT_DIR_NAME = "Notifier_TB"  # 跟本專案並排的那個資料夾
 TIMEOUT = 5.0  # 跟 ISDStockProject 的 post_event_socket 一樣
 OUTBOX_NAME = "notify_outbox.jsonl"
 OUTBOX_LIMIT = 200  # 積太多就丟掉最舊的；這是通知，不是帳本
-WAKE_WAIT = 30.0  # Notifier 沒開著：幫它開，最多等這麼久讓它的 socket 起來
-STOP_WAIT = 15.0  # 關機、當掉那幾則等短一點：nssm 停服務只給 25 秒，當掉時要等這裡結束才重開
-IDLE_SECONDS = 180  # 幫它開的那一個閒置多久自己關（跟 launcher_ondemand.bat 一樣）
+SIGNAL_HOST, SIGNAL_PORT = "127.0.0.1", 9999  # Notifier 那份沒寫時：ClawBot 的 Host 聽的地方
+CLAWBOT_SECRET_KEY = "signal_socket_secret"    # ClawBot config.json 裡 9999 那把密鑰的鍵名
 RUNTIME_KEY = "service_runtime"  # 共用資料庫裡的那一格：後台現在開著沒、上一次是怎麼結束的
 
 CLAWBOT_HOME_ENV = "CLAWBOT_HOME"          # ClawBot 搬家了就在 .env 填這個
@@ -109,26 +107,51 @@ class NotifierTarget:
         return f"{self.host}:{self.port}（{self.source}）"
 
 
+def _read_config(config_file: Path | None, what: str) -> dict:
+    """讀一份 config.json；沒有、讀不懂都回 {}（只寫檔名進 log，不印內容——裡面有密鑰）。"""
+    if config_file is None or not config_file.is_file():
+        return {}
+    try:
+        config = json.loads(config_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        log.warning("讀不懂 %s 的 config.json（%s）：%s", what, config_file, type(exc).__name__)
+        return {}
+    return config if isinstance(config, dict) else {}
+
+
 def find_notifier(paths: Paths) -> NotifierTarget | None:
-    """讀出 Notifier_TB 的 socket 設定。找不到、或被關掉就回 None。"""
+    """讀出 9999 那條退路（ClawBot 的 Host／舊的 Notifier_TB 在聽的 socket）怎麼連。
+
+    密鑰：ClawBot ``config.json`` 的 ``signal_socket_secret`` 優先，沒有才用 ``../Notifier_TB/config.json`` 的
+    ``socket_secret``（兩邊是同一把，Notifier_TB 資料夾之後可能被收掉）。host、port 照 Notifier 那份，沒有就是
+    127.0.0.1:9999。``source`` 寫讀了哪一份（不含密鑰）。哪一份都沒有密鑰、或被 ``NOTIFIER_DISABLED`` 關掉就回 None。
+    """
     if _env(paths, DISABLE_ENV):
         return None
     home = _env(paths, HOME_ENV)
     folder = Path(home).expanduser() if home else paths.church.root.parent / DEFAULT_DIR_NAME
-    config_file = folder / "config.json"
-    if not config_file.exists():
+    notifier_file = folder / "config.json"
+    notifier = _read_config(notifier_file, "Notifier_TB")
+    clawbot_folder = _clawbot_folder(paths)
+    clawbot_file = clawbot_folder / "config.json" if clawbot_folder is not None else None
+    clawbot = _read_config(clawbot_file, "ClawBot")
+
+    secret = str(clawbot.get(CLAWBOT_SECRET_KEY) or "").strip()
+    if secret:
+        secret_from = f"密鑰：{clawbot_file} 的 {CLAWBOT_SECRET_KEY}"
+    else:
+        secret = str(notifier.get("socket_secret") or "").strip()
+        secret_from = f"密鑰：{notifier_file} 的 socket_secret"
+    if not secret:
         return None
     try:
-        config = json.loads(config_file.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        log.warning("讀不懂 Notifier_TB 的 config.json（%s）：%s", config_file, exc)
-        return None
-    if not isinstance(config, dict):
-        return None
-    target = NotifierTarget(str(config.get("socket_host") or "127.0.0.1").strip(),
-                            int(config.get("socket_port") or 9999),
-                            str(config.get("socket_secret") or "").strip(),
-                            str(config_file))
+        port = int(notifier.get("socket_port") or SIGNAL_PORT)
+    except (TypeError, ValueError):
+        log.warning("Notifier_TB 的 config.json 的 socket_port 看不懂（%s），用 %d", notifier_file, SIGNAL_PORT)
+        port = SIGNAL_PORT
+    host = str(notifier.get("socket_host") or SIGNAL_HOST).strip()
+    address_from = f"位址：{notifier_file}" if ("socket_host" in notifier or "socket_port" in notifier) else "位址：預設"
+    target = NotifierTarget(host, port, secret, f"{secret_from}；{address_from}")
     return target if target.ready else None
 
 
@@ -211,13 +234,18 @@ class ClawBotLink:
         return True
 
 
-def _clawbot_store(paths: Paths) -> Path | None:
-    """ClawBot 的 ``data/gateway.json`` 在哪；被 ``CLAWBOT_DISABLED`` 關掉就回 None。不讀檔、不連線。"""
+def _clawbot_folder(paths: Paths) -> Path | None:
+    """ClawBot 的資料夾（``CLAWBOT_HOME``，沒填就是專案隔壁）；被 ``CLAWBOT_DISABLED`` 關掉就回 None。不讀檔。"""
     if _env(paths, CLAWBOT_DISABLE_ENV):
         return None
     home = _env(paths, CLAWBOT_HOME_ENV)
-    folder = Path(home).expanduser() if home else paths.church.root.parent / CLAWBOT_DIR_NAME
-    return folder / "data" / "gateway.json"
+    return Path(home).expanduser() if home else paths.church.root.parent / CLAWBOT_DIR_NAME
+
+
+def _clawbot_store(paths: Paths) -> Path | None:
+    """ClawBot 的 ``data/gateway.json`` 在哪；被 ``CLAWBOT_DISABLED`` 關掉就回 None。不讀檔、不連線。"""
+    folder = _clawbot_folder(paths)
+    return None if folder is None else folder / "data" / "gateway.json"
 
 
 def clawbot_configured(paths: Paths) -> bool:
@@ -277,7 +305,8 @@ class Notifier:
         if target is None and not clawbot:
             return "還沒接上 ClawBot 或 Notifier_TB"
         ways = (["先經 ClawBot"] if clawbot else []) + (
-            [f"{'不行再' if clawbot else ''}經由 Notifier_TB {target.host}:{target.port}"] if target else [])
+            [f"{'不行再' if clawbot else ''}試打一次 {target.host}:{target.port}（Host 的 socket／Notifier_TB）"]
+            if target else [])
         waiting = self.pending()
         extra = f"；有 {waiting} 則還沒送出去（兩邊都沒開著時先存起來）" if waiting else ""
         return f"{'，'.join(ways)}送到 Telegram{extra}"
@@ -290,15 +319,15 @@ class Notifier:
 
     # ------------------------------------------------------------------ 送
 
-    def send(self, text: str, *, wait: float = WAKE_WAIT, stream: str = STREAM_SYSTEM, kind: str = "",
+    def send(self, text: str, *, stream: str = STREAM_SYSTEM, kind: str = "",
              silent: bool = False, important: bool = False, via_clawbot: bool = True) -> bool:
         """送一則給伺服器管理員。永遠不丟例外；回傳有沒有真的送出去。
 
         先經 ClawBot（``/v1/notify``；``stream``／``kind``／``silent``／``important`` 交給它的分流表）；
-        ClawBot 找不到、連不上、回錯誤 → 退回 Notifier_TB。``via_clawbot=False``＝呼叫的人剛試過 ClawBot、
-        確定連不上，直接走 Notifier_TB。
-        Notifier 沒開著 → 幫它開（要用才開），最多等 ``wait`` 秒讓它起來再送。
-        還是送不出去也不是錯誤，會先存進 outbox，之後補送。
+        ClawBot 找不到、連不上、回錯誤 → 退回 9999 的 socket，**只試打一次**（Host 開著就收得到）。
+        ``via_clawbot=False``＝呼叫的人剛試過 ClawBot、確定連不上，直接試 9999。
+        9999 也沒人聽 → 不叫醒任何程式、不等，**立刻**存進 outbox，之後補送；這不是錯誤。
+        送得出去的那一次會順手把 outbox 積欠的補送掉（Host 開回來後的第一則就會帶走它們）。
         """
         link = find_clawbot(self.paths, timeout=CLAWBOT_NOTIFY_TIMEOUT) if via_clawbot else None
         target = self.target
@@ -307,17 +336,17 @@ class Notifier:
             return False
         opts = {"stream": stream, "kind": kind, "silent": silent, "important": important}
         with self._lock:
-            way = self._deliver(link, target, text, opts, wait)
+            way = self._deliver(link, target, text, opts)
             if way:
                 log.info("通知給擁有者：經 %s 送出", way)
                 self._flush(link, target)  # 既然通了，順手把積欠的補送掉
             else:
-                log.info("通知給擁有者：ClawBot、Notifier_TB 都送不出去，先存起來之後補送")
+                log.info("通知給擁有者：ClawBot、9999 的 socket 都送不出去，先存起來之後補送（不叫醒任何程式）")
                 self._spool(text, opts)
             return bool(way)
 
-    def flush(self, *, wait: float = WAKE_WAIT) -> int:
-        """把積欠的補送出去，回傳補送了幾則。後台啟動時呼叫一次。"""
+    def flush(self) -> int:
+        """把積欠的補送出去，回傳補送了幾則。後台啟動時呼叫一次；還是不通就留著，不叫醒、不等。"""
         if not self._read_spool():
             return 0  # 沒有積欠的就不用去找 ClawBot、Notifier
         link = find_clawbot(self.paths, timeout=CLAWBOT_NOTIFY_TIMEOUT)
@@ -325,50 +354,32 @@ class Notifier:
         if link is None and target is None:
             return 0
         with self._lock:
-            return self._flush(link, target, wait)
+            return self._flush(link, target)
 
-    def _deliver(self, link: ClawBotLink | None, target: NotifierTarget | None, text: str, opts: dict,
-                 wait: float) -> str:
-        """送一則，回傳走了哪一條（"ClawBot"／"Notifier_TB"）；都不通回空字串。"""
+    def _deliver(self, link: ClawBotLink | None, target: NotifierTarget | None, text: str, opts: dict) -> str:
+        """送一則，回傳走了哪一條（"ClawBot"／"socket 9999"）；都不通回空字串。9999 只試一次。"""
         if link is not None:
             if link.tell_owner(text, **opts):
                 return "ClawBot"
             if target is not None:
-                log.info("ClawBot 沒送成，退回 Notifier_TB")
-        if target is not None and self._post_waking(target, text, wait):
-            return "Notifier_TB"
+                log.info("ClawBot 沒送成，退回 9999 的 socket（試一次）")
+        if target is not None and self._post(target, text):
+            return f"socket {target.port}"
         return ""
 
-    def _post_waking(self, target: NotifierTarget, text: str, wait: float) -> bool:
-        """送；Notifier 沒開著就開它，等它的 socket 起來再送。
-
-        這是「這一則要送」才發生的一次性等待（最多 ``wait`` 秒），不是背景輪詢。
-        """
-        if self._post(target, text):
-            return True
-        if wait <= 0 or not wake_notifier(target):
-            return False
-        deadline = time.monotonic() + wait
-        while time.monotonic() < deadline:
-            time.sleep(1.0)
-            if self._post(target, text, quiet=True):
-                return True
-        log.warning("開了 Notifier_TB 但 %d 秒內沒起來，通知先存起來之後補送", wait)
-        return False
-
     @staticmethod
-    def _post(target: NotifierTarget, text: str, quiet: bool = False) -> bool:
-        """一個 TCP 連線、一個封包、關掉。格式跟 Notifier_TB 的 test_socket.py 一模一樣。"""
+    def _post(target: NotifierTarget, text: str) -> bool:
+        """一個 TCP 連線、一個封包、關掉。格式跟 Notifier_TB 的 test_socket.py 一模一樣。
+        沒人聽就回 False——**不會**去開 Notifier_TB 或任何程式。"""
         packet = json.dumps({"sig": target.secret, "payload": text}, ensure_ascii=False)
         try:
             with socket.create_connection((target.host, target.port), timeout=TIMEOUT) as conn:
                 conn.sendall(packet.encode("utf-8"))
         except ConnectionRefusedError:
-            if not quiet:
-                log.info("Notifier_TB 現在沒開著（%s）", target)
+            log.info("%s:%d 沒人在聽（ClawBot 的 Host 沒開），不叫醒 Notifier_TB", target.host, target.port)
             return False
         except OSError as exc:
-            log.warning("推給 Notifier_TB 失敗（%s）：%s", target, exc)
+            log.warning("推給 %s:%d 失敗：%s", target.host, target.port, exc)
             return False
         return True
 
@@ -391,7 +402,7 @@ class Notifier:
         except OSError:
             return []
 
-    def _flush(self, link: ClawBotLink | None, target: NotifierTarget | None, wait: float = 0) -> int:
+    def _flush(self, link: ClawBotLink | None, target: NotifierTarget | None) -> int:
         lines = self._read_spool()
         if not lines:
             return 0
@@ -405,9 +416,8 @@ class Notifier:
             text = f"（補送・{entry.get('at', '')}）\n{entry.get('text', '')}"
             opts = {"stream": str(entry.get("stream") or STREAM_SYSTEM), "kind": str(entry.get("kind") or ""),
                     "silent": bool(entry.get("silent")), "important": bool(entry.get("important"))}
-            if not self._deliver(link, target, text, opts, wait):
+            if not self._deliver(link, target, text, opts):
                 break  # 又不通了，剩下的留著下次再說
-            wait = 0  # 只有第一則需要等 Notifier 起來
             sent += 1
         rest = lines[sent:]
         try:
@@ -420,60 +430,6 @@ class Notifier:
         if sent:
             log.info("補送了 %d 則之前沒送出去的通知", sent)
         return sent
-
-
-# --------------------------------------------------------------------------- 要用才開
-
-_wake_lock = threading.Lock()
-_last_wake = float("-inf")  # 這個程式上一次開 Notifier 的時間（time.monotonic）
-
-
-def wake_notifier(target: NotifierTarget) -> bool:
-    """Notifier_TB 沒開著：幫它開起來，跟 ClawBot 的 ``Notifier.ensure()`` 同一個做法。
-
-    開的是 Notifier 自己的「要用才開」模式（``main.py --until-idle 180``，就是 launcher_ondemand.bat
-    裡那一行）：沒事做 3 分鐘自己正常關掉。所以這裡**不需要**把 Notifier 註冊成服務——
-    擁有者 2026-10-09：服務只留給真的常常要用的那幾個，其他的要想辦法在執行的時候配合。
-
-    - 已經有一個 Notifier 在跑（擁有者自己開的、或剛被叫起來的）→ 新開的那個會自己退出（它的
-      ``other_instance()`` 擋），不會有兩個。
-    - 經 ``cmd /c start`` 開：中間那層 cmd 馬上結束，Notifier 不掛在後台底下，所以 nssm 停服務時
-      收拾程式樹不會把它一起帶走（剛送進去的「後台已關閉」才送得出去）。
-    - 不直接開 launcher_ondemand.bat：它出錯時會 ``pause`` 等人按鍵，在服務那個看不到的桌面上
-      就會永遠卡著。
-    """
-    global _last_wake
-    folder = Path(target.source).parent
-    python = folder / ".venv" / "Scripts" / "python.exe"
-    if not (python.exists() and (folder / "main.py").exists()):
-        log.warning("Notifier_TB 沒開著，也找不到可以把它開起來的程式（%s）", python)
-        return False
-    with _wake_lock:
-        now = time.monotonic()
-        if now - _last_wake < WAKE_WAIT:
-            return True  # 剛剛才開過，還在起來，等它就好
-        _last_wake = now
-    try:
-        launch_notifier(folder, python)
-    except OSError as exc:
-        log.warning("開不起 Notifier_TB：%s", exc)
-        return False
-    log.info("Notifier_TB 沒開著，已經幫它開起來（要用才開，閒置 %d 秒自己關）", IDLE_SECONDS)
-    return True
-
-
-def launch_notifier(folder: Path, python: Path) -> None:
-    """真的開。獨立出來是為了測試可以換掉它。"""
-    # 這個專案的 PYTHONPATH、CHURCH_BOT_* 不要帶過去：Notifier 是另一個程式，用它自己的 venv
-    env = {key: value for key, value in os.environ.items()
-           if key not in ("PYTHONPATH", "VIRTUAL_ENV") and not key.startswith("CHURCH_BOT_")}
-    env["PYTHONIOENCODING"] = "utf-8"
-    subprocess.Popen(
-        ["cmd.exe", "/c", "start", "Notifier_TB (on demand)", "/min",
-         str(python), "main.py", "--until-idle", str(IDLE_SECONDS)],
-        cwd=folder, env=env,
-        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 # --------------------------------------------------------------------------- 後台開著沒
