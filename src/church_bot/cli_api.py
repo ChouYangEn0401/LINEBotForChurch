@@ -260,6 +260,90 @@ def _roster(paths: "Paths", args: argparse.Namespace) -> Result:
 cmd_roster = run_json(_roster)
 
 
+# --------------------------------------------------------------------------- remind now、quota
+
+
+def quota_json(snapshot) -> dict:  # noqa: ANN001 - core.quota.QuotaSnapshot
+    now = dt.datetime.now().astimezone()
+    month = (snapshot.checked_at or now).strftime("%Y-%m")
+    return {"used": snapshot.used, "limit": snapshot.limit, "remaining": snapshot.remaining, "month": month,
+            "checked_at": snapshot.checked_at.isoformat(timespec="seconds") if snapshot.checked_at else None,
+            "pending": snapshot.pending, "error": snapshot.error, "describe": snapshot.describe(),
+            "status": snapshot.status_text(now)}
+
+
+def _remind(paths: "Paths", args: argparse.Namespace) -> Result:
+    """現在就把這週的提醒推到這個牧區的 LINE 群組（＝ send --force 只對這個牧區）。**花 LINE 額度**。"""
+    from church_bot.core.directory import normalize_name
+    from church_bot.core.planner import active_targets
+    from church_bot.models import DeliveryStatus, Severity
+
+    church, unit = one_unit(paths, args)
+    by = require_by(args)
+    service = unit.service
+    ctx = service.load()
+    enabled = active_targets(ctx.targets)
+    names = [t.name for t in enabled]
+    if not enabled:
+        raise CliFail("這個牧區還沒有會收到提醒的 LINE 群組", "到管理網頁「LINE 群組」頁新增、勾選「要收到提醒」。", groups=[])
+    target_id = ""
+    if args.target:
+        wanted = normalize_name(args.target)
+        hit = next((t for t in enabled if t.line_id == args.target.strip() or normalize_name(t.name) == wanted), None)
+        if hit is None:
+            raise CliFail(f"「{args.target}」不是這個牧區會收到提醒的群組", f"會收到提醒的群組：{'、'.join(names)}",
+                          groups=names)
+        target_id = hit.line_id
+    dry = bool(args.dry_run)
+    report, _plan = service.run("cli", dry_run=dry, force=True, only_target=target_id, count_audience=True,
+                                requested_by=by)
+    test_mode = ctx.settings.messenger.kind == "console"
+    done = DeliveryStatus.DRY_RUN if dry else DeliveryStatus.SENT
+    planned = [d for d in report.deliveries if d.status in (DeliveryStatus.SENT, DeliveryStatus.FAILED, DeliveryStatus.DRY_RUN)]
+    pushed = [d for d in report.deliveries if d.status is done]
+    sizes = report.audience
+    used = 0 if test_mode else sum(sizes.get(d.target_id) or 0 for d in pushed)
+    exact = test_mode or all(sizes.get(d.target_id) is not None for d in pushed)
+
+    groups: dict[str, dict] = {}
+    for d in report.deliveries:
+        g = groups.setdefault(d.target_name, {"name": d.target_name, "ok": True, "error": "", "status": d.status.value,
+                                              "messages": 0, "audience": sizes.get(d.target_id)})
+        g["messages"] += 1
+        if d.status is DeliveryStatus.FAILED:
+            g["ok"], g["status"] = False, d.status.value
+            g["error"] = g["error"] or d.detail
+    failed = sum(1 for d in report.deliveries if d.status is DeliveryStatus.FAILED)
+    sent = 0 if dry else report.count_sent
+    issues = [{"severity": i.severity.value, "message": i.message, "hint": i.hint}
+              for i in report.issues if i.severity is not Severity.INFO]
+    snapshot = church.quota_status() if not dry else church.refresh_quota()
+    cost = "（測試模式：不會真的送到 LINE）" if test_mode else f"，大約用掉 LINE {used} 則額度" + ("" if exact else "（有群組問不到人數，只算了問得到的）")
+    if not planned:
+        reason = next((i.message for i in report.issues if i.is_error), "這幾天服事表沒有要提醒的內容")
+        ok, message = False, f"沒有東西可以送：{reason}"
+    elif dry:
+        ok = not report.has_errors
+        message = f"會送 {len(planned)} 則到 {len(groups)} 個群組{cost}"
+    else:
+        ok = not report.has_errors
+        message = (f"已送出 {sent} 則到 {sum(1 for g in groups.values() if g['ok'])} 個群組{cost}"
+                   + (f"；{failed} 則沒送出" if failed else ""))
+        if report.has_errors and not failed:
+            message += "；有錯誤：" + next(i.message for i in report.issues if i.is_error)
+    payload = {"ok": ok, "dry_run": dry, "test_mode": test_mode, "ministry": _ministry_json(unit), "sent": sent,
+               "planned": len(planned), "failed": failed, "groups": list(groups.values()), "messages_used": used,
+               "messages_exact": exact, "quota": quota_json(snapshot) if snapshot is not None else None,
+               "issues": issues, "message": message}
+    lines = [("✅ " if ok else "❌ ") + message]
+    lines += [f"・{g['name']}：{g['messages']} 則{'' if g['ok'] else '，失敗：' + g['error']}" for g in groups.values()]
+    lines += [f"{'❌' if i['severity'] == 'error' else '⚠️'} {i['message']}" for i in issues]
+    return (0 if ok else 1), payload, lines
+
+
+cmd_remind = run_json(_remind)
+
+
 # --------------------------------------------------------------------------- 參數
 
 
@@ -306,5 +390,11 @@ def add_parsers(sub: argparse._SubParsersAction) -> None:  # noqa: SLF001
         p.add_argument("--weeks-back", type=int, default=2, help="往前幾週（預設 2，跟 /行事曆 一樣）")
         p.add_argument("--weeks-forward", type=int, default=4, help="往後幾週（預設 4）")
 
+    remind = sub.add_parser("remind", help="現在就把這週的提醒推到 LINE 群組（花 LINE 額度；--dry-run 只試算）")
+    when = remind.add_subparsers(dest="action", metavar="動作", required=True)
+    now = when.add_parser("now", parents=[parent], help="＝ send --force 只對這個牧區")
+    now.add_argument("--target", default="", help="只送這一個群組（群組名或 LINE ID；要是啟用中的）")
+    now.add_argument("--dry-run", action="store_true", help="不送，只回會送幾則、哪些群組、大約用掉幾則額度")
 
-COMMANDS = {"swap": cmd_swap, "roster": cmd_roster}
+
+COMMANDS = {"swap": cmd_swap, "roster": cmd_roster, "remind": cmd_remind}

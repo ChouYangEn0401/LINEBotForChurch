@@ -243,9 +243,15 @@ class BotService:
     # ------------------------------------------------------------------ running
 
     def run(self, trigger: str, *, dry_run: bool = False, force: bool = False, use_cache: bool = False,
-            will_retry: bool = False) -> tuple[RunReport, Plan | None]:
+            will_retry: bool = False, only_target: str = "", count_audience: bool = False,
+            requested_by: str = "") -> tuple[RunReport, Plan | None]:
         """will_retry：呼叫的人等一下會重試（cli send --retries）。這次的問題如果是重試可能就好的，
-        先不通知管理員，免得每試一次就扣一則 LINE；最後一次還是失敗才通知。"""
+        先不通知管理員，免得每試一次就扣一則 LINE；最後一次還是失敗才通知。
+
+        給 ``remind now``（cli_api.py）用的三個：``only_target`` = 只發這個 LINE 群組（line_id）；
+        ``count_audience`` = 問每個群組的人數（``report.audience``，算這次用掉幾則額度）；
+        ``requested_by`` = 誰要求的（寫進這次的紀錄，INFO，不會通知任何人）。
+        """
         # 真的發送時要跟其他程式排隊（見 locking.py）；預覽不發送，不用排
         send_lock = nullcontext() if dry_run else process_lock(self.paths.data_dir / "send.lock")
         with self._run_lock, send_lock:
@@ -254,9 +260,13 @@ class BotService:
             plan: Plan | None = None
             ctx: Context | None = None
             messenger: Messenger | None = None
+            if requested_by:
+                report.issues.append(Issue(Severity.INFO, "requested_by", f"由 {requested_by} 要求現在就發"))
             try:
                 ctx = self.load()
                 report.issues.extend(ctx.issues)
+                if only_target:
+                    ctx.targets = [t for t in ctx.targets if t.line_id == only_target]
                 today = self.now(ctx.settings).date()
                 roster = self.fetch_roster(ctx.settings, today, use_cache=use_cache)
                 planner = Planner(Renderer(ctx.settings.message), ctx.directory, ctx.settings.behavior)
@@ -273,7 +283,7 @@ class BotService:
                         report.issues.append(Issue(Severity.WARNING, "messenger_unavailable",
                                                    f"目前還不能真的發送：{exc.message}", exc.hint))
                 Dispatcher(self.history, ctx.settings.behavior, messenger, messenger_error,
-                           check_quota=ctx.settings.messenger.check_quota).run(
+                           check_quota=ctx.settings.messenger.check_quota, count_audience=count_audience).run(
                     plan, report, dry_run=dry_run, force=force)
             except ChurchBotError as exc:
                 report.issues.append(Issue(Severity.ERROR, type(exc).__name__, exc.message, exc.hint))

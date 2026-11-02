@@ -223,6 +223,9 @@ class RunReport:
     service_date: dt.date | None = None
     deliveries: list[Delivery] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
+    # 每個群組送一則會被 LINE 算成幾則（群組人數）：target_id → 人數，問不到是 None。
+    # 有查額度時（或呼叫的人要求，例如 remind now）才會填；remind now 用它算「這次用掉幾則額度」。
+    audience: dict[str, int | None] = field(default_factory=dict)
 
     @property
     def has_errors(self) -> bool:
