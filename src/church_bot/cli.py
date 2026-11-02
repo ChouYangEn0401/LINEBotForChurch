@@ -278,9 +278,17 @@ def cmd_quota(paths: Paths, args: argparse.Namespace) -> int:
     管理網頁下次打開看到的就是發送後的真實用量。管理網頁開著的話它自己會更新，不用這個指令。
     用量是整個 LINE 帳號一份，所有牧區共用。
     """
+    from church_bot.cli_api import emit_json, quota_json
     from church_bot.ministries import Church
 
     snapshot = Church(paths).refresh_quota(force=args.force)
+    if getattr(args, "json", False):  # 給 ClawBot 的「📊 本月用量」（欄位見 docs/CLI.md）
+        if snapshot is None:
+            emit_json({"ok": True, "enabled": False,
+                       "message": "目前不檢查 LINE 額度（每個牧區都是測試模式，或設定裡關掉了額度檢查）"})
+            return 0
+        emit_json({"ok": not snapshot.error, "enabled": True, **quota_json(snapshot), "message": snapshot.describe()})
+        return 1 if snapshot.error else 0
     if snapshot is None:
         _print("➖ 目前不檢查 LINE 額度（每個牧區都是測試模式，或設定裡關掉了額度檢查）")
         return 0
@@ -325,6 +333,8 @@ def cmd_ministries(paths: Paths, args: argparse.Namespace) -> int:
         _print(f"✅ 已清掉「{unit.name}」的牧區密碼，現在只要網站密碼就進得去。")
         return 0
     units = church.units()
+    if getattr(args, "json", False):
+        return _ministries_json(units)
     if not units:
         _print("還沒有任何牧區。打開管理網頁（2-start）新增第一個，或執行 init。")
         return 0
@@ -337,6 +347,32 @@ def cmd_ministries(paths: Paths, args: argparse.Namespace) -> int:
         groups = sum(1 for t in unit.targets() if t.enabled)
         _print(f"{unit.id}\t{lock}{unit.name}\t{groups} 個群組會收到提醒\t{schedule}")
     _print("\nTelegram 可以呼叫：cli.bat send（今天輪到的牧區）、cli.bat send --牧區 名稱（只發那一個）")
+    return 0
+
+
+def _ministries_json(units: list[Unit]) -> int:
+    """``牧區 list --json``：一個清單（ClawBot 用來問「哪個牧區」；欄位見 docs/CLI.md）。設定檔壞了不整個失敗。"""
+    from church_bot.cli_api import emit_json
+    from church_bot.config import load_settings
+    from church_bot.scheduler import next_fire_time
+
+    rows = []
+    for unit in units:
+        row = {"id": unit.id, "name": unit.name, "enabled": False, "day_of_week": "", "time": "", "every_n_weeks": 1,
+               "schedule": "", "next_send": None, "groups": sum(1 for t in unit.targets() if t.enabled), "error": ""}
+        try:
+            settings = load_settings(unit.service.paths)
+        except ChurchBotError as exc:
+            row["error"] = exc.message
+        else:
+            cfg = settings.schedule
+            row.update(enabled=cfg.enabled, day_of_week=cfg.day_of_week, time=cfg.time, every_n_weeks=cfg.every_n_weeks,
+                       schedule=cfg.describe())
+            if cfg.enabled:
+                upcoming = next_fire_time(cfg, unit.service.now(settings))
+                row["next_send"] = upcoming.isoformat(timespec="seconds")
+        rows.append(row)
+    emit_json(rows)
     return 0
 
 
@@ -852,9 +888,13 @@ def build_parser() -> argparse.ArgumentParser:
     state.add_argument("--short", action="store_true", help="一個牧區只印一行")
     quota = sub.add_parser("quota", help="查本月 LINE 用量（發送後約 5 分鐘呼叫一次，用量就會是發送後的數字）")
     quota.add_argument("--force", action="store_true", help="不管上次查多久以前，一定重新問 LINE")
+    quota.add_argument("--json", action="store_true", help="印一行 JSON（欄位見 docs/CLI.md）")
     ministries = sub.add_parser("牧區", aliases=["ministries"], help="牧區清單：列出、新增、改名、清掉牧區密碼")
+    ministries.add_argument("--json", action="store_true", help="列出牧區時印一行 JSON（欄位見 docs/CLI.md）")
     actions = ministries.add_subparsers(dest="action", metavar="動作")
-    actions.add_parser("list", help="列出所有牧區（預設）")
+    listing = actions.add_parser("list", help="列出所有牧區（預設）")
+    # SUPPRESS：沒寫在 list 後面時，不要蓋掉寫在 list 前面的 --json
+    listing.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="印一行 JSON")
     add = actions.add_parser("add", help="新增牧區")
     add.add_argument("name", help="牧區名稱")
     add.add_argument("--note", default="", help="備註，例如負責人")
