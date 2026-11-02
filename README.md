@@ -308,6 +308,10 @@ ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_
     結果如何、下一次什麼時候發、本月 LINE 用量。`--telegram` 同時傳一份到手機、`--quick` 不連網讀服事表、
     `--short` 一個牧區一行
   - `cli.bat 牧區`：列出牧區；`cli.bat 牧區 add 名稱`、`rename 舊 新`、`temp-password 名稱`（給一組臨時密碼，預設 = 網站密碼，第一次進來要換）、`clear-password 名稱`（在這台電腦上清掉）
+  - **給 ClawBot（Telegram `/line` 面板）的指令**：`roster show`／`roster image`（看服事表、畫成一張圖）、
+    `swap person`／`weeks`／`list`／`undo`（人員調換：存在這台電腦、疊在服事表上，**不改 Google Sheet**）、
+    `remind now`（現在就推這週的提醒，**花 LINE 額度**；`--dry-run` 只試算）、`quota --json`、`牧區 list --json`。
+    每個指令、JSON 欄位、結束碼、什麼會花錢：[docs/CLI.md](docs/CLI.md)
   - 結束代碼：0 = 正常、1 = 有要處理的事、2 = 設定有問題
 - 同時從好幾個地方觸發也沒關係：有防重複＋跨程式的鎖，同一週同樣的內容只會發一次。
 - 其他：`check.bat`（健康檢查＋預覽）。Mac 對應的是 `scripts/mac/*.sh`。
@@ -377,6 +381,7 @@ ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_
 | [docs/LINE_IDS_AND_MEMBERS.md](docs/LINE_IDS_AND_MEMBERS.md) | 群組 ID、個人 ID 怎麼來；能不能知道群組有哪些人；能不能私訊、怎麼算錢 |
 | [docs/HANDOVER.md](docs/HANDOVER.md) | 交接：目前狀態、已驗證／未驗證、上線清單、帳號與機密、待確認事項 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 程式架構（給工程師） |
+| [docs/CLI.md](docs/CLI.md) | 給程式呼叫的指令（ClawBot 用）：看服事表、畫成圖、人員調換（覆蓋層）、立即提醒、JSON 欄位與結束碼 |
 | [docs/MINISTRIES.md](docs/MINISTRIES.md) | 多牧區：畫面怎麼走、罐頭訊息怎麼寫、三種身分與登入、重新啟動、變更紀錄、資料放哪裡、為什麼這樣決定 |
 
 ---
@@ -384,7 +389,8 @@ ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_
 ## 給工程師
 
 - 技術：Python 3.11+、FastAPI + Jinja2（伺服器端畫面，無前端建置）、APScheduler、httpx、gspread、pydantic v2、SQLite。
-- 指令（`PYTHONPATH=src`）：`python -m church_bot init | web | check | preview | send [--牧區 X] [--all] [--force] | quota | 牧區`
+- 指令（`PYTHONPATH=src`）：`python -m church_bot init | web | check | preview | send [--牧區 X] [--all] [--force] | quota | 牧區`；
+  給程式呼叫的 `roster`、`swap`、`remind`（`--json`）見 [docs/CLI.md](docs/CLI.md)
 - 測試：`pip install -r requirements-dev.txt`，然後 `pytest`
 - JSON API：管理網頁開著時看 <http://127.0.0.1:8787/docs>
 - 架構、錯誤處理原則、**怎麼把 LINE／Google Sheet 換成別的服務**：[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)

@@ -34,12 +34,15 @@ class Dispatcher:
         messenger: Messenger | None,
         messenger_error: ChurchBotError | None = None,
         check_quota: bool = True,
+        count_audience: bool = False,
     ) -> None:
+        """``count_audience``：額度檢查關著、或問不到額度時，也要問每個群組的人數（記在 ``report.audience``）。"""
         self.history = history
         self.behavior = behavior
         self.messenger = messenger
         self.messenger_error = messenger_error
         self.check_quota = check_quota
+        self.count_audience = count_audience
 
     def run(self, plan: Plan, report: RunReport, *, dry_run: bool, force: bool) -> None:
         to_send: list[PlannedMessage] = []
@@ -52,7 +55,7 @@ class Dispatcher:
             else:
                 to_send.append(pm)
 
-        if to_send and self.messenger is not None and self.check_quota:
+        if to_send and self.messenger is not None and (self.check_quota or self.count_audience):
             self._check_quota(to_send, report)
 
         if dry_run:
@@ -92,8 +95,8 @@ class Dispatcher:
     def _check_quota(self, to_send: list[PlannedMessage], report: RunReport) -> None:
         assert self.messenger is not None
         try:
-            quota = self.messenger.quota()
-            if quota is None:
+            quota = self.messenger.quota() if self.check_quota else None
+            if quota is None and not self.count_audience:
                 return
             sizes: dict[str, int | None] = {}
             for pm in to_send:
@@ -101,6 +104,9 @@ class Dispatcher:
                     sizes[pm.target.line_id] = self.messenger.audience_size(pm.target.line_id)
         except ChurchBotError as exc:
             report.issues.append(Issue(Severity.WARNING, "quota_unknown", f"查不到本月 LINE 額度：{exc.message}", exc.hint))
+            return
+        report.audience.update(sizes)
+        if quota is None:
             return
         need = sum(sizes[pm.target.line_id] or 0 for pm in to_send)
         report.issues.append(Issue(Severity.INFO, "quota", f"LINE 額度：{quota.describe()}；這次預計用掉約 {need} 則"))

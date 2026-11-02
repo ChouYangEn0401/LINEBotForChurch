@@ -12,6 +12,18 @@ rem                              management page shows the usage *after* that se
 rem   cli.bat 狀態 --telegram  every ministry at a glance: roster end date, last send, next send,
 rem                              LINE usage. --telegram also pushes it to the server manager's phone;
 rem                              --quick skips reading the roster (no network); --short one line each
+rem For ClawBot (Telegram /line panel); full contract in docs\CLI.md. Add --json for one JSON line,
+rem --ministry=m1 when there is more than one ministry, --by=telegram:ID on every command that writes:
+rem   cli.bat roster show        the roster, 2 weeks back + 4 weeks ahead, swaps applied (free)
+rem   cli.bat roster image --out=C:\path\roster.png     same, drawn as one PNG (free)
+rem   cli.bat swap person --date=2026-09-13 --role=X --from=A --to=B --by=...
+rem                              swap one person on one day (stored here, Google Sheet untouched; free)
+rem   cli.bat swap weeks --a=DATE --b=DATE [--role=X or --column=X] --by=...   swap two days (free)
+rem   cli.bat swap list [--all]  /  cli.bat swap undo --id=ID --by=...
+rem   cli.bat remind now --by=... [--target=GROUP] [--dry-run]
+rem                              push this week's reminder now (= send --force, this ministry only);
+rem                              COSTS LINE MESSAGES unless --dry-run
+rem   cli.bat quota --json  /  cli.bat ministries list --json
 setlocal
 call "%~dp0_env.bat"
 if not exist "%VENV_PY%" (

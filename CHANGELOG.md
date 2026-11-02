@@ -11,6 +11,17 @@
   `.env` 的 `TELEGRAM_BOT_TOKEN` 變成退路（有填才用）；旁邊有 ClawBot 就不用填 token 也能用登入碼。
   經 ClawBot 傳的登入碼訊息刪不掉（ClawBot 不回訊息編號），碼照樣 90 秒過期、用過就失效。
 - 測試：每個測試各自一個找 ClawBot 的地方（`CLAWBOT_HOME`）——以前共用 tmp 的上一層，寫過 gateway.json 之後別的測試會去敲真的 Host
+- 新功能：**給 ClawBot（Telegram `/line` 面板）呼叫的指令**，契約寫在 [docs/CLI.md](docs/CLI.md)
+  （`--json` 最後一行一份 JSON、結束碼 0／1／2、兩個以上牧區要 `--ministry=`、寫入的要 `--by=`；參數看不懂時 `--json` 照樣印 JSON）：
+  - `roster show`：上兩週＋下四週的服事表（跟 `/行事曆` 同一個範圍、同一條讀法），每一天的服事、服飾、哪裡被調換過
+  - `roster image --out=…png`：同一份畫成一張寬 1080px 的表（只用 Pillow；被調換的格子黃底＋「※」；找不到中文字型回 `font: "fallback"`）
+  - `swap person`／`swap weeks`／`swap list`／`swap undo`：**人員調換（覆蓋層）**。存在 `data/ministries/<id>/overrides.json`，
+    **不寫回 Google Sheet**；疊在讀服事表的那一個地方（`BotService.fetch_roster`），所以每週推播、`/提醒`、`/行事曆`、`/點名`、
+    管理網頁預覽都看到換過的，那一天的提醒標「（已調整）」一次。Sheet 改成一樣了自動退掉；每筆都進變更紀錄
+  - `remind now [--target=群組] [--dry-run]`：現在就把這週的提醒推到這個牧區的 LINE 群組（＝ `send --force` 只對這個牧區，**花 LINE 額度**）；
+    `--dry-run` 只回會送幾則、哪些群組、大約用掉幾則額度
+  - `quota --json`、`牧區 list --json`（`ministries list --json`）
+- 變更：`/行事曆` 被調換過的那一列多「已調整」
 
 - 新功能：**webhook 的開關通知可以送給「能開它的人」**（`dev_notice: clawbot`，擁有者 2026-10-23／10-27）。
   這條臨時網址是大家共用的，所以開好、延長、快關、已關經 ClawBot 送給「在它的服務 bot 上被開了『LINE 群組指令』
