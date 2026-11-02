@@ -37,7 +37,7 @@ def write_clawbot(paths, *, token: str, extra: dict | None = None, url: str = "h
     """假裝旁邊有一份 ClawBot：它的 data/gateway.json（網址＋ token）。"""
     from church_bot.core import notify
 
-    folder = paths.church.root.parent / notify.CLAWBOT_DIR_NAME / "data"
+    folder = notify._clawbot_store(paths).parent  # 找 ClawBot 的那個地方（conftest 讓每個測試各自一個）
     folder.mkdir(parents=True, exist_ok=True)
     tokens = {token: {"user_id": 1, "name": "owner"}}
     tokens.update(extra or {})
