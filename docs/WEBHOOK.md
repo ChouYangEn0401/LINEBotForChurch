@@ -62,7 +62,7 @@
 webhook:
   hours: 3                    # 開多久自己關；0 = 不自動關
   warn_minutes: 10            # 關掉前幾分鐘預告；0 = 不預告
-  dev_notice: notifier_tb     # 誰收到通知：notifier_tb（只有你；先經 ClawBot、再 Notifier_TB）/ clawbot（能開 webhook 的人都收到）
+  dev_notice: notifier_tb     # 誰收到通知：notifier_tb（只有你；先經 ClawBot、再試打 9999）/ clawbot（能開 webhook 的人都收到）
                               #           / command（執行自己的程式）/ off（不通知）
   dev_command: []             # dev_notice: command 時執行的程式，例如 ["C:/tools/notify.exe", "{text}"]
   line_admins_on_open: false  # 開好時，LINE 私訊每位牧區管理員（每人 1 則額度）
@@ -74,7 +74,9 @@ webhook:
 ## 通知誰
 
 - **伺服器管理員（你）**：開好、延長、快關、已關，都傳 Telegram，不佔 LINE 額度。2026-11-02 起先經 ClawBot 的
-  `POST /v1/notify`（只送給擁有者，stream=system，ClawBot 照分流表挑 bot），ClawBot 沒開著才經 Notifier_TB。
+  `POST /v1/notify`（只送給擁有者，stream=system，ClawBot 照分流表挑 bot）；打不通才對 `127.0.0.1:9999` **試打一次**
+  （現在聽 9999 的是 ClawBot 的 Host，Notifier_TB 已經併進去了），9999 也沒人聽就**不叫醒 Notifier_TB、不開任何程式**，
+  直接存進 `data/notify_outbox.jsonl`，Host 開回來之後的下一則（或後台下次啟動）一起補送。
   後台自己的事（`restarting`、`stop_failed`）不管 `dev_notice` 是 `notifier_tb` 還是 `clawbot`，都走這一條、只給你。
   預設沒改成 `clawbot`：那個會把開關通知也送給別人，要不要給別人是另一個決定。
   不用 Telegram 的人把 `dev_notice` 改成 `command`：每次都執行 `dev_command` 一次，`{event}`、`{text}`、`{until}`、`{url}`
@@ -86,7 +88,7 @@ webhook:
   - 怎麼接上的：讀旁邊 `MyFirstTelegramClawBot/data/gateway.json`（網址＋擁有者的 token，這個專案一個金鑰都不保管），
     打它的 `POST /v1/service/broadcast` `{"grant": "line_bot"}`。ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；
     完全不想接就填 `CLAWBOT_DISABLED=1`。
-  - **ClawBot 沒開著就退回 `notifier_tb`**（Notifier_TB 本來就會先存起來、之後補送），所以改成這個不會掉通知。
+  - **ClawBot 沒開著就退回 `notifier_tb` 那一條**（9999 試打一次，不通就先存起來、之後補送），所以改成這個不會掉通知。
   - **後台（church-bot）自己的事不走這條**：臨時網址斷了 nssm 會重開（`restarting`）、時間到卻停不掉服務
     （`stop_failed`）講的是服務、nssm、cloudflared 的結束代碼，永遠只給伺服器管理員
     （擁有者 2026-10-27：「他們不會有權限知道其他東西」）。

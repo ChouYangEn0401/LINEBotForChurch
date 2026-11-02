@@ -205,27 +205,26 @@ webhook:
 | 伺服器管理員登入碼、測試訊息 | `important` | 主機 bot（一律） |
 
 `/v1/notify` 只送給機器擁有者，所以「後台的事別人看不到」（擁有者 2026-10-27）照舊成立。
-**ClawBot 找不到、Host 沒開、或它回錯誤**，就退回下面的 Notifier_TB，不會掉通知；`data/church_bot.log` 每一則寫一行走了哪一條。
-ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_DISABLED=1`（只走 Notifier_TB）。
+**ClawBot 找不到、Host 沒開、或它回錯誤**，就退回下面的 9999 socket，不會掉通知；`data/church_bot.log` 每一則寫一行走了哪一條。
+ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_DISABLED=1`（只走 9999，密鑰也只讀 Notifier_TB 那份）。
 
-**退路：Notifier_TB。** 這台電腦上已經有一支專門「把東西送到 Telegram」的機器人：**`Notifier_TB`**（跟本專案並排的資料夾）。
-任何本地程式都可以推進去，`ISDStockProject` 的 live monitor 就是這樣用的，所以這裡照同一套走：
+**退路：127.0.0.1:9999 的 socket（以前叫 Notifier_TB）。** 封包跟 `ISDStockProject` 的 live monitor 同一套：
 
 ```
-{"sig": <socket_secret>, "payload": <要送的文字>}   →  TCP 127.0.0.1:9999
+{"sig": <密鑰>, "payload": <要送的文字>}   →  TCP 127.0.0.1:9999
 ```
 
-要講話的時候才連一次、送完就關——**不連 api.telegram.org、沒有任何輪詢**。token、收件人、
-訊息追蹤全部是 Notifier 的事，這個專案一個金鑰都不用保管。
+Notifier_TB 已經併進 ClawBot 的 Host（2026-11-02）：**現在聽 9999 的是 Host**，同一個埠、同一把密鑰。
+要講話的時候才連一次、送完就關——**不連 api.telegram.org、沒有任何輪詢**，這個專案一個 Telegram 金鑰都不用保管。
 
-- 預設自己去隔壁找 `../Notifier_TB/config.json`，所以通常**什麼都不用設定**
-- Notifier 放在別的地方 → `.env` 填 `NOTIFIER_TB_HOME`
-- 完全不想接 → `.env` 填 `NOTIFIER_DISABLED=1`
-- Notifier 是「要用才開」的：**沒開著就幫它開**（跟 ClawBot 同一個做法：它自己的 `main.py --until-idle 180`，
-  送完沒事做 3 分鐘自己關），所以 Notifier **不用**註冊成服務。後台以服務身分跑時，它是在看不到的桌面上被叫起來的，
-  這時你自己雙擊 Notifier 的 `launcher.bat` 會說「已經有一個在跑」——等 3 分鐘它自己關掉再開就好
-- ClawBot 和 Notifier 都送不出去（例如 Host 沒開、Notifier 的 `.venv` 不見了）時，訊息先存進 `data/notify_outbox.jsonl`，
-  下次送得出去（或後台重開）時一起補送（經 ClawBot 或 Notifier，照原本那一流），不會不見
+- 密鑰：旁邊 ClawBot 的 `config.json` 有 `signal_socket_secret` 就用它；沒有才讀 `../Notifier_TB/config.json` 的
+  `socket_secret`（兩邊是同一把；Notifier_TB 資料夾之後可能收掉）。host、port 照 Notifier 那份，沒有就是 `127.0.0.1:9999`。
+  所以通常**什麼都不用設定**
+- Notifier 放在別的地方 → `.env` 填 `NOTIFIER_TB_HOME`；完全不想走這條退路 → `.env` 填 `NOTIFIER_DISABLED=1`
+- **只試打一次、不叫醒任何程式**（2026-11-02 起）：9999 沒人聽（Host 沒開）就不開 Notifier_TB、不開任何程式、不等。
+  以前會「幫它開」舊的 Notifier，那只會在 Host 沒開時叫起一支已經退休的 bot
+- ClawBot 和 9999 都送不出去（例如 Host 沒開）時，訊息**立刻**存進 `data/notify_outbox.jsonl`；Host 開回來之後的
+  下一則通知（或後台下次啟動）會一起補送（經 ClawBot 或 9999，照原本那一流），不會不見
 
 > `.env` 裡的 `TELEGRAM_BOT_TOKEN` 只是「從外面登入伺服器管理員的一次性登入碼」的**退路**：登入碼先經 ClawBot 傳，
 > ClawBot 沒開著時才用這個機器人直接傳（沒填就請改用驗證器 App）。跟播報無關。旁邊有 ClawBot 的話可以不填。
@@ -363,7 +362,7 @@ ClawBot 搬家了在 `.env` 填 `CLAWBOT_HOME`；完全不想接就填 `CLAWBOT_
 | `config/_before_ministries/`、`config/_deleted/` | 升級前的舊檔、移除的牧區（都沒有真的刪掉） | 確認不需要了可以刪 |
 | `data/ministries/m1/send.lock` | 發送時排隊用的鎖（避免兩個程式同時發） | 不用，也不用刪 |
 | `tools/nssm.exe` | 把後台包成 Windows 服務的小工具，`service\install.bat` 自己下載的 | 不用；刪掉再跑一次 install.bat 就有 |
-| `data/notify_outbox.jsonl` | Notifier_TB 沒開著時先存下來的通知，之後自動補送 | 不用；刪掉就是放棄那些還沒送出去的通知 |
+| `data/notify_outbox.jsonl` | ClawBot 的 Host 沒開著（`/v1/notify`、9999 都不通）時先存下來的通知，之後自動補送 | 不用；刪掉就是放棄那些還沒送出去的通知 |
 
 > 🔒 `.env`、`settings.yaml`、`config/` 底下所有 CSV、`service-account.json`、`data/` 都設定成**不會上傳到 git**，範例檔（`*.example.*`）才會。
 

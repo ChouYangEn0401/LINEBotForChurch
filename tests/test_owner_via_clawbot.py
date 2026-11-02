@@ -70,7 +70,7 @@ def test_a_long_text_is_cut_to_what_clawbot_takes(paths, clawbot):
 def test_when_clawbot_is_down_or_says_no_it_falls_back_to_notifier_tb(paths, clawbot, fake_notifier, reply):
     clawbot["reply"] = reply
     write_notifier_config(paths, port=fake_notifier.port)
-    assert notify.Notifier(paths).send("❌ 後台意外停止", wait=0) is True
+    assert notify.Notifier(paths).send("❌ 後台意外停止") is True
     assert len(clawbot["posted"]) == 1
     assert fake_notifier.wait(1) and fake_notifier.payloads == ["❌ 後台意外停止"]
 
@@ -79,11 +79,11 @@ def test_with_neither_it_is_kept_and_resent_through_clawbot_later(paths, clawbot
     write_notifier_config(paths, port=dead_port())
     clawbot["reply"] = None
     notifier = notify.Notifier(paths)
-    assert notifier.send("第一則", wait=0, kind=notify.KIND_HELLO) is False
+    assert notifier.send("第一則", kind=notify.KIND_HELLO) is False
     assert notifier.pending() == 1
     clawbot["reply"] = {"ok": True, "bot": "buffer"}
     clawbot["posted"].clear()
-    assert notifier.send("第二則", wait=0) is True
+    assert notifier.send("第二則") is True
     texts = [b["text"] for _p, b in clawbot["posted"]]
     assert texts[0] == "第二則" and "補送" in texts[1] and "第一則" in texts[1]
     assert clawbot["posted"][1][1]["kind"] == "hello"        # 補送時也照原本那一流

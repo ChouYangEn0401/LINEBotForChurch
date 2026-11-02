@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import secrets
 import socket
+import subprocess
 import threading
 import time
 
@@ -169,7 +171,7 @@ def test_notifier_never_raises_when_notifier_tb_is_down(paths):
 
 
 def test_messages_are_kept_and_resent_when_notifier_comes_back(paths):
-    """Notifier_TB 是「要用才開」的，沒開著的時候訊息不能就這樣不見。"""
+    """9999 沒人聽的時候訊息不能就這樣不見：先存起來，有人聽了再補送。"""
     write_notifier_config(paths, port=dead_port())
     notifier = notify.Notifier(paths)
     assert notifier.send("後台當掉了") is False
@@ -214,77 +216,149 @@ def test_the_backlog_does_not_grow_for_ever(paths, monkeypatch):
     assert "第 19 則" not in kept and "第 20 則" in kept  # 丟掉的是最舊的那幾則
 
 
-# --------------------------------------------------------------------------- 要用才開
+# --------------------------------------------------------------------------- 退路只試一次、不叫醒任何程式
+# 2026-11-02：Notifier_TB 已經併進 ClawBot 的 Host（Host 自己聽 9999、同一把密鑰）。以前 9999 沒人聽就
+# 「幫它開 Notifier_TB」，現在那只會在 Host 沒開時叫起一支退休的 bot——所以拿掉：試一次，不通就存起來。
 
 
 @pytest.fixture
-def notifier_program(paths, monkeypatch):
-    """Notifier_TB 關著、但開得起來：資料夾裡有它的 venv python 和 main.py。
+def no_child_process(monkeypatch):
+    """誰想開子程序就當場 fail（Notifier_TB 或任何別的程式都一樣）。"""
+    def refuse(*args, **kwargs):
+        pytest.fail(f"通知不該開任何程式：{args[:1]}")
 
-    真的開的那一步（launch_notifier）換成測試自己的，記下被叫了幾次。
-    放在每個測試自己的資料夾（NOTIFIER_TB_HOME）：專案隔壁那個 Notifier_TB 是所有測試共用的。
-    """
-    port = dead_port()
-    home = write_notifier_config(paths, port=port, folder=f"Notifier_TB_{secrets.token_hex(4)}")
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    if hasattr(os, "startfile"):
+        monkeypatch.setattr(os, "startfile", refuse)
+
+
+@pytest.fixture
+def startable_notifier_tb(paths):
+    """Notifier_TB 關著、但以前開得起來的樣子（有它的 venv python 和 main.py），9999 沒人聽。
+    放在每個測試自己的資料夾（NOTIFIER_TB_HOME）：專案隔壁那個 Notifier_TB 是所有測試共用的。"""
+    home = write_notifier_config(paths, port=dead_port(), folder=f"Notifier_TB_{secrets.token_hex(4)}")
     write(paths.root / ".env", f"NOTIFIER_TB_HOME={home}\n")
     (home / ".venv" / "Scripts").mkdir(parents=True)
     (home / ".venv" / "Scripts" / "python.exe").write_bytes(b"")
     (home / "main.py").write_text("", encoding="utf-8")
-    monkeypatch.setattr(notify, "_last_wake", float("-inf"))  # 別的測試開過不算
-    calls: list = []
-    servers: list[FakeNotifier] = []
-    state = {"comes_up": True}
-
-    def launch(folder, python):
-        calls.append((folder, python))
-        if state["comes_up"]:
-            servers.append(FakeNotifier(port))  # Notifier 起來了，聽它 config.json 寫的那個埠
-
-    monkeypatch.setattr(notify, "launch_notifier", launch)
-    yield {"home": home, "calls": calls, "servers": servers, "state": state}
-    for server in servers:
-        server.close()
+    return home
 
 
-def test_a_closed_notifier_is_opened_and_the_message_goes_out_at_once(paths, notifier_program):
-    """跟 ClawBot 一樣「要用才開」：Notifier 不用註冊成服務，要送的時候幫它開起來。"""
+@pytest.fixture
+def fake_clawbot(paths, monkeypatch):
+    """假的 ClawBot Host（換掉 ``ClawBotLink`` 的兩個網路呼叫，不打這台電腦上真的 Host）。
+    ``state["up"]`` 換成 False＝Host 沒開（``/v1/me`` 問不到、``/v1/notify`` 連不上）。"""
+    state = {"up": False, "posted": []}
+
+    def post(self, path, body):
+        if not state["up"]:
+            return None
+        state["posted"].append((path, body))
+        return {"ok": True, "bot": "buffer"}
+
+    monkeypatch.setattr(notify.ClawBotLink, "_post", post)
+    monkeypatch.setattr(notify.ClawBotLink, "is_owner", lambda self: state["up"])
+    store = notify._clawbot_store(paths)
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text(json.dumps({"url": "http://127.0.0.1:8765", "tokens": {"t": {"name": "owner"}}}),
+                     encoding="utf-8")
+    return state
+
+
+def test_the_wake_up_path_is_gone():
+    """留著沒人呼叫的 wake_notifier 會讓下一個人以為還在用，所以整段刪掉。"""
+    for name in ("wake_notifier", "launch_notifier", "WAKE_WAIT", "IDLE_SECONDS", "STOP_WAIT"):
+        assert not hasattr(notify, name), name
+    assert not hasattr(notify.Notifier, "_post_waking")
+
+
+def test_host_down_and_nobody_on_9999_starts_nothing_and_keeps_the_message(
+        paths, fake_clawbot, startable_notifier_tb, no_child_process):
+    """驗收第一條（自動測試的那一半）：Host 沒開 → 不開 Notifier_TB、不等，訊息進 outbox。"""
     notifier = notify.Notifier(paths)
-    assert notifier.send("後台開起來了", wait=5) is True
-    server = notifier_program["servers"][0]
-    server.wait(1)
-    assert server.payloads == ["後台開起來了"]  # 當場送到，不是「補送」
-    assert notifier.pending() == 0
-    folder, python = notifier_program["calls"][0]
-    assert folder == notifier_program["home"] and python.name == "python.exe"
-
-
-def test_the_backlog_also_opens_notifier_at_start_up(paths, notifier_program):
-    notifier_program["state"]["comes_up"] = False
-    notifier = notify.Notifier(paths)
-    notifier.send("上次關機那一則", wait=0)  # wait=0：不開，只存起來
-    assert notifier.pending() == 1 and notifier_program["calls"] == []
-
-    notifier_program["state"]["comes_up"] = True
-    assert notifier.flush(wait=5) == 1
-    notifier_program["servers"][0].wait(1)
-    assert "上次關機那一則" in notifier_program["servers"][0].payloads[0]
-
-
-def test_if_notifier_never_comes_up_the_message_is_kept_and_it_is_not_reopened(paths, notifier_program):
-    notifier_program["state"]["comes_up"] = False
-    notifier = notify.Notifier(paths)
-    assert notifier.send("第一則", wait=1.5) is False
-    assert notifier.send("第二則", wait=1.5) is False
-    assert notifier.pending() == 2  # 不會不見，下次送得出去時補送
-    assert len(notifier_program["calls"]) == 1  # 剛開過就不再開第二個，等它就好
-
-
-def test_nothing_is_opened_when_notifier_tb_cannot_be_started(paths):
-    """資料夾裡只有 config.json（沒有它的程式）→ 不開、不等，直接存起來。"""
-    write_notifier_config(paths, port=dead_port())
     started = time.monotonic()
-    assert notify.Notifier(paths).send("開不起來") is False
+    assert notifier.send("❌ 後台意外停止") is False
+    # 不等誰起來（以前最多等 30 秒）：Windows 上一次被拒絕的連線本身要 2 秒左右，所以只量一則、給 5 秒
     assert time.monotonic() - started < 5
+    assert notifier.send("⏹ 後台已經正常關閉", kind=notify.KIND_HELLO) is False
+    assert notifier.pending() == 2
+    assert notifier.flush() == 0                    # 後台啟動時的補送也一樣：不通就留著，不叫醒
+    assert notifier.pending() == 2
+
+
+def test_someone_on_9999_gets_it_and_nothing_is_spooled(paths, fake_clawbot, fake_notifier, no_child_process):
+    """/v1/notify 不通、但 9999 有人聽（Host 的 socket 或擁有者自己開的舊 Notifier）→ 試一次就送到。"""
+    write_notifier_config(paths, port=fake_notifier.port, secret="same-secret")
+    notifier = notify.Notifier(paths)
+    assert notifier.send("⚠️ 臨時網址斷了") is True
+    assert fake_notifier.wait(1) == [{"sig": "same-secret", "payload": "⚠️ 臨時網址斷了"}]
+    assert notifier.pending() == 0 and not notifier.outbox.exists()
+
+
+def test_when_the_host_is_back_the_next_send_carries_the_backlog(
+        paths, fake_clawbot, startable_notifier_tb, no_child_process):
+    """驗收第一條的後半：Host 開回來之後的下一則，把 outbox 裡的一起補送（照原本那一流）。"""
+    notifier = notify.Notifier(paths)
+    assert notifier.send("⏹ 後台已經正常關閉", kind=notify.KIND_HELLO) is False
+    assert notifier.pending() == 1
+
+    fake_clawbot["up"] = True                       # Host 開回來了
+    assert notifier.send("✅ 後台已啟動") is True
+    texts = [body["text"] for _path, body in fake_clawbot["posted"]]
+    assert texts[0] == "✅ 後台已啟動"
+    assert texts[1].startswith("（補送・") and "後台已經正常關閉" in texts[1]
+    assert fake_clawbot["posted"][1][1]["kind"] == notify.KIND_HELLO
+    assert notifier.pending() == 0
+
+
+def test_flush_at_start_up_also_goes_through_the_host(paths, fake_clawbot, startable_notifier_tb, no_child_process):
+    notifier = notify.Notifier(paths)
+    notifier.send("上次關機那一則")
+    fake_clawbot["up"] = True
+    assert notifier.flush() == 1
+    assert "上次關機那一則" in fake_clawbot["posted"][0][1]["text"]
+
+
+# --------------------------------------------------------------------------- 9999 的密鑰從哪來
+
+
+def write_clawbot_config(paths, config: dict) -> None:
+    folder = notify._clawbot_store(paths).parent.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "config.json").write_text(json.dumps(config), encoding="utf-8")
+
+
+def test_the_clawbot_secret_wins_and_the_source_says_which_file(paths, fake_notifier):
+    write_notifier_config(paths, port=fake_notifier.port, secret="old-notifier-secret")
+    write_clawbot_config(paths, {"signal_socket_secret": "clawbot-secret", "bot_token": "x"})
+    target = notify.find_notifier(paths)
+    assert target.secret == "clawbot-secret" and target.port == fake_notifier.port
+    assert "signal_socket_secret" in target.source and "config.json" in target.source
+    assert "clawbot-secret" not in str(target) and "clawbot-secret" not in notify.Notifier(paths).describe()
+    assert notify.Notifier(paths).send("用 ClawBot 那把") is True
+    assert fake_notifier.wait(1)[0]["sig"] == "clawbot-secret"
+
+
+def test_without_a_clawbot_secret_the_notifier_one_is_used(paths, fake_notifier):
+    write_notifier_config(paths, port=fake_notifier.port, secret="old-notifier-secret")
+    write_clawbot_config(paths, {"bot_token": "x"})            # ClawBot 在，但沒有 signal_socket_secret
+    target = notify.find_notifier(paths)
+    assert target.secret == "old-notifier-secret" and "socket_secret" in target.source
+
+
+def test_only_clawbot_config_left_still_finds_the_host_socket(paths):
+    """Notifier_TB 資料夾之後可能被收掉：只剩 ClawBot 的 config.json 也找得到 9999（不送，只看設定）。"""
+    write(paths.root / ".env", f"NOTIFIER_TB_HOME={paths.root / 'gone'}\n")
+    write_clawbot_config(paths, {"signal_socket_secret": "clawbot-secret"})
+    target = notify.find_notifier(paths)
+    assert (target.host, target.port, target.secret) == ("127.0.0.1", 9999, "clawbot-secret")
+    assert "位址：預設" in target.source
+
+
+def test_clawbot_disabled_does_not_read_its_config(paths):
+    write_clawbot_config(paths, {"signal_socket_secret": "clawbot-secret"})
+    write(paths.root / ".env", f"NOTIFIER_TB_HOME={paths.root / 'gone'}\nCLAWBOT_DISABLED=1\n")
+    assert notify.find_notifier(paths) is None
 
 
 # --------------------------------------------------------------------------- 上一次有沒有正常關閉

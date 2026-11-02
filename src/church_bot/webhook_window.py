@@ -318,12 +318,13 @@ def run_command(argv: list[str], payload: dict) -> bool:
     return done.returncode == 0
 
 
-def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: float | None = None) -> bool:
+def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict) -> bool:
     """通知該知道的人。永遠不丟例外。
 
     ``dev_notice: clawbot`` 而且這個事件可以分享（``SHARED_EVENTS``）→ 經 ClawBot 送給「能開這條網址的人」
     ＋擁有者；連不上 ClawBot 就退回 Notifier_TB（不會掉通知）。其他情況（``notifier_tb``，或後台自己的事）
-    只給伺服器管理員：``Notifier.send`` 先經 ClawBot 的 ``/v1/notify``（stream=system，會響），再退回 Notifier_TB。
+    只給伺服器管理員：``Notifier.send`` 先經 ClawBot 的 ``/v1/notify``（stream=system，會響），再對 9999 試打一次
+    （Host 的 socket；不叫醒 Notifier_TB），都不通就存起來之後補送。
     """
     try:
         if settings.dev_notice == "off":
@@ -342,8 +343,7 @@ def tell_dev(paths: Paths, settings: WebhookSettings, payload: dict, *, wait: fl
             clawbot_down = True               # 剛試過、連不上：下面不用再試一次 /v1/notify
             log.info("ClawBot 那邊送不出去（%s），退回 Notifier_TB", payload.get("event"))
         notifier = notify.Notifier(paths)
-        kwargs = {"via_clawbot": not clawbot_down, **({} if wait is None else {"wait": wait})}
-        return notifier.send(payload["text"], **kwargs)
+        return notifier.send(payload["text"], via_clawbot=not clawbot_down)
     except Exception:  # noqa: BLE001 - 通知失敗不能害臨時網址開不起來／關不掉
         log.exception("通知開發者失敗（%s）", payload.get("event"))
         return False
@@ -384,12 +384,12 @@ Announce = Callable[..., None]
 
 
 def announce(paths: Paths, event: str, window: Window | None, *, url: str = "", reason: str = "", ok: bool = True,
-             settings: WebhookSettings | None = None, church: "Church | None" = None, wait: float | None = None,
+             settings: WebhookSettings | None = None, church: "Church | None" = None,
              now: dt.datetime | None = None) -> None:
     """一個事件：開發者一定（照 dev_notice），牧區管理員看開關（line_admins_on_open／on_close）。"""
     settings = settings or load_webhook_settings(paths)
     text = dev_text(event, window, url=url, reason=reason, ok=ok, now=now)
-    tell_dev(paths, settings, event_payload(event, text, window, url=url, reason=reason, now=now), wait=wait)
+    tell_dev(paths, settings, event_payload(event, text, window, url=url, reason=reason, now=now))
     to_admins = (event == OPENED and settings.line_admins_on_open) or \
                 (event in (CLOSING_SOON, CLOSED) and settings.line_admins_on_close)
     if not to_admins:
