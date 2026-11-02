@@ -83,11 +83,12 @@
   有在收集 LINE 帳號的話也備份 `data/church_bot.db`（刪掉會忘記送過什麼、收集到但還沒對應的 LINE 帳號；已經對應到同工名單的不受影響）。
 - **出問題**：把 `data/church_bot.log` 傳給維護的人。
 - **後台還活著嗎**：狀態播報（2026-11-02 起）先經旁邊 **ClawBot** 的 `POST /v1/notify`（照它的分流表挑 bot，見 README
-  「狀態播報」那一節），ClawBot 沒開著才走這台電腦上的 **`Notifier_TB`**（`../Notifier_TB/config.json` 裡的
-  `socket_host` / `socket_port` / `socket_secret`）。本專案不保管 Telegram 金鑰。後台開了、關了、
+  「狀態播報」那一節），打不通才對 `127.0.0.1:9999` **試打一次**（現在聽 9999 的是 ClawBot 的 Host，Notifier_TB
+  已經併進去；密鑰優先讀 ClawBot `config.json` 的 `signal_socket_secret`，沒有才讀 `../Notifier_TB/config.json` 的
+  `socket_secret`）。本專案不保管 Telegram 金鑰。後台開了、關了、
   意外停掉都會傳一則給伺服器管理員；每週自動發送那一次也一定會傳彙總——**該收到卻沒收到，
-  就是後台當時沒在跑**。Notifier 沒開著就幫它開（要用才開，閒置 3 分鐘自己關，所以它不是服務）；
-  真的開不起來時訊息先存在 `data/notify_outbox.jsonl`，之後補送。
+  就是後台當時沒在跑**。9999 也沒人聽就**不叫醒 Notifier_TB、不開任何程式**（2026-11-02 起），
+  訊息立刻存在 `data/notify_outbox.jsonl`，Host 開回來之後的下一則（或後台下次啟動）一起補送。
   想主動問：`cli.bat 狀態 --telegram`（所有牧區：服事表排到哪、上次發送、下次發送）。
 
 ## 8. 已知限制

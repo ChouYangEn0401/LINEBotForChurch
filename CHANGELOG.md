@@ -2,6 +2,12 @@
 
 ## 未發佈
 
+- 變更：**通知的退路不再叫醒 Notifier_TB**（2026-11-02，Notifier 已經併進 ClawBot 的 Host，Host 自己聽 9999、同一把密鑰）。
+  `/v1/notify` 打不通時只對 `127.0.0.1:9999` **試打一次**（Host 開著就收得到）；沒人聽就**不開 Notifier_TB、不開任何程式、不等**，
+  立刻存進 `data/notify_outbox.jsonl`，Host 開回來之後的下一則（或後台下次啟動）一起補送。以前的「沒開著就幫它開」
+  （`wake_notifier`／`launch_notifier`、等 30 秒）整段拿掉——那只會在 Host 沒開時叫起一支退休的 bot。
+  9999 的密鑰優先讀旁邊 ClawBot `config.json` 的 `signal_socket_secret`，沒有才讀 `../Notifier_TB/config.json`
+  （Notifier_TB 資料夾之後可能收掉）；系統檢查那一頁寫的是「試打一次 127.0.0.1:9999」。
 - 變更：**給伺服器管理員（擁有者）的 Telegram 通知先經 ClawBot**（擁有者 2026-11-02：「全部都改，按照現在的分流架構，
   決定應該要把訊息塞給誰」）。發送彙總、後台開／關／當掉、`狀態 --telegram`、webhook 斷了／停不掉、`notifier_tb` 的開關通知
   都打 ClawBot 的 `POST /v1/notify`（`stream=system`；開關機問候 `kind=hello` 不響；乾淨的成功彙總與 `狀態 --telegram` 不響；
